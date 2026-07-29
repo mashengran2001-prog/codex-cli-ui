@@ -1,0 +1,15 @@
+node_modules/
+dist/
+dist-electron/
+release/
+artifacts/
+.tmp/
+playwright-report/
+test-results/
+*.log
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
