@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -210,8 +211,12 @@ export async function createPopulatedPage(browser, url, viewport = { width: 1380
   const page = await context.newPage();
   await installMockBridge(page);
   await page.goto(url, { waitUntil: "networkidle" });
-  await page.locator(".sidebar-section-label button").click();
-  await page.locator("textarea").fill("Fix the parser and run the test suite");
+  const terminalTab = page.getByRole("tab", { name: "终端" });
+  assert.equal(await terminalTab.isDisabled(), false);
+  await terminalTab.click();
+  await page.locator(".xterm-screen").waitFor();
+  await page.getByRole("tab", { name: "对话" }).click();
+  await page.locator(".composer textarea").fill("Fix the parser and run the test suite");
   await page.locator(".send-button").click();
   await page.getByText("Updated the parser").waitFor({ timeout: 10_000 });
   return { context, page };

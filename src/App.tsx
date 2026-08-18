@@ -413,13 +413,13 @@ export default function App() {
 
   const addProject = async () => {
     const path = await window.codex.chooseDirectory();
-    if (!path) return;
+    if (!path) return false;
     const existing = projectsRef.current.find((project) => project.path.toLowerCase() === path.toLowerCase());
     if (existing) {
       setSelectedProjectId(existing.id);
       const conversation = conversationsRef.current.filter((item) => item.projectId === existing.id && item.providerId === activeProviderId).sort((a, b) => b.updatedAt - a.updatedAt)[0];
       if (conversation) setSelectedConversationId(conversation.id);
-      return;
+      return true;
     }
     const project: ProjectRecord = { id: crypto.randomUUID(), name: projectName(path), path, createdAt: Date.now() };
     projectsRef.current = [...projectsRef.current, project];
@@ -434,6 +434,7 @@ export default function App() {
     setSelectedConversationId(draft.id);
     setWorkspaceMode("chat");
     void refreshProject(project.id, activeProviderId);
+    return true;
   };
 
   const newConversation = (projectId?: string) => {
@@ -595,7 +596,7 @@ export default function App() {
           onCliLifecycleToggle={() => void toggleCliLifecycle()}
           onWorkspaceModeChange={setWorkspaceMode}
           onRefreshChat={() => { if (selectedProject) void refreshProject(selectedProject.id, activeProviderId); }}
-          onAddProject={() => void addProject()}
+          onAddProject={addProject}
           onError={setError}
           chatSidebar={(
             <Sidebar

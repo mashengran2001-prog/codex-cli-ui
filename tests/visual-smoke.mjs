@@ -14,15 +14,17 @@ try {
   const desktopMetrics = await desktop.page.evaluate(() => {
     const composer = document.querySelector(".composer").getBoundingClientRect();
     const sidebar = document.querySelector(".chat-side-panel").getBoundingClientRect();
+    const actions = document.querySelector(".terminal-actions").getBoundingClientRect();
     const body = document.body.getBoundingClientRect();
     return {
-      composer, sidebar, body, text: document.body.innerText.length,
+      composer, sidebar, body, titlebarReserve: window.innerWidth - actions.right, text: document.body.innerText.length,
       nebulaShells: document.querySelectorAll(".terminal-workspace").length,
       legacyHeaders: document.querySelectorAll(".sidebar-header, .brand-lockup").length,
     };
   });
   assert.ok(desktopMetrics.composer.width > 600);
   assert.ok(desktopMetrics.sidebar.width >= 238);
+  assert.ok(desktopMetrics.titlebarReserve >= 150, "workspace actions entered the Windows titlebar controls area");
   assert.ok(desktopMetrics.text > 150);
   assert.equal(desktopMetrics.nebulaShells, 1);
   assert.equal(desktopMetrics.legacyHeaders, 0);
@@ -86,16 +88,19 @@ try {
     const toolbar = document.querySelector(".composer-toolbar").getBoundingClientRect();
     const send = document.querySelector(".send-button").getBoundingClientRect();
     const options = document.querySelector(".composer-options").getBoundingClientRect();
+    const actions = document.querySelector(".terminal-actions").getBoundingClientRect();
     return {
       overflow: shell.scrollWidth - shell.clientWidth,
       toolbarHeight: toolbar.height,
       sendLeft: send.left,
       optionsRight: options.right,
+      titlebarReserve: window.innerWidth - actions.right,
       sendVisible: send.right <= window.innerWidth && send.left >= 0,
     };
   });
   assert.ok(compactMetrics.overflow <= 1, `compact layout overflowed by ${compactMetrics.overflow}px`);
   assert.ok(compactMetrics.toolbarHeight >= 40);
+  assert.ok(compactMetrics.titlebarReserve >= 150, "compact workspace actions entered the Windows titlebar controls area");
   assert.ok(compactMetrics.sendVisible);
   assert.ok(compactMetrics.optionsRight <= compactMetrics.sendLeft + 1, "composer controls overlap send button");
   await compact.page.getByRole("tab", { name: "终端" }).click();

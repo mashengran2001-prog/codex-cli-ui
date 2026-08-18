@@ -28,7 +28,7 @@ interface TerminalWorkspaceProps {
   onCliLifecycleToggle(): void;
   onWorkspaceModeChange(mode: "chat" | "terminal"): void;
   onRefreshChat(): void;
-  onAddProject(): void;
+  onAddProject(): Promise<boolean>;
   onError(message: string): void;
 }
 
@@ -395,8 +395,11 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     setDrawer(null);
     setView("settings");
   };
-  const activateWorkspaceMode = (mode: "chat" | "terminal") => {
-    if (mode === "terminal" && !projectPath) return;
+  const activateWorkspaceMode = async (mode: "chat" | "terminal") => {
+    if (mode === "terminal" && !projectPath) {
+      if (await onAddProject()) onWorkspaceModeChange("terminal");
+      return;
+    }
     setDrawer(null);
     setView("terminal");
     onWorkspaceModeChange(mode);
@@ -415,13 +418,13 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
           <span className="terminal-brand">{view === "settings" ? <Settings2 size={17} /> : chatView ? <Bot size={17} /> : <TerminalSquare size={17} />}</span>
           <div>
             <h1 aria-label={headingLabel}>{headingTitle}</h1>
-            {project ? <button title={projectPath} onClick={() => void window.codex.revealPath(projectPath)}><FolderOpen size={11} /><span>{projectLabel}</span><small>{chatView ? providerName : active?.cwd || projectPath}</small></button> : <button title={workbenchCopy.selectDirectory} onClick={onAddProject}><FolderOpen size={11} /><span>{workbenchCopy.selectDirectory}</span><small>{providerName}</small></button>}
+            {project ? <button title={projectPath} onClick={() => void window.codex.revealPath(projectPath)}><FolderOpen size={11} /><span>{projectLabel}</span><small>{chatView ? providerName : active?.cwd || projectPath}</small></button> : <button title={workbenchCopy.selectDirectory} onClick={() => void onAddProject()}><FolderOpen size={11} /><span>{workbenchCopy.selectDirectory}</span><small>{providerName}</small></button>}
           </div>
         </div>
         <div className="terminal-actions">
           {primaryView && <div className="workspace-view-switch" role="tablist" aria-label={workbenchCopy.viewSwitcher}>
-            <button role="tab" aria-selected={workspaceMode === "chat"} className={workspaceMode === "chat" ? "active" : ""} title={workbenchCopy.chat} onClick={() => activateWorkspaceMode("chat")}><Bot size={13} /><span>{workbenchCopy.chat}</span></button>
-            <button role="tab" aria-selected={workspaceMode === "terminal"} className={workspaceMode === "terminal" ? "active" : ""} title={workbenchCopy.terminal} disabled={!projectPath} onClick={() => activateWorkspaceMode("terminal")}><TerminalSquare size={13} /><span>{workbenchCopy.terminal}</span></button>
+            <button role="tab" aria-selected={workspaceMode === "chat"} className={workspaceMode === "chat" ? "active" : ""} title={workbenchCopy.chat} onClick={() => void activateWorkspaceMode("chat")}><Bot size={13} /><span>{workbenchCopy.chat}</span></button>
+            <button role="tab" aria-selected={workspaceMode === "terminal"} className={workspaceMode === "terminal" ? "active" : ""} title={workbenchCopy.terminal} onClick={() => void activateWorkspaceMode("terminal")}><TerminalSquare size={13} /><span>{workbenchCopy.terminal}</span></button>
           </div>}
           {chatView && <button title={workbenchCopy.refreshChat} disabled={!project} onClick={onRefreshChat}><RefreshCw size={14} /></button>}
           {terminalView && <>

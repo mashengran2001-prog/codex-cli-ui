@@ -45,6 +45,24 @@ try {
   assert.ok(metrics.overflow <= 1);
   assert.ok(metrics.composerWidth > 600);
   assert.ok(metrics.bodyText > 150);
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(760, 620));
+  await window.waitForTimeout(250);
+  await window.getByRole("tab", { name: "终端" }).click();
+  await window.locator(".xterm-screen").waitFor({ timeout: 15_000 });
+  const titlebarMetrics = await window.evaluate(() => {
+    const actions = document.querySelector(".terminal-actions").getBoundingClientRect();
+    const header = document.querySelector(".terminal-header").getBoundingClientRect();
+    return {
+      reserve: window.innerWidth - actions.right,
+      actionsLeft: actions.left,
+      headerLeft: header.left,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  });
+  assert.ok(titlebarMetrics.reserve >= 150, "workspace actions entered the native Windows controls area");
+  assert.ok(titlebarMetrics.actionsLeft >= titlebarMetrics.headerLeft);
+  assert.ok(titlebarMetrics.overflow <= 1);
+  await window.screenshot({ path: join(artifacts, "codex-ui-electron-titlebar.png") });
   console.log("electron-visual: real Electron window screenshot and layout checks passed");
 } finally {
   await app.close();

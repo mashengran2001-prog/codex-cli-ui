@@ -18,7 +18,7 @@ try {
   assert.equal(request.providerId, "codex");
   assert.equal(request.prompt, "Fix the parser and run the test suite");
 
-  await page.locator("textarea").fill("/");
+  await page.locator(".composer textarea").fill("/");
   await page.getByRole("button", { name: /\/review/ }).waitFor();
   assert.equal(await page.locator(".command-menu button").count(), 4);
   await page.keyboard.press("Escape");
@@ -92,10 +92,11 @@ try {
   await page.waitForFunction((count) => document.querySelectorAll(".terminal-tab").length === count - 1, tabCountBeforeMiddleClick);
   assert.equal(await page.evaluate(() => window.__mock.terminalSessions.length), tabCountBeforeMiddleClick - 1);
   await page.getByRole("button", { name: "文件", exact: true }).click();
-  await page.getByText("README.md").waitFor();
-  await page.locator(".file-row", { hasText: "README.md" }).dragTo(page.locator(".terminal-grid-cell .terminal-canvas"));
+  const readmeRow = page.locator(".file-row", { hasText: "README.md" });
+  await readmeRow.waitFor();
+  await readmeRow.dragTo(page.locator(".terminal-grid-cell .terminal-canvas"));
   await page.waitForFunction(() => window.__mock.terminalWrites.some((write) => write.data === "'F:\\demo\\atlas-workspace\\README.md'"));
-  await page.getByText("README.md").click();
+  await readmeRow.click();
   await page.getByRole("heading", { name: "Atlas" }).waitFor();
   await page.getByRole("button", { name: "关闭文档" }).click();
   await page.getByRole("button", { name: "Git 状态" }).click();

@@ -460,10 +460,20 @@ function normalizeAppSettings(value: Partial<AppSettings> | null | undefined): A
 }
 
 function applyWindowAppearance(window: BrowserWindow) {
+  const titleBarThemes: Record<AppSettings["theme"], { color: string; symbolColor: string }> = {
+    nebula: { color: "#171a21", symbolColor: "#d8dee9" },
+    silver: { color: "#eaedef", symbolColor: "#262a2e" },
+    steel: { color: "#272d33", symbolColor: "#e2e7eb" },
+    limestone: { color: "#ebe9e3", symbolColor: "#302f2b" },
+    coal: { color: "#252522", symbolColor: "#e7e4dc" },
+    linen: { color: "#eeeae1", symbolColor: "#34312c" },
+    moss: { color: "#232924", symbolColor: "#e3e7de" },
+  };
   const light = appSettings.theme === "silver" || appSettings.theme === "limestone" || appSettings.theme === "linen";
+  const titleBarTheme = titleBarThemes[appSettings.theme];
   window.setTitleBarOverlay({
-    color: light ? "#f0f0ec" : "#181a17",
-    symbolColor: light ? "#33332f" : "#e3e5df",
+    color: titleBarTheme.color,
+    symbolColor: titleBarTheme.symbolColor,
     height: 44,
   });
   window.setBackgroundColor(light ? "#f7f7f5" : "#181a17");
