@@ -36,6 +36,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   copyOnSelect: true,
   powerlinePrompt: true,
   quickTerminal: true,
+  shellStartupIntegration: false,
   defaultShellId: "powershell",
   cursorStyle: "bar",
   cursorBlink: true,
@@ -535,10 +536,14 @@ export default function App() {
   };
 
   const updateAppSettings = (settings: AppSettings) => {
+    const previous = appSettings;
     setAppSettings(settings);
     void window.codex.setAppSettings(settings)
       .then(setAppSettings)
-      .catch((reason) => setError(reason instanceof Error ? reason.message : copy.saveSettingsFailed));
+      .catch((reason) => {
+        setAppSettings(previous);
+        setError(reason instanceof Error ? reason.message : copy.saveSettingsFailed);
+      });
   };
 
   const toggleLauncher = async () => {

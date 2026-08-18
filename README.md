@@ -22,6 +22,7 @@
 - 跟随系统、简体中文和 English 三种界面语言
 - Codex notify 与 Claude hooks 统一管理，保留已有钩子链并在配置被覆盖后自动修复
 - PowerShell 中运行 `codex` 自动打开 UI；`codex-raw` 保留原始终端 CLI
+- 设置 → 交互可选开启“打开 PowerShell/CMD 时唤起工作台”；该集成只维护自己的 profile/AutoRun 标记，内置终端通过环境变量自动跳过，关闭后恢复原配置
 - CLI 中的当前目录、普通 prompt 和 `-m/--model` 会带入 UI
 
 应用不提供托管后端、不收集 telemetry，也不会把导入的会话正文复制到 `localStorage`。历史正文始终从 Codex 自己的 session JSONL 读取。

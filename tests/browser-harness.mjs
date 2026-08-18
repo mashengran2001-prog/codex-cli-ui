@@ -52,7 +52,7 @@ export async function installMockBridge(page) {
       closeBehavior: "tray", notifyOnCompletion: true, language: "system", theme: "nebula",
       backgroundBlur: false, backgroundOpacity: 0.92, restoreTerminalTabs: true,
       resizablePanels: false, completionEnabled: true, copyOnSelect: true, powerlinePrompt: true,
-      quickTerminal: true, defaultShellId: "powershell", cursorStyle: "bar", cursorBlink: true,
+      quickTerminal: true, shellStartupIntegration: false, defaultShellId: "powershell", cursorStyle: "bar", cursorBlink: true,
       bellSound: true, loadShellProfile: false, cliProfiles: [],
     };
     let cliLifecycleStatus = {

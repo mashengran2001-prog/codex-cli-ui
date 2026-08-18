@@ -104,6 +104,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <h2>{copy.interaction}</h2>
           <Toggle label={copy.resizablePanels} checked={settings.resizablePanels} onChange={(value) => update("resizablePanels", value)} />
           <Toggle label={copy.quickTerminal} checked={settings.quickTerminal} onChange={(value) => update("quickTerminal", value)} />
+          <Toggle label={copy.shellStartupIntegration} checked={settings.shellStartupIntegration} onChange={(value) => update("shellStartupIntegration", value)} />
           <Toggle label={copy.completionNotifications} checked={settings.notifyOnCompletion} onChange={(value) => update("notifyOnCompletion", value)} />
           <div className="settings-row"><label>{copy.closeWindow}</label><select value={settings.closeBehavior} onChange={(event) => update("closeBehavior", event.target.value as AppSettings["closeBehavior"])}><option value="tray">{copy.keepRunning}</option><option value="quit">{copy.quitApplication}</option></select></div>
         </section>

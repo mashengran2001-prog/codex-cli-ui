@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { _electron as electron } from "playwright";
@@ -9,6 +10,8 @@ import { root } from "./browser-harness.mjs";
 const testRoot = join(root, ".tmp", "electron-workflow");
 const codexHome = join(testRoot, "codex-home");
 const userData = join(testRoot, "user-data");
+const shellStartupRoot = join(testRoot, "shell-startup");
+const shellStartupRegistry = `HKCU:\\Software\\CodexCliUiTest\\Electron-${process.pid}`;
 await rm(testRoot, { recursive: true, force: true });
 await mkdir(testRoot, { recursive: true });
 await createElectronFixture(root, codexHome);
@@ -21,6 +24,10 @@ const electronEnv = {
   CODEX_UI_USER_DATA_DIR: userData,
   TEMP: join(root, ".tmp"),
   TMP: join(root, ".tmp"),
+  CODEX_UI_SHELL_STARTUP_WINDOWS_PROFILE: join(shellStartupRoot, "WindowsPowerShell", "profile.ps1"),
+  CODEX_UI_SHELL_STARTUP_PWSH_PROFILE: join(shellStartupRoot, "PowerShell", "profile.ps1"),
+  CODEX_UI_SHELL_STARTUP_HOOK_PATH: join(shellStartupRoot, "hooks", "shell-startup.ps1"),
+  CODEX_UI_SHELL_STARTUP_REGISTRY_PATH: shellStartupRegistry,
 };
 
 const app = await electron.launch({
@@ -57,6 +64,11 @@ try {
   await window.keyboard.press("Enter");
   await window.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent?.includes("NEBULA_PTY_OK"), undefined, { timeout: 15_000 });
   assert.equal(await window.evaluate(async () => (await window.codex.listTerminals()).length), 1);
+  await window.getByRole("button", { name: "设置", exact: true }).click();
+  await window.getByLabel("打开 PowerShell/CMD 时唤起工作台").check();
+  await window.waitForFunction(async () => (await window.codex.getAppSettings()).shellStartupIntegration === true, undefined, { timeout: 15_000 });
+  await window.getByLabel("打开 PowerShell/CMD 时唤起工作台").uncheck();
+  await window.waitForFunction(async () => (await window.codex.getAppSettings()).shellStartupIntegration === false, undefined, { timeout: 15_000 });
   console.log("electron-workflow: Codex IPC, session persistence, and real ConPTY terminal passed");
 } finally {
   await app.close();
@@ -81,4 +93,5 @@ try {
   console.log("electron-restore: terminal snapshot recreated the project tab after restart");
 } finally {
   await restoredApp.close();
+  try { execFileSync("powershell.exe", ["-NoProfile", "-Command", `Remove-Item -LiteralPath '${shellStartupRegistry}' -Recurse -Force -ErrorAction SilentlyContinue`], { windowsHide: true }); } catch {}
 }

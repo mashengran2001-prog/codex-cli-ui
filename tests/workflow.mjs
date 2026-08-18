@@ -82,6 +82,10 @@ try {
   await page.getByLabel("CLI 活动同步").check();
   await page.waitForFunction(() => document.querySelectorAll(".cli-lifecycle-integrations .tool-status.online").length === 2);
   assert.equal(await page.getByLabel("CLI 活动同步").isChecked(), true);
+  assert.equal(await page.getByLabel("打开 PowerShell/CMD 时唤起工作台").isChecked(), false);
+  await page.getByLabel("打开 PowerShell/CMD 时唤起工作台").check();
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).shellStartupIntegration, true);
+  await page.getByLabel("打开 PowerShell/CMD 时唤起工作台").uncheck();
   await page.getByLabel("加载 PowerShell 配置").check();
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).loadShellProfile, true);
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).language, "zh-CN");

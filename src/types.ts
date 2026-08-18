@@ -69,6 +69,7 @@ export interface AppSettings {
   copyOnSelect: boolean;
   powerlinePrompt: boolean;
   quickTerminal: boolean;
+  shellStartupIntegration: boolean;
   defaultShellId: string;
   cursorStyle: TerminalCursorStyle;
   cursorBlink: boolean;

@@ -110,6 +110,15 @@ interface DetectedShell extends ShellProfile {
   args: string[];
 }
 
+interface ShellStartupStatus {
+  enabled: boolean;
+  powershellInstalled: boolean;
+  cmdInstalled: boolean;
+  profilePaths: string[];
+  registryPath: string;
+  error?: string;
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const RUN_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,99}$/;
 const PROVIDER_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9:_-]{0,119}$/;
@@ -137,6 +146,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   copyOnSelect: true,
   powerlinePrompt: true,
   quickTerminal: true,
+  shellStartupIntegration: false,
   defaultShellId: "powershell",
   cursorStyle: "bar",
   cursorBlink: true,
@@ -172,6 +182,7 @@ let cliLifecycleBridge: CliLifecycleBridge | null = null;
 const bootStartedAt = Date.now();
 
 app.setName("Codex CLI UI");
+process.env.CODEX_UI_SHELL_STARTUP_GUARD = "1";
 if (process.env.CODEX_UI_USER_DATA_DIR) app.setPath("userData", process.env.CODEX_UI_USER_DATA_DIR);
 
 const hasLock = app.requestSingleInstanceLock();
@@ -448,6 +459,7 @@ function normalizeAppSettings(value: Partial<AppSettings> | null | undefined): A
     copyOnSelect: value?.copyOnSelect !== false,
     powerlinePrompt: value?.powerlinePrompt !== false,
     quickTerminal: value?.quickTerminal !== false,
+    shellStartupIntegration: value?.shellStartupIntegration === true,
     defaultShellId: typeof value?.defaultShellId === "string" && /^[a-zA-Z0-9:_-]{1,120}$/.test(value.defaultShellId)
       ? value.defaultShellId
       : "powershell",
@@ -1714,6 +1726,53 @@ function runLauncherAction(action: "Status" | "Install" | "Uninstall") {
   });
 }
 
+function shellStartupScriptPath() {
+  return app.isPackaged
+    ? join(process.resourcesPath, "scripts", "install-shell-startup.ps1")
+    : join(app.getAppPath(), "scripts", "install-shell-startup.ps1");
+}
+
+function launchUiScriptPath() {
+  return app.isPackaged
+    ? join(process.resourcesPath, "scripts", "launch-ui.ps1")
+    : join(app.getAppPath(), "scripts", "launch-ui.ps1");
+}
+
+function runShellStartupAction(action: "Status" | "Install" | "Uninstall") {
+  return new Promise<ShellStartupStatus>((resolveStatus) => {
+    const script = shellStartupScriptPath();
+    if (!existsSync(script)) {
+      resolveStatus({ enabled: false, powershellInstalled: false, cmdInstalled: false, profilePaths: [], registryPath: "", error: "找不到 Shell 启动集成脚本" });
+      return;
+    }
+    const hookPath = process.env.CODEX_UI_SHELL_STARTUP_HOOK_PATH || join(app.getPath("userData"), "shell-startup.ps1");
+    const args = [
+      "-NoProfile",
+      "-ExecutionPolicy", "Bypass",
+      "-File", script,
+      "-Action", action,
+      "-AppExecutable", process.execPath,
+      "-ProjectRoot", app.isPackaged ? dirname(process.execPath) : app.getAppPath(),
+      "-LaunchScript", launchUiScriptPath(),
+      "-HookPath", hookPath,
+    ];
+    const overrides: Array<[string, string | undefined]> = [
+      ["-WindowsPowerShellProfilePath", process.env.CODEX_UI_SHELL_STARTUP_WINDOWS_PROFILE],
+      ["-PowerShellProfilePath", process.env.CODEX_UI_SHELL_STARTUP_PWSH_PROFILE],
+      ["-RegistryPath", process.env.CODEX_UI_SHELL_STARTUP_REGISTRY_PATH],
+    ];
+    for (const [name, value] of overrides) if (value) args.push(name, value);
+    execFile("powershell.exe", args, { windowsHide: true, timeout: 20_000 }, (error, stdout, stderr) => {
+      try {
+        const status = JSON.parse(stdout.trim()) as ShellStartupStatus;
+        resolveStatus(error ? { ...status, error: status.error || stderr.trim() || error.message } : status);
+      } catch {
+        resolveStatus({ enabled: false, powershellInstalled: false, cmdInstalled: false, profilePaths: [], registryPath: "", error: stderr.trim() || error?.message || "Shell 启动集成返回了无效结果" });
+      }
+    });
+  });
+}
+
 function codexCapabilities() {
   return {
     structuredChat: true,
@@ -1926,8 +1985,20 @@ ipcMain.handle("codex:info", () => initializeProviderRegistry().get("codex").get
 
 ipcMain.handle("app:settings:get", () => appSettings);
 ipcMain.handle("app:settings:set", async (_event, value: unknown) => {
-  appSettings = normalizeAppSettings(value && typeof value === "object" ? value as Partial<AppSettings> : undefined);
-  await saveSettings(appSettings);
+  const previous = appSettings;
+  const next = normalizeAppSettings(value && typeof value === "object" ? value as Partial<AppSettings> : undefined);
+  const startupChanged = previous.shellStartupIntegration !== next.shellStartupIntegration;
+  if (startupChanged) {
+    const status = await runShellStartupAction(next.shellStartupIntegration ? "Install" : "Uninstall");
+    if (status.error || status.enabled !== next.shellStartupIntegration) throw new Error(status.error || "Shell 启动集成状态不一致");
+  }
+  try {
+    await saveSettings(next);
+  } catch (reason) {
+    if (startupChanged) await runShellStartupAction(previous.shellStartupIntegration ? "Install" : "Uninstall");
+    throw reason;
+  }
+  appSettings = next;
   for (const window of BrowserWindow.getAllWindows()) applyWindowAppearance(window);
   updateQuickTerminalShortcut();
   queueTerminalSnapshotSave();
