@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, ShieldAlert, X } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, LoaderCircle, ShieldAlert, X } from "lucide-react";
 import Composer from "./Composer";
 import ConversationView from "./ConversationView";
 import Sidebar from "./Sidebar";
+import { getUiCopy, UiLocaleContext, useResolvedAppLocale } from "./i18n";
 import { defaultState, loadState, saveState } from "./storage";
 import type {
   Activity,
+  AgentProviderId,
+  AgentProviderInfo,
   AppSettings,
-  CodexInfo,
+  CliLifecycleStatus,
   ConversationRecord,
   LauncherRequest,
   LauncherStatus,
@@ -17,6 +20,29 @@ import type {
   RunEvent,
   SandboxMode,
 } from "./types";
+
+const TerminalWorkspace = lazy(() => import("./TerminalWorkspace"));
+
+const DEFAULT_APP_SETTINGS: AppSettings = {
+  closeBehavior: "tray",
+  notifyOnCompletion: true,
+  language: "system",
+  theme: "nebula",
+  backgroundBlur: false,
+  backgroundOpacity: 0.92,
+  restoreTerminalTabs: true,
+  resizablePanels: false,
+  completionEnabled: true,
+  copyOnSelect: true,
+  powerlinePrompt: true,
+  quickTerminal: true,
+  defaultShellId: "powershell",
+  cursorStyle: "bar",
+  cursorBlink: true,
+  bellSound: true,
+  loadShellProfile: false,
+  cliProfiles: [],
+};
 
 interface PendingDanger {
   conversation: ConversationRecord;
@@ -37,6 +63,16 @@ function projectName(path: string) {
 function compactTitle(prompt: string) {
   const value = prompt.replace(/\s+/g, " ").trim();
   return value.length > 46 ? `${value.slice(0, 45)}…` : value;
+}
+
+function aliasKey(providerId: AgentProviderId, sessionId: string) {
+  return `${providerId}:${sessionId}`;
+}
+
+function providerLabel(providerId: AgentProviderId) {
+  if (providerId === "codex") return "Codex";
+  if (providerId === "deepseek") return "DeepSeek";
+  return providerId;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -114,15 +150,20 @@ export default function App() {
   const [aliases, setAliases] = useState<Record<string, string>>(initial.aliases);
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(initial.selectedProjectId);
   const [selectedConversationId, setSelectedConversationId] = useState<string | undefined>(initial.selectedConversationId);
-  const [sidebarWidth, setSidebarWidth] = useState(initial.sidebarWidth);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarWidth] = useState(initial.sidebarWidth);
+  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "terminal">("chat");
   const [model, setModel] = useState(initial.model);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(initial.reasoningEffort);
   const [sandboxMode, setSandboxMode] = useState<SandboxMode>(initial.sandboxMode);
-  const [codexInfo, setCodexInfo] = useState<CodexInfo | null>(null);
+  const [providers, setProviders] = useState<AgentProviderInfo[]>([]);
+  const [activeProviderId, setActiveProviderId] = useState<AgentProviderId>(initial.activeProviderId);
   const [launcherStatus, setLauncherStatus] = useState<LauncherStatus | null>(null);
   const [launcherBusy, setLauncherBusy] = useState(false);
-  const [appSettings, setAppSettings] = useState<AppSettings>({ closeBehavior: "tray", notifyOnCompletion: true });
+  const [cliLifecycleStatus, setCliLifecycleStatus] = useState<CliLifecycleStatus | null>(null);
+  const [cliLifecycleBusy, setCliLifecycleBusy] = useState(false);
+  const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const locale = useResolvedAppLocale(appSettings.language);
+  const copy = getUiCopy(locale).app;
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const [refreshingProjects, setRefreshingProjects] = useState<Set<string>>(new Set());
   const [composerSeed, setComposerSeed] = useState<{ id: string; text: string }>();
@@ -138,6 +179,7 @@ export default function App() {
   useEffect(() => { projectsRef.current = projects; }, [projects]);
   useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
   useEffect(() => { selectedConversationRef.current = selectedConversationId; }, [selectedConversationId]);
+  useEffect(() => { document.documentElement.lang = locale; }, [locale]);
 
   useEffect(() => {
     const state: PersistedState = {
@@ -150,25 +192,27 @@ export default function App() {
       model,
       reasoningEffort,
       sandboxMode,
+      activeProviderId,
     };
     saveState(state);
-  }, [aliases, model, projects, reasoningEffort, sandboxMode, selectedConversationId, selectedProjectId, sidebarWidth]);
+  }, [activeProviderId, aliases, model, projects, reasoningEffort, sandboxMode, selectedConversationId, selectedProjectId, sidebarWidth]);
 
-  const refreshProject = useCallback(async (projectId: string) => {
+  const refreshProject = useCallback(async (projectId: string, providerId: AgentProviderId = activeProviderId) => {
     const project = projectsRef.current.find((item) => item.id === projectId);
     if (!project) return;
     setRefreshingProjects((value) => new Set(value).add(projectId));
     try {
-      const sessions = await window.codex.listSessions(project.path);
+      const sessions = await window.workbench.listProviderSessions(providerId, project.path);
       setConversations((current) => {
-        const outsideProject = current.filter((conversation) => conversation.projectId !== projectId);
-        const currentProject = current.filter((conversation) => conversation.projectId === projectId);
+        const outsideProject = current.filter((conversation) => conversation.projectId !== projectId || conversation.providerId !== providerId);
+        const currentProject = current.filter((conversation) => conversation.projectId === projectId && conversation.providerId === providerId);
         const activeOrDraft = currentProject.filter((conversation) => conversation.isDraft || conversation.runState === "running");
         const imported = sessions.map<ConversationRecord>((session) => {
           const existing = currentProject.find((conversation) => conversation.id === session.id);
           return {
             ...session,
-            title: aliases[session.id] || session.title,
+            providerId,
+            title: aliases[aliasKey(providerId, session.id)] || (providerId === "codex" ? aliases[session.id] : undefined) || session.title,
             projectId,
             runState: existing?.runState ?? "idle",
             runId: existing?.runId,
@@ -180,7 +224,7 @@ export default function App() {
         return [...outsideProject, ...activeOrDraft.filter((conversation) => !importedIds.has(conversation.id)), ...imported];
       });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "刷新 Codex 会话失败");
+      setError(reason instanceof Error ? reason.message : "刷新 Provider 会话失败");
     } finally {
       setRefreshingProjects((value) => {
         const next = new Set(value);
@@ -188,25 +232,29 @@ export default function App() {
         return next;
       });
     }
-  }, [aliases]);
+  }, [activeProviderId, aliases]);
 
   useEffect(() => {
     void Promise.all([
-      window.codex.getInfo().then(setCodexInfo),
+      window.workbench.listProviders().then(setProviders),
       window.codex.getLauncherStatus().then(setLauncherStatus),
-      window.codex.getAppSettings().then(setAppSettings),
+      window.codex.getCliLifecycleStatus().then(setCliLifecycleStatus),
+      window.codex.getAppSettings().then((settings) => setAppSettings({ ...DEFAULT_APP_SETTINGS, ...settings })),
     ]).catch((reason) => setError(reason instanceof Error ? reason.message : "初始化失败"));
-    for (const project of projectsRef.current) void refreshProject(project.id);
-  }, [refreshProject]);
+  }, []);
+
+  useEffect(() => {
+    for (const project of projectsRef.current) void refreshProject(project.id, activeProviderId);
+  }, [activeProviderId, projects.length, refreshProject]);
 
   useEffect(() => {
     const conversation = conversations.find((item) => item.id === selectedConversationId);
     if (!conversation || conversation.isDraft || conversation.messages !== undefined || loadingConversationId === conversation.id) return;
     setLoadingConversationId(conversation.id);
-    void window.codex.getSession(conversation.id, conversation.cwd)
+    void window.workbench.getProviderSession(conversation.providerId, conversation.id, conversation.cwd)
       .then((session) => {
         setConversations((current) => current.map((item) => item.id === conversation.id
-          ? { ...item, ...session, title: aliases[item.id] || session?.title || item.title, projectId: item.projectId, runState: item.runState, messages: session?.messages ?? [] }
+          ? { ...item, ...session, title: aliases[aliasKey(item.providerId, item.id)] || (item.providerId === "codex" ? aliases[item.id] : undefined) || session?.title || item.title, projectId: item.projectId, runState: item.runState, messages: session?.messages ?? [] }
           : item));
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : "载入会话失败"))
@@ -216,6 +264,7 @@ export default function App() {
   const handleRunEvent = useCallback((event: RunEvent) => {
     const data = event.data ?? {};
     const eventType = asString(data.type);
+    const providerName = providerLabel(event.providerId);
     if (event.type === "stderr") {
       const previous = runStderrRef.current.get(event.runId) ?? "";
       runStderrRef.current.set(event.runId, `${previous}${event.text ?? ""}`.slice(-12_000));
@@ -223,7 +272,7 @@ export default function App() {
     }
     if (event.type === "error") {
       setConversations((current) => current.map((conversation) => conversation.runId === event.runId
-        ? updateAssistant(conversation, event.runId, (message) => ({ ...message, status: "error", error: event.text || "Codex 启动失败" }))
+        ? updateAssistant(conversation, event.runId, (message) => ({ ...message, status: "error", error: event.text || `${providerName} 启动失败` }))
         : conversation));
       return;
     }
@@ -231,14 +280,14 @@ export default function App() {
       const state = event.stopped ? "stopped" : event.code === 0 ? "done" : "error";
       const stderr = runStderrRef.current.get(event.runId)?.trim();
       const conversationId = runConversationRef.current.get(event.runId);
-      let completedTitle = "Codex 已完成";
+      let completedTitle = `${providerName} 已完成`;
       setConversations((current) => current.map((conversation) => {
         if (conversation.runId !== event.runId) return conversation;
         completedTitle = conversation.title;
         return updateAssistant({ ...conversation, runState: state, runId: undefined }, event.runId, (message) => ({
           ...message,
           status: state,
-          error: state === "stopped" ? "任务已停止" : state === "error" ? stderr || `Codex 退出码 ${event.code}` : message.error,
+          error: state === "stopped" ? "任务已停止" : state === "error" ? stderr || `${providerName} 退出码 ${event.code}` : message.error,
         }));
       }));
       if (conversationId && selectedConversationRef.current !== conversationId && state === "done") {
@@ -304,7 +353,7 @@ export default function App() {
         });
       }));
     } else if (eventType === "error" || eventType === "turn.failed") {
-      const message = textFromUnknown(data.message || data.error) || "Codex 运行失败";
+      const message = textFromUnknown(data.message || data.error) || `${providerName} 运行失败`;
       setConversations((current) => current.map((conversation) => conversation.runId === event.runId
         ? updateAssistant(conversation, event.runId, (item) => ({ ...item, status: "error", error: message }))
         : conversation));
@@ -320,6 +369,7 @@ export default function App() {
       setProjects(projectsRef.current);
     }
     const draft: ConversationRecord = {
+      providerId: "codex",
       id: crypto.randomUUID(),
       projectId: project.id,
       title: request.prompt ? compactTitle(request.prompt) : "新会话",
@@ -333,19 +383,33 @@ export default function App() {
     setConversations((current) => [...current, draft]);
     setSelectedProjectId(project.id);
     setSelectedConversationId(draft.id);
+    setActiveProviderId("codex");
+    setWorkspaceMode("chat");
     if (request.model) setModel(request.model);
     if (request.prompt) setComposerSeed({ id: crypto.randomUUID(), text: request.prompt });
-    void refreshProject(project.id);
+    void refreshProject(project.id, "codex");
   }, [refreshProject]);
 
   useEffect(() => {
     const removeRun = window.codex.onRunEvent(handleRunEvent);
     const removeLauncher = window.codex.onLauncherRequest(handleLauncherRequest);
-    return () => { removeRun(); removeLauncher(); };
-  }, [handleLauncherRequest, handleRunEvent]);
+    const removeQuickTerminal = window.codex.onQuickTerminal(() => {
+      const project = projectsRef.current.find((item) => item.id === selectedProjectId) || projectsRef.current[0];
+      if (!project) return;
+      setSelectedProjectId(project.id);
+      setWorkspaceMode("terminal");
+    });
+    return () => { removeRun(); removeLauncher(); removeQuickTerminal(); };
+  }, [handleLauncherRequest, handleRunEvent, selectedProjectId]);
+
+  useEffect(() => {
+    document.documentElement.dataset.terminalTheme = appSettings.theme;
+  }, [appSettings.theme]);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
-  const selectedConversation = conversations.find((conversation) => conversation.id === selectedConversationId);
+  const activeProvider = providers.find((provider) => provider.id === activeProviderId) ?? null;
+  const visibleConversations = conversations.filter((conversation) => conversation.providerId === activeProviderId);
+  const selectedConversation = visibleConversations.find((conversation) => conversation.id === selectedConversationId);
 
   const addProject = async () => {
     const path = await window.codex.chooseDirectory();
@@ -353,7 +417,7 @@ export default function App() {
     const existing = projectsRef.current.find((project) => project.path.toLowerCase() === path.toLowerCase());
     if (existing) {
       setSelectedProjectId(existing.id);
-      const conversation = conversationsRef.current.filter((item) => item.projectId === existing.id).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      const conversation = conversationsRef.current.filter((item) => item.projectId === existing.id && item.providerId === activeProviderId).sort((a, b) => b.updatedAt - a.updatedAt)[0];
       if (conversation) setSelectedConversationId(conversation.id);
       return;
     }
@@ -362,12 +426,14 @@ export default function App() {
     setProjects(projectsRef.current);
     setSelectedProjectId(project.id);
     const draft: ConversationRecord = {
+      providerId: activeProviderId,
       id: crypto.randomUUID(), projectId: project.id, title: "新会话", cwd: path,
       createdAt: Date.now(), updatedAt: Date.now(), messages: [], runState: "idle", isDraft: true,
     };
     setConversations((current) => [...current, draft]);
     setSelectedConversationId(draft.id);
-    void refreshProject(project.id);
+    setWorkspaceMode("chat");
+    void refreshProject(project.id, activeProviderId);
   };
 
   const newConversation = (projectId?: string) => {
@@ -377,12 +443,14 @@ export default function App() {
       return;
     }
     const draft: ConversationRecord = {
+      providerId: activeProviderId,
       id: crypto.randomUUID(), projectId: project.id, title: "新会话", cwd: project.path,
       createdAt: Date.now(), updatedAt: Date.now(), messages: [], runState: "idle", isDraft: true,
     };
     setConversations((current) => [...current, draft]);
     setSelectedProjectId(project.id);
     setSelectedConversationId(draft.id);
+    setWorkspaceMode("chat");
     setComposerSeed({ id: crypto.randomUUID(), text: "" });
   };
 
@@ -405,6 +473,7 @@ export default function App() {
     } : item));
     try {
       await window.codex.startRun({
+        providerId: conversation.providerId,
         runId,
         prompt,
         cwd: conversation.cwd,
@@ -416,7 +485,7 @@ export default function App() {
       });
       return true;
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : "Codex 启动失败";
+      const message = reason instanceof Error ? reason.message : "Provider 启动失败";
       setConversations((current) => current.map((item) => item.runId === runId
         ? updateAssistant({ ...item, runState: "error", runId: undefined }, runId, (assistant) => ({ ...assistant, status: "error", error: message }))
         : item));
@@ -427,13 +496,48 @@ export default function App() {
 
   const send = async (prompt: string, imagePaths: string[]) => {
     if (!selectedConversation) return false;
-    if (sandboxMode !== "danger-full-access") return executeRun(selectedConversation, prompt, imagePaths);
+    if (!activeProvider?.capabilities.sandboxMode || sandboxMode !== "danger-full-access") return executeRun(selectedConversation, prompt, imagePaths);
     return new Promise<boolean>((resolve) => setPendingDanger({ conversation: selectedConversation, prompt, imagePaths, resolve }));
+  };
+
+  const selectProvider = (providerId: AgentProviderId) => {
+    setActiveProviderId(providerId);
+    const next = conversationsRef.current
+      .filter((conversation) => conversation.providerId === providerId && (!selectedProjectId || conversation.projectId === selectedProjectId))
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    setSelectedConversationId(next?.id);
+    setModel(providers.find((provider) => provider.id === providerId)?.defaultModel || "");
+  };
+
+  const refreshProvider = async (providerId: AgentProviderId) => {
+    try {
+      const info = await window.workbench.refreshProvider(providerId);
+      setProviders((current) => current.map((provider) => provider.id === providerId ? info : provider));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "刷新 Provider 失败");
+    }
+  };
+
+  const installProvider = async (providerId: AgentProviderId) => {
+    const result = await window.workbench.installProvider(providerId);
+    if (!result.ok) setError(result.message);
+    else await refreshProvider(providerId);
+  };
+
+  const saveProviderCredential = async (providerId: AgentProviderId, credential: string) => {
+    try {
+      const info = await window.workbench.setProviderCredential(providerId, credential);
+      setProviders((current) => current.map((provider) => provider.id === providerId ? info : provider));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : copy.saveCredentialFailed);
+    }
   };
 
   const updateAppSettings = (settings: AppSettings) => {
     setAppSettings(settings);
-    void window.codex.setAppSettings(settings).catch((reason) => setError(reason instanceof Error ? reason.message : "保存设置失败"));
+    void window.codex.setAppSettings(settings)
+      .then(setAppSettings)
+      .catch((reason) => setError(reason instanceof Error ? reason.message : copy.saveSettingsFailed));
   };
 
   const toggleLauncher = async () => {
@@ -447,9 +551,23 @@ export default function App() {
     }
   };
 
+  const toggleCliLifecycle = async () => {
+    setCliLifecycleBusy(true);
+    try {
+      const status = await window.codex.setCliLifecycleEnabled(!(cliLifecycleStatus?.enabled ?? false));
+      setCliLifecycleStatus(status);
+      const issue = status.error || status.integrations.find((integration) => integration.error)?.error;
+      if (issue) setError(issue);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : copy.lifecycleFailed);
+    } finally {
+      setCliLifecycleBusy(false);
+    }
+  };
+
   const removeProject = (projectId: string) => {
     if (conversationsRef.current.some((conversation) => conversation.projectId === projectId && conversation.runState === "running")) {
-      setError("项目仍有运行中的任务");
+      setError(copy.projectBusy);
       return;
     }
     setProjects((current) => current.filter((project) => project.id !== projectId));
@@ -461,109 +579,119 @@ export default function App() {
     }
   };
 
-  const resizeSidebar = (event: React.PointerEvent<HTMLDivElement>) => {
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const startX = event.clientX;
-    const startWidth = sidebarWidth;
-    const move = (pointerEvent: PointerEvent) => setSidebarWidth(Math.max(238, Math.min(430, startWidth + pointerEvent.clientX - startX)));
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-
   return (
-    <div className="app-shell">
-      <Sidebar
-        projects={projects}
-        conversations={conversations}
-        selectedProjectId={selectedProjectId}
-        selectedConversationId={selectedConversationId}
-        codexInfo={codexInfo}
-        launcherStatus={launcherStatus}
-        launcherBusy={launcherBusy}
-        appSettings={appSettings}
-        collapsed={sidebarCollapsed}
-        width={sidebarWidth}
-        onCollapsedChange={setSidebarCollapsed}
-        onResizeStart={resizeSidebar}
-        onAddProject={() => void addProject()}
-        onSelectProject={(id) => {
-          setSelectedProjectId(id);
-          const first = conversations.filter((conversation) => conversation.projectId === id).sort((a, b) => b.updatedAt - a.updatedAt)[0];
-          setSelectedConversationId(first?.id);
-        }}
-        onRemoveProject={removeProject}
-        onRenameProject={(id, name) => setProjects((current) => current.map((project) => project.id === id ? { ...project, name } : project))}
-        onRefreshProject={(id) => void refreshProject(id)}
-        onNewConversation={newConversation}
-        onSelectConversation={(id) => {
-          setSelectedConversationId(id);
-          const conversation = conversations.find((item) => item.id === id);
-          if (conversation) setSelectedProjectId(conversation.projectId);
-        }}
-        onRenameConversation={(id, name) => {
-          setConversations((current) => current.map((conversation) => conversation.id === id ? { ...conversation, title: name } : conversation));
-          const conversation = conversations.find((item) => item.id === id);
-          if (conversation && !conversation.isDraft) setAliases((current) => ({ ...current, [id]: name }));
-        }}
-        onLauncherToggle={() => void toggleLauncher()}
-        onAppSettingsChange={updateAppSettings}
-      />
-      <section className="workspace-panel">
-        <ConversationView
+    <UiLocaleContext.Provider value={locale}>
+    <div className="app-shell nebula-shell">
+      <Suspense fallback={<div className="terminal-loading"><LoaderCircle className="spin" size={18} /><span>{copy.launching}</span></div>}>
+        <TerminalWorkspace
           project={selectedProject}
-          conversation={selectedConversation}
-          loading={loadingConversationId === selectedConversation?.id}
-          onNewConversation={() => newConversation()}
-          onRevealPath={() => { if (selectedProject) void window.codex.revealPath(selectedProject.path); }}
-          onOpenTerminal={() => { if (selectedProject) void window.codex.openTerminal(selectedProject.path); }}
-          onRefresh={() => { if (selectedProject) void refreshProject(selectedProject.id); }}
+          settings={appSettings}
+          workspaceMode={workspaceMode}
+          chatTitle={selectedConversation?.title || selectedProject?.name}
+          providerName={activeProvider?.shortName || "Provider"}
+          cliLifecycleStatus={cliLifecycleStatus}
+          cliLifecycleBusy={cliLifecycleBusy}
+          onSettingsChange={updateAppSettings}
+          onCliLifecycleToggle={() => void toggleCliLifecycle()}
+          onWorkspaceModeChange={setWorkspaceMode}
+          onRefreshChat={() => { if (selectedProject) void refreshProject(selectedProject.id, activeProviderId); }}
+          onAddProject={() => void addProject()}
+          onError={setError}
+          chatSidebar={(
+            <Sidebar
+              projects={projects}
+              conversations={visibleConversations}
+              selectedProjectId={selectedProjectId}
+              selectedConversationId={selectedConversationId}
+              providers={providers}
+              activeProviderId={activeProviderId}
+              launcherStatus={launcherStatus}
+              launcherBusy={launcherBusy}
+              appSettings={appSettings}
+              onAddProject={() => void addProject()}
+              onSelectProject={(id) => {
+                setSelectedProjectId(id);
+                const first = visibleConversations.filter((conversation) => conversation.projectId === id).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+                setSelectedConversationId(first?.id);
+              }}
+              onRemoveProject={removeProject}
+              onRenameProject={(id, name) => setProjects((current) => current.map((project) => project.id === id ? { ...project, name } : project))}
+              onRefreshProject={(id) => void refreshProject(id)}
+              onNewConversation={newConversation}
+              onSelectConversation={(id) => {
+                setSelectedConversationId(id);
+                setWorkspaceMode("chat");
+                const conversation = visibleConversations.find((item) => item.id === id);
+                if (conversation) setSelectedProjectId(conversation.projectId);
+              }}
+              onRenameConversation={(id, name) => {
+                setConversations((current) => current.map((conversation) => conversation.id === id ? { ...conversation, title: name } : conversation));
+                const conversation = visibleConversations.find((item) => item.id === id);
+                if (conversation && !conversation.isDraft) setAliases((current) => ({ ...current, [aliasKey(conversation.providerId, id)]: name }));
+              }}
+              onLauncherToggle={() => void toggleLauncher()}
+              onAppSettingsChange={updateAppSettings}
+              onProviderChange={selectProvider}
+              onProviderRefresh={(id) => void refreshProvider(id)}
+              onProviderInstall={(id) => void installProvider(id)}
+              onProviderCredential={(id, value) => void saveProviderCredential(id, value)}
+            />
+          )}
+          chatContent={(
+            <div className="chat-workspace">
+            <ConversationView
+              project={selectedProject}
+              conversation={selectedConversation}
+              providerName={activeProvider?.shortName || "Provider"}
+              loading={loadingConversationId === selectedConversation?.id}
+              onNewConversation={() => newConversation()}
+            />
+            <Composer
+              conversation={selectedConversation}
+              provider={activeProvider}
+              loadingHistory={loadingConversationId === selectedConversation?.id}
+              model={model}
+              reasoningEffort={reasoningEffort}
+              sandboxMode={sandboxMode}
+              seed={composerSeed}
+              onModelChange={setModel}
+              onReasoningEffortChange={setReasoningEffort}
+              onSandboxModeChange={setSandboxMode}
+              onChooseImages={() => activeProvider?.capabilities.images ? window.codex.chooseImages() : Promise.resolve([])}
+              onSend={send}
+              onStop={() => { if (selectedConversation?.runId) void window.codex.stopRun(selectedConversation.runId); }}
+              onNewConversation={() => newConversation()}
+            />
+            </div>
+          )}
         />
-        <Composer
-          conversation={selectedConversation}
-          codexAvailable={codexInfo?.available === true}
-          loadingHistory={loadingConversationId === selectedConversation?.id}
-          model={model}
-          reasoningEffort={reasoningEffort}
-          sandboxMode={sandboxMode}
-          seed={composerSeed}
-          onModelChange={setModel}
-          onReasoningEffortChange={setReasoningEffort}
-          onSandboxModeChange={setSandboxMode}
-          onChooseImages={() => window.codex.chooseImages()}
-          onSend={send}
-          onStop={() => { if (selectedConversation?.runId) void window.codex.stopRun(selectedConversation.runId); }}
-          onNewConversation={() => newConversation()}
-        />
-      </section>
+      </Suspense>
 
       {error && (
-        <div className="error-toast"><AlertTriangle size={15} /><span>{error}</span><button title="关闭" onClick={() => setError(null)}><X size={13} /></button></div>
+        <div className="error-toast"><AlertTriangle size={15} /><span>{error}</span><button title={copy.close} onClick={() => setError(null)}><X size={13} /></button></div>
       )}
       {toast && (
         <button className="completion-toast" onClick={() => { setSelectedConversationId(toast.id); setToast(null); }}>
-          <CheckCircle2 size={17} /><span><strong>任务已完成</strong><small>{toast.title}</small></span>
+          <CheckCircle2 size={17} /><span><strong>{copy.completed}</strong><small>{toast.title}</small></span>
         </button>
       )}
       {pendingDanger && (
         <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="danger-title">
           <div className="danger-dialog">
-            <div className="danger-heading"><span><ShieldAlert size={19} /></span><div><h2 id="danger-title">允许完全访问？</h2><p>此任务将绕过 Codex 的审批和沙箱限制。</p></div></div>
+            <div className="danger-heading"><span><ShieldAlert size={19} /></span><div><h2 id="danger-title">{copy.dangerTitle}</h2><p>{copy.dangerBody}</p></div></div>
             <div className="danger-scope"><strong>{projectName(pendingDanger.conversation.cwd)}</strong><code>{pendingDanger.conversation.cwd}</code></div>
             <div className="dialog-actions">
-              <button onClick={() => { pendingDanger.resolve(false); setPendingDanger(null); }}>取消</button>
+              <button onClick={() => { pendingDanger.resolve(false); setPendingDanger(null); }}>{copy.cancel}</button>
               <button className="danger-confirm" onClick={() => {
                 const pending = pendingDanger;
                 setPendingDanger(null);
                 void executeRun(pending.conversation, pending.prompt, pending.imagePaths).then(pending.resolve);
-              }}>完全访问并运行</button>
+              }}>{copy.dangerRun}</button>
             </div>
           </div>
         </div>
       )}
     </div>
+    </UiLocaleContext.Provider>
   );
 }

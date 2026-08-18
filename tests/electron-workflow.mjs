@@ -13,19 +13,21 @@ await rm(testRoot, { recursive: true, force: true });
 await mkdir(testRoot, { recursive: true });
 await createElectronFixture(root, codexHome);
 
+const electronEnv = {
+  ...process.env,
+  CODEX_UI_CLI_PATH: process.execPath,
+  CODEX_UI_CLI_PREFIX_ARGS: JSON.stringify([join(root, "tests", "fake-codex.mjs")]),
+  CODEX_UI_CODEX_HOME: codexHome,
+  CODEX_UI_USER_DATA_DIR: userData,
+  TEMP: join(root, ".tmp"),
+  TMP: join(root, ".tmp"),
+};
+
 const app = await electron.launch({
   executablePath: electronPath,
   args: [root, ...launcherArgs(root)],
   cwd: root,
-  env: {
-    ...process.env,
-    CODEX_UI_CLI_PATH: process.execPath,
-    CODEX_UI_CLI_PREFIX_ARGS: JSON.stringify([join(root, "tests", "fake-codex.mjs")]),
-    CODEX_UI_CODEX_HOME: codexHome,
-    CODEX_UI_USER_DATA_DIR: userData,
-    TEMP: join(root, ".tmp"),
-    TMP: join(root, ".tmp"),
-  },
+  env: electronEnv,
   timeout: 30_000,
 });
 
@@ -44,10 +46,39 @@ try {
   assert.equal(await textarea.inputValue(), "Fix the parser from CLI");
   await window.locator(".send-button").click();
   await window.getByText(/Completed from fake Codex/).waitFor({ timeout: 15_000 });
-  assert.match(await window.locator(".composer-status").textContent(), /Thread 33333333/);
+  assert.match(await window.locator(".composer-status").textContent(), /(?:会话|Session) 33333333/);
   assert.match(await window.locator(".activity-row").last().textContent(), /npm test/);
   assert.match(await window.locator(".sidebar-status").textContent(), /0.145.0-test/);
-  console.log("electron-workflow: preload IPC, session import, launcher args, process stream, and thread persistence passed");
+
+  await window.getByRole("tab", { name: "终端" }).click();
+  await window.locator(".xterm-helper-textarea").waitFor({ timeout: 15_000 });
+  await window.locator(".xterm-helper-textarea").focus();
+  await window.keyboard.type('Write-Output ("NEBULA" + "_PTY_OK")', { delay: 12 });
+  await window.keyboard.press("Enter");
+  await window.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent?.includes("NEBULA_PTY_OK"), undefined, { timeout: 15_000 });
+  assert.equal(await window.evaluate(async () => (await window.codex.listTerminals()).length), 1);
+  console.log("electron-workflow: Codex IPC, session persistence, and real ConPTY terminal passed");
 } finally {
   await app.close();
+}
+
+const restoredApp = await electron.launch({
+  executablePath: electronPath,
+  args: [root],
+  cwd: root,
+  env: electronEnv,
+  timeout: 30_000,
+});
+
+try {
+  const window = await restoredApp.firstWindow();
+  await window.waitForLoadState("domcontentloaded");
+  await window.getByRole("tab", { name: "终端" }).waitFor({ timeout: 15_000 });
+  await window.getByRole("tab", { name: "终端" }).click();
+  await window.locator(".xterm-screen").waitFor({ timeout: 15_000 });
+  assert.equal(await window.evaluate(async () => (await window.codex.listTerminals()).length), 1);
+  assert.match(await window.locator(".terminal-tab").textContent(), /codex-ui/);
+  console.log("electron-restore: terminal snapshot recreated the project tab after restart");
+} finally {
+  await restoredApp.close();
 }

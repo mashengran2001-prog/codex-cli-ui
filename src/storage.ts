@@ -10,6 +10,7 @@ export const defaultState: PersistedState = {
   model: "",
   reasoningEffort: "medium",
   sandboxMode: "workspace-write",
+  activeProviderId: "codex",
 };
 
 export function loadState(): PersistedState {

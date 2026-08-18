@@ -13,22 +13,20 @@ import {
   Image,
   LoaderCircle,
   MessageSquarePlus,
-  RefreshCw,
   TerminalSquare,
   Wrench,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useUiCopy } from "./i18n";
 import type { Activity, ChatMessage, ConversationRecord, ProjectRecord } from "./types";
 
 interface ConversationViewProps {
   project?: ProjectRecord;
   conversation?: ConversationRecord;
+  providerName: string;
   loading: boolean;
   onNewConversation(): void;
-  onRevealPath(): void;
-  onOpenTerminal(): void;
-  onRefresh(): void;
 }
 
 function activityIcon(activity: Activity) {
@@ -42,6 +40,7 @@ function activityIcon(activity: Activity) {
 }
 
 function ActivityList({ activities }: { activities: Activity[] }) {
+  const copy = useUiCopy().conversation;
   if (!activities.length) return null;
   return (
     <div className="activity-list">
@@ -51,7 +50,7 @@ function ActivityList({ activities }: { activities: Activity[] }) {
             <span className="activity-chevron"><ChevronRight size={12} /></span>
             <span className="activity-icon">{activityIcon(activity)}</span>
             <strong>{activity.name}</strong>
-            <code>{activity.summary || (activity.status === "running" ? "运行中" : "完成")}</code>
+            <code>{activity.summary || (activity.status === "running" ? copy.running : copy.done)}</code>
             {activity.status === "done" && <Check className="activity-check" size={13} />}
           </summary>
           {activity.detail && <pre>{activity.detail}</pre>}
@@ -62,11 +61,12 @@ function ActivityList({ activities }: { activities: Activity[] }) {
 }
 
 function CopyButton({ text }: { text: string }) {
+  const copy = useUiCopy().conversation;
   const [copied, setCopied] = useState(false);
   return (
     <button
       className="message-action"
-      title={copied ? "已复制" : "复制回答"}
+      title={copied ? copy.copied : copy.copyAnswer}
       onClick={() => {
         void navigator.clipboard.writeText(text).then(() => {
           setCopied(true);
@@ -94,7 +94,8 @@ function UserMessage({ message }: { message: ChatMessage }) {
   );
 }
 
-function AssistantMessage({ message }: { message: ChatMessage }) {
+function AssistantMessage({ message, providerName }: { message: ChatMessage; providerName: string }) {
+  const copy = useUiCopy().conversation;
   const running = message.status === "running";
   return (
     <article className="message assistant-message">
@@ -102,7 +103,7 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
       <div className="assistant-message-body">
         {message.reasoning && (
           <details className="reasoning-block">
-            <summary><ChevronRight size={12} /><span>推理</span></summary>
+            <summary><ChevronRight size={12} /><span>{copy.reasoning}</span></summary>
             <div className="reasoning-content">{message.reasoning}</div>
           </details>
         )}
@@ -120,7 +121,7 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
             </ReactMarkdown>
           </div>
         ) : running ? (
-          <div className="assistant-thinking"><LoaderCircle className="spin" size={14} /><span>Codex 正在处理</span></div>
+          <div className="assistant-thinking"><LoaderCircle className="spin" size={14} /><span>{copy.processing(providerName)}</span></div>
         ) : null}
         {message.error && <div className="message-error">{message.error}</div>}
         {!!message.content && <div className="message-actions"><CopyButton text={message.content} /></div>}
@@ -130,6 +131,7 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
 }
 
 export default function ConversationView(props: ConversationViewProps) {
+  const copy = useUiCopy().conversation;
   const scrollRef = useRef<HTMLDivElement>(null);
   const followOutputRef = useRef(true);
   const messages = props.conversation?.messages ?? [];
@@ -141,32 +143,13 @@ export default function ConversationView(props: ConversationViewProps) {
     if (element) element.scrollTop = element.scrollHeight;
   }, [messages.length, lastMessage?.content, lastMessage?.reasoning, lastMessage?.activities?.length]);
 
-  const header = props.project && (
-    <header className="conversation-header">
-      <div className="conversation-heading">
-        <h1>{props.conversation?.title || props.project.name}</h1>
-        <button className="workspace-path" title={props.project.path} onClick={props.onRevealPath}>
-          <FolderOpen size={12} />
-          <span>{props.project.name}</span>
-          <small>{props.project.path}</small>
-        </button>
-      </div>
-      <div className="header-actions">
-        <button title="刷新会话" onClick={props.onRefresh}><RefreshCw size={14} /></button>
-        <button title="打开终端" onClick={props.onOpenTerminal}><TerminalSquare size={14} /></button>
-        <button title="在资源管理器中显示" onClick={props.onRevealPath}><FolderOpen size={14} /></button>
-      </div>
-    </header>
-  );
-
   if (!props.project) {
     return (
       <main className="main-panel">
-        <div className="window-drag-region" />
         <section className="empty-workspace">
           <div className="hero-mark" aria-hidden="true"><span /><span /><span /><span /></div>
-          <h1>Codex CLI UI</h1>
-          <button className="primary-button" onClick={props.onNewConversation}><FolderOpen size={15} />选择工作目录</button>
+          <h1>CLI Workbench</h1>
+          <button className="primary-button" onClick={props.onNewConversation}><FolderOpen size={15} />{copy.chooseDirectory}</button>
         </section>
       </main>
     );
@@ -175,11 +158,10 @@ export default function ConversationView(props: ConversationViewProps) {
   if (!props.conversation) {
     return (
       <main className="main-panel">
-        {header}
         <section className="empty-conversation">
           <div className="empty-symbol"><MessageSquarePlus size={20} /></div>
           <h2>{props.project.name}</h2>
-          <button className="primary-button" onClick={props.onNewConversation}><MessageSquarePlus size={15} />新建会话</button>
+          <button className="primary-button" onClick={props.onNewConversation}><MessageSquarePlus size={15} />{copy.newSession}</button>
         </section>
       </main>
     );
@@ -187,7 +169,6 @@ export default function ConversationView(props: ConversationViewProps) {
 
   return (
     <main className="main-panel">
-      {header}
       <div
         className="conversation-scroll"
         ref={scrollRef}
@@ -197,17 +178,17 @@ export default function ConversationView(props: ConversationViewProps) {
         }}
       >
         {props.loading ? (
-          <div className="history-loading"><LoaderCircle className="spin" size={17} /><span>载入会话</span></div>
+          <div className="history-loading"><LoaderCircle className="spin" size={17} /><span>{copy.loading}</span></div>
         ) : messages.length === 0 ? (
           <div className="conversation-start">
             <div className="conversation-start-mark"><Clipboard size={18} /></div>
-            <h2>开始一个新任务</h2>
+            <h2>{copy.startTask}</h2>
           </div>
         ) : (
           <div className="conversation-content">
             {messages.map((message) => message.role === "user"
               ? <UserMessage key={message.id} message={message} />
-              : <AssistantMessage key={message.id} message={message} />)}
+              : <AssistantMessage key={message.id} message={message} providerName={props.providerName} />)}
           </div>
         )}
       </div>

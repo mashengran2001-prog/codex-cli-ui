@@ -45,62 +45,172 @@ export async function launchBrowser() {
 export async function installMockBridge(page) {
   await page.addInitScript(() => {
     const runListeners = [];
+    const terminalListeners = [];
     const launcherListeners = [];
-    let settings = { closeBehavior: "tray", notifyOnCompletion: true };
+    let settings = {
+      closeBehavior: "tray", notifyOnCompletion: true, language: "system", theme: "nebula",
+      backgroundBlur: false, backgroundOpacity: 0.92, restoreTerminalTabs: true,
+      resizablePanels: false, completionEnabled: true, copyOnSelect: true, powerlinePrompt: true,
+      quickTerminal: true, defaultShellId: "powershell", cursorStyle: "bar", cursorBlink: true,
+      bellSound: true, loadShellProfile: false, cliProfiles: [],
+    };
+    let cliLifecycleStatus = {
+      enabled: false,
+      supported: true,
+      watching: false,
+      integrations: [
+        { id: "codex", label: "Codex", installed: false, configPath: "C:\\mock\\.codex\\config.toml" },
+        { id: "claude", label: "Claude Code", installed: false, configPath: "C:\\mock\\.claude\\settings.json" },
+      ],
+    };
+    const capabilities = { structuredChat: true, sessions: true, resume: true, models: true, reasoningEffort: true, sandboxMode: true, images: true, stop: true, webUi: false, terminal: true };
+    const codexProvider = { id: "codex", name: "OpenAI Codex", shortName: "Codex", description: "Mock Codex Provider", available: true, configured: true, cliAvailable: true, version: "codex-cli 0.145.0", executable: "C:\\mock\\codex.exe", defaultModel: "", models: [{ id: "gpt-5.6-sol", label: "GPT-5.6 Sol" }], capabilities };
+    const deepseekProvider = { id: "deepseek", name: "DeepSeek Harness", shortName: "DeepSeek", description: "Mock DeepSeek Provider", available: true, configured: false, cliAvailable: false, installCommand: "npm install -g @deepseek-ai/dsh@0.1.0-rc.7", defaultModel: "deepseek-v4-flash", models: [{ id: "deepseek-v4-flash", label: "DeepSeek V4 Flash" }], capabilities: { ...capabilities, reasoningEffort: false, sandboxMode: false, images: false, webUi: true } };
+    let terminalCounter = 0;
+    const terminalSessions = [];
+    const terminalWrites = [];
     const emit = (event) => runListeners.forEach((listener) => listener(event));
+    const emitTerminal = (event) => terminalListeners.forEach((listener) => listener(event));
     const completeRun = (request) => {
       const threadId = "11111111-1111-4111-8111-111111111111";
-      window.setTimeout(() => emit({ runId: request.runId, type: "message", data: { type: "thread.started", thread_id: threadId } }), 20);
+      window.setTimeout(() => emit({ providerId: request.providerId, runId: request.runId, type: "message", data: { type: "thread.started", thread_id: threadId } }), 20);
       window.setTimeout(() => emit({
+        providerId: request.providerId,
         runId: request.runId,
         type: "message",
         data: { type: "item.started", item: { id: "cmd-1", type: "command_execution", command: "npm test", status: "in_progress", aggregated_output: "" } },
       }), 45);
       window.setTimeout(() => emit({
+        providerId: request.providerId,
         runId: request.runId,
         type: "message",
         data: { type: "item.completed", item: { id: "cmd-1", type: "command_execution", command: "npm test", status: "completed", aggregated_output: "12 tests passed" } },
       }), 70);
       window.setTimeout(() => emit({
+        providerId: request.providerId,
         runId: request.runId,
         type: "message",
         data: { type: "item.completed", item: { id: "msg-1", type: "agent_message", text: "## Done\n\nUpdated the parser and verified **12 tests**.\n\n```ts\nconst status = 'ready';\n```" } },
       }), 95);
-      window.setTimeout(() => emit({ runId: request.runId, type: "exit", code: 0, stopped: false }), 115);
+      window.setTimeout(() => emit({ providerId: request.providerId, runId: request.runId, type: "exit", code: 0, stopped: false }), 115);
     };
 
-    window.__mock = { runListeners, launcherListeners, lastRun: null, launcherInstalled: false };
+    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites };
     window.codex = {
-      getInfo: async () => ({ available: true, version: "codex-cli 0.145.0", executable: "C:\\mock\\codex.exe" }),
+      getInfo: async () => codexProvider,
+      listProviders: async () => [codexProvider, deepseekProvider],
+      refreshProvider: async (id) => id === "deepseek" ? deepseekProvider : codexProvider,
+      installProvider: async () => ({ ok: true, message: "Installed" }),
+      setProviderCredential: async () => ({ ...deepseekProvider, configured: true }),
       getAppSettings: async () => settings,
       setAppSettings: async (value) => { settings = value; return settings; },
       chooseDirectory: async () => "F:\\demo\\atlas-workspace",
       chooseImages: async () => ["F:\\demo\\ui-reference.png"],
+      chooseBackgroundImage: async () => "F:\\demo\\background.png",
       revealPath: async () => true,
+      copyText: async () => true,
       openTerminal: async () => true,
+      listShells: async () => [
+        { id: "powershell", label: "Windows PowerShell", command: "powershell.exe", kind: "powershell" },
+        { id: "cmd", label: "Command Prompt", command: "cmd.exe", kind: "cmd" },
+      ],
+      listCliTools: async () => [
+        { id: "builtin:codex", name: "Codex", command: "codex", args: [], icon: "code", description: "OpenAI Codex CLI", builtIn: true, available: true, executable: "C:\\mock\\codex.exe", installCommand: "npm install -g @openai/codex" },
+        { id: "builtin:claude", name: "Claude Code", command: "claude", args: [], icon: "code", description: "Anthropic Claude Code", builtIn: true, available: false, installCommand: "npm install -g @anthropic-ai/claude-code" },
+      ],
+      getCommandHistory: async (prefix) => prefix ? [`${prefix} --help`] : [],
+      listTerminals: async () => [...terminalSessions],
+      createTerminal: async (request) => {
+        const existing = request.reuseExisting !== false && terminalSessions.find((item) => item.cwd.toLowerCase() === request.cwd.toLowerCase() && item.status === "running");
+        if (existing) return existing;
+        terminalCounter += 1;
+        const session = {
+          id: `22222222-2222-4222-8222-${String(terminalCounter).padStart(12, "0")}`,
+          title: request.cwd.split(/[\\/]/).at(-1) || "Terminal",
+          cwd: request.cwd,
+          shell: "powershell.exe",
+          shellId: request.sshProfileId ? `ssh:${request.sshProfileId}` : request.shellId || "powershell",
+          profileId: request.profileId,
+          kind: request.sshProfileId ? "ssh" : "local",
+          remoteHost: request.sshProfileId ? "dev@example.com" : undefined,
+          activity: "idle",
+          status: "running",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          cols: request.cols,
+          rows: request.rows,
+        };
+        terminalSessions.push(session);
+        return session;
+      },
+      attachTerminal: async (id) => {
+        const terminal = terminalSessions.find((item) => item.id === id);
+        return terminal ? { terminal, snapshot: "Mock PowerShell\r\nPS F:\\demo\\atlas-workspace> " } : null;
+      },
+      detachTerminal: async () => true,
+      writeTerminal: async (id, data) => { terminalWrites.push({ id, data }); emitTerminal({ sessionId: id, type: "data", data }); return true; },
+      resizeTerminal: async (id, cols, rows) => {
+        const terminal = terminalSessions.find((item) => item.id === id);
+        if (terminal) { terminal.cols = cols; terminal.rows = rows; }
+        return !!terminal;
+      },
+      closeTerminal: async (id) => {
+        const index = terminalSessions.findIndex((item) => item.id === id);
+        if (index < 0) return false;
+        terminalSessions.splice(index, 1);
+        return true;
+      },
+      listDirectory: async (_root, path) => [
+        { name: "src", path: `${path}\\src`, type: "directory" },
+        { name: "README.md", path: `${path}\\README.md`, type: "file", size: 2113 },
+      ],
+      readDocument: async (_root, path) => path.endsWith("README.md") ? { path, name: "README.md", kind: "markdown", content: "# Atlas\n\nInline math $x^2$.", size: 2113, modifiedAt: Date.now() } : null,
+      getGitStatus: async () => ({ available: true, branch: "main", entries: [{ status: "M", path: "src/App.tsx" }] }),
+      runGitAction: async (request) => ({ ok: true, message: `${request.action} completed` }),
+      listSshProfiles: async () => [{ id: "ssh-mock", name: "Dev server", host: "example.com", port: 22, username: "dev", remotePath: "/home/dev", createdAt: Date.now(), updatedAt: Date.now(), source: "saved" }],
+      saveSshProfile: async (profile) => profile,
+      deleteSshProfile: async () => true,
+      testSshProfile: async () => ({ ok: true, stages: ["resolve", "tcp", "authenticate", "session"].map((name) => ({ name, status: "done" })) }),
+      listSftp: async (_id, path) => [{ name: "remote.txt", path: `${path.replace(/\/$/, "")}/remote.txt`, type: "file", size: 512 }],
+      runSftpAction: async (request) => ({ ok: true, message: `${request.action} completed` }),
       listSessions: async () => [],
       getSession: async () => null,
+      listProviderSessions: async () => [],
+      getProviderSession: async () => null,
       startRun: async (request) => {
         window.__mock.lastRun = request;
         completeRun(request);
         return { accepted: true };
       },
-      stopRun: async (runId) => { emit({ runId, type: "exit", code: null, stopped: true }); return true; },
+      stopRun: async (runId) => { emit({ providerId: "codex", runId, type: "exit", code: null, stopped: true }); return true; },
       getLauncherStatus: async () => ({ installed: false, profilePath: "C:\\mock\\profile.ps1", rawCommand: "C:\\mock\\codex.exe" }),
       installLauncher: async () => { window.__mock.launcherInstalled = true; return { installed: true, profilePath: "C:\\mock\\profile.ps1", rawCommand: "C:\\mock\\codex.exe" }; },
       uninstallLauncher: async () => { window.__mock.launcherInstalled = false; return { installed: false, profilePath: "C:\\mock\\profile.ps1", rawCommand: "C:\\mock\\codex.exe" }; },
+      getCliLifecycleStatus: async () => cliLifecycleStatus,
+      setCliLifecycleEnabled: async (enabled) => {
+        cliLifecycleStatus = {
+          ...cliLifecycleStatus,
+          enabled,
+          watching: enabled,
+          integrations: cliLifecycleStatus.integrations.map((integration) => ({ ...integration, installed: enabled })),
+        };
+        return cliLifecycleStatus;
+      },
       onRunEvent: (listener) => { runListeners.push(listener); return () => runListeners.splice(runListeners.indexOf(listener), 1); },
+      onTerminalEvent: (listener) => { terminalListeners.push(listener); return () => terminalListeners.splice(terminalListeners.indexOf(listener), 1); },
+      onQuickTerminal: () => () => {},
       onLauncherRequest: (listener) => { launcherListeners.push(listener); return () => launcherListeners.splice(launcherListeners.indexOf(listener), 1); },
     };
+    window.workbench = window.codex;
   });
 }
 
 export async function createPopulatedPage(browser, url, viewport = { width: 1380, height: 880 }) {
-  const context = await browser.newContext({ viewport });
+  const context = await browser.newContext({ viewport, locale: "zh-CN" });
   const page = await context.newPage();
   await installMockBridge(page);
   await page.goto(url, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "添加工作目录" }).click();
+  await page.locator(".sidebar-section-label button").click();
   await page.locator("textarea").fill("Fix the parser and run the test suite");
   await page.locator(".send-button").click();
   await page.getByText("Updated the parser").waitFor({ timeout: 10_000 });

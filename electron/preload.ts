@@ -1,25 +1,65 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AppSettings, CodexBridge, LauncherRequest, RunEvent, RunRequest } from "../src/types";
+import type { AgentProviderId, AppSettings, CodexBridge, GitActionRequest, LauncherRequest, RunEvent, RunRequest, SftpActionRequest, SshProfile, TerminalCreateRequest, TerminalEvent } from "../src/types";
 
 const bridge: CodexBridge = {
   getInfo: () => ipcRenderer.invoke("codex:info"),
+  listProviders: () => ipcRenderer.invoke("provider:list"),
+  refreshProvider: (providerId: AgentProviderId) => ipcRenderer.invoke("provider:refresh", providerId),
+  installProvider: (providerId: AgentProviderId) => ipcRenderer.invoke("provider:install", providerId),
+  setProviderCredential: (providerId: AgentProviderId, credential: string) => ipcRenderer.invoke("provider:credential", providerId, credential),
   getAppSettings: () => ipcRenderer.invoke("app:settings:get"),
   setAppSettings: (settings: AppSettings) => ipcRenderer.invoke("app:settings:set", settings),
   chooseDirectory: () => ipcRenderer.invoke("dialog:directory"),
   chooseImages: () => ipcRenderer.invoke("dialog:images"),
+  chooseBackgroundImage: () => ipcRenderer.invoke("dialog:background-image"),
   revealPath: (path: string) => ipcRenderer.invoke("path:reveal", path),
+  copyText: (text: string) => ipcRenderer.invoke("clipboard:write", text),
   openTerminal: (path: string) => ipcRenderer.invoke("path:terminal", path),
+  listShells: () => ipcRenderer.invoke("terminal:shells"),
+  listCliTools: () => ipcRenderer.invoke("terminal:cli-tools"),
+  getCommandHistory: (prefix: string, cwd: string) => ipcRenderer.invoke("terminal:history", prefix, cwd),
+  listTerminals: () => ipcRenderer.invoke("terminal:list"),
+  createTerminal: (request: TerminalCreateRequest) => ipcRenderer.invoke("terminal:create", request),
+  attachTerminal: (id: string) => ipcRenderer.invoke("terminal:attach", id),
+  detachTerminal: (id: string) => ipcRenderer.invoke("terminal:detach", id),
+  writeTerminal: (id: string, data: string) => ipcRenderer.invoke("terminal:write", id, data),
+  resizeTerminal: (id: string, cols: number, rows: number) => ipcRenderer.invoke("terminal:resize", id, cols, rows),
+  closeTerminal: (id: string) => ipcRenderer.invoke("terminal:close", id),
+  listDirectory: (root: string, path: string) => ipcRenderer.invoke("terminal:files", root, path),
+  readDocument: (root: string, path: string) => ipcRenderer.invoke("terminal:document", root, path),
+  getGitStatus: (path: string) => ipcRenderer.invoke("terminal:git", path),
+  runGitAction: (request: GitActionRequest) => ipcRenderer.invoke("terminal:git-action", request),
+  listSshProfiles: () => ipcRenderer.invoke("terminal:ssh-profiles"),
+  saveSshProfile: (profile: SshProfile) => ipcRenderer.invoke("terminal:ssh-save", profile),
+  deleteSshProfile: (id: string) => ipcRenderer.invoke("terminal:ssh-delete", id),
+  testSshProfile: (profile: SshProfile) => ipcRenderer.invoke("terminal:ssh-test", profile),
+  listSftp: (profileId: string, path: string) => ipcRenderer.invoke("terminal:sftp-list", profileId, path),
+  runSftpAction: (request: SftpActionRequest) => ipcRenderer.invoke("terminal:sftp-action", request),
   listSessions: (cwd: string) => ipcRenderer.invoke("codex:sessions", cwd),
   getSession: (id: string, cwd: string) => ipcRenderer.invoke("codex:session", id, cwd),
-  startRun: (request: RunRequest) => ipcRenderer.invoke("codex:run", request),
-  stopRun: (runId: string) => ipcRenderer.invoke("codex:stop", runId),
+  listProviderSessions: (providerId: AgentProviderId, cwd: string) => ipcRenderer.invoke("provider:sessions", providerId, cwd),
+  getProviderSession: (providerId: AgentProviderId, id: string, cwd: string) => ipcRenderer.invoke("provider:session", providerId, id, cwd),
+  startRun: (request: RunRequest) => ipcRenderer.invoke("provider:run", request),
+  stopRun: (runId: string) => ipcRenderer.invoke("provider:stop", runId),
   getLauncherStatus: () => ipcRenderer.invoke("launcher:status"),
   installLauncher: () => ipcRenderer.invoke("launcher:install"),
   uninstallLauncher: () => ipcRenderer.invoke("launcher:uninstall"),
+  getCliLifecycleStatus: () => ipcRenderer.invoke("cli-lifecycle:status"),
+  setCliLifecycleEnabled: (enabled: boolean) => ipcRenderer.invoke("cli-lifecycle:set-enabled", enabled),
   onRunEvent: (listener: (event: RunEvent) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, value: RunEvent) => listener(value);
-    ipcRenderer.on("codex:event", handler);
-    return () => ipcRenderer.removeListener("codex:event", handler);
+    ipcRenderer.on("provider:event", handler);
+    return () => ipcRenderer.removeListener("provider:event", handler);
+  },
+  onTerminalEvent: (listener: (event: TerminalEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: TerminalEvent) => listener(value);
+    ipcRenderer.on("terminal:event", handler);
+    return () => ipcRenderer.removeListener("terminal:event", handler);
+  },
+  onQuickTerminal: (listener: () => void) => {
+    const handler = () => listener();
+    ipcRenderer.on("terminal:quick-open", handler);
+    return () => ipcRenderer.removeListener("terminal:quick-open", handler);
   },
   onLauncherRequest: (listener: (request: LauncherRequest) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, value: LauncherRequest) => listener(value);
@@ -29,3 +69,4 @@ const bridge: CodexBridge = {
 };
 
 contextBridge.exposeInMainWorld("codex", bridge);
+contextBridge.exposeInMainWorld("workbench", bridge);

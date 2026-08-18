@@ -16,6 +16,14 @@ $tokens = @()
 [void][Management.Automation.Language.Parser]::ParseFile($launchScript, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -gt 0) { throw ($parseErrors | ForEach-Object Message | Out-String) }
 
+$driveRoot = [IO.Path]::GetPathRoot($workspace)
+$rootLaunch = (& $launchScript -AppExecutable "CodexCliUi.exe" -ProjectRoot $workspace -WorkingDirectory $driveRoot -PassThruArguments) | ConvertFrom-Json
+if ($rootLaunch.cwd -ne $driveRoot) { throw "launcher changed the drive root path" }
+$encodedRoot = ($rootLaunch.arguments | Where-Object { $_ -like "--codex-cwd-b64=*" } | Select-Object -First 1).Substring(16)
+$padding = (4 - ($encodedRoot.Length % 4)) % 4
+$decodedRoot = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($encodedRoot + ("=" * $padding)).Replace("-", "+").Replace("_", "/")))
+if ($decodedRoot -ne $driveRoot) { throw "launcher root path did not survive base64 transport" }
+
 $electron = Join-Path $workspace "node_modules\electron\dist\electron.exe"
 $installJson = & $installScript -Action Install -AppExecutable $electron -ProjectRoot $workspace -RawCommand $electron -ProfilePath $profilePath
 $install = $installJson | ConvertFrom-Json

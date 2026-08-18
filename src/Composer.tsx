@@ -9,7 +9,8 @@ import {
   Square,
   X,
 } from "lucide-react";
-import type { ConversationRecord, ReasoningEffort, SandboxMode } from "./types";
+import { useUiCopy } from "./i18n";
+import type { AgentProviderInfo, ConversationRecord, ReasoningEffort, SandboxMode } from "./types";
 
 interface ComposerSeed {
   id: string;
@@ -18,7 +19,7 @@ interface ComposerSeed {
 
 interface ComposerProps {
   conversation?: ConversationRecord;
-  codexAvailable: boolean;
+  provider: AgentProviderInfo | null;
   loadingHistory: boolean;
   model: string;
   reasoningEffort: ReasoningEffort;
@@ -33,20 +34,24 @@ interface ComposerProps {
   onNewConversation(): void;
 }
 
-const commandOptions = [
-  { command: "/new", label: "新建会话", action: "new" },
-  { command: "/review", label: "审查当前工作区", action: "review" },
-  { command: "/test", label: "运行并修复测试", action: "test" },
-  { command: "/explain", label: "解释选定代码", action: "explain" },
+const commandDefinitions = [
+  { command: "/new", action: "new" },
+  { command: "/review", action: "review" },
+  { command: "/test", action: "test" },
+  { command: "/explain", action: "explain" },
 ] as const;
 
 export default function Composer(props: ComposerProps) {
+  const copy = useUiCopy().composer;
   const [value, setValue] = useState("");
   const [images, setImages] = useState<string[]>([]);
   const [commandIndex, setCommandIndex] = useState(0);
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const running = props.conversation?.runState === "running";
+  const available = props.provider?.available === true && props.provider.configured;
+  const capabilities = props.provider?.capabilities;
+  const commandOptions = useMemo(() => commandDefinitions.map((item) => ({ ...item, label: copy.commands[item.action].label })), [copy]);
   const commandQuery = value.startsWith("/") && !value.includes(" ") ? value.toLowerCase() : "";
   const matchingCommands = useMemo(() => commandQuery
     ? commandOptions.filter((item) => item.command.startsWith(commandQuery))
@@ -67,16 +72,12 @@ export default function Composer(props: ComposerProps) {
 
   useEffect(() => setCommandIndex(0), [commandQuery]);
 
-  const chooseCommand = (action: typeof commandOptions[number]["action"]) => {
+  const chooseCommand = (action: typeof commandDefinitions[number]["action"]) => {
     if (action === "new") {
       props.onNewConversation();
       setValue("");
-    } else if (action === "review") {
-      setValue("Review the current workspace. Prioritize correctness, regressions, security risks, and missing tests. Fix confirmed issues.");
-    } else if (action === "test") {
-      setValue("Run the relevant test suite, diagnose any failures, and fix the underlying issues.");
     } else {
-      setValue("Explain the relevant code path, including its data flow, assumptions, and failure modes.");
+      setValue(copy.commands[action].prompt);
     }
     window.setTimeout(() => textareaRef.current?.focus(), 0);
   };
@@ -87,7 +88,7 @@ export default function Composer(props: ComposerProps) {
       return;
     }
     const prompt = value.trim();
-    if (!prompt || sending || !props.conversation || !props.codexAvailable) return;
+    if (!prompt || sending || !props.conversation || !available) return;
     setSending(true);
     try {
       const accepted = await props.onSend(prompt, images);
@@ -110,7 +111,7 @@ export default function Composer(props: ComposerProps) {
             {images.map((path) => (
               <div className="attachment-chip" key={path}>
                 <span><ImagePlus size={13} />{path.split(/[\\/]/).at(-1)}</span>
-                <button title="移除图片" onClick={() => setImages((items) => items.filter((item) => item !== path))}><X size={12} /></button>
+                <button title={copy.removeImage} onClick={() => setImages((items) => items.filter((item) => item !== path))}><X size={12} /></button>
               </div>
             ))}
           </div>
@@ -119,7 +120,9 @@ export default function Composer(props: ComposerProps) {
           ref={textareaRef}
           value={value}
           disabled={props.loadingHistory}
-          placeholder={props.codexAvailable ? "交给 Codex 一个任务…" : "未找到 Codex CLI"}
+          placeholder={available
+            ? copy.taskPlaceholder(props.provider?.shortName || "Provider")
+            : props.provider?.available ? copy.notConfigured(props.provider.shortName) : copy.unavailable(props.provider?.shortName || "Provider")}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
             if (matchingCommands.length) {
@@ -161,46 +164,44 @@ export default function Composer(props: ComposerProps) {
         )}
         <div className="composer-toolbar">
           <div className="composer-options">
-            <button
+            {capabilities?.images && <button
               className="toolbar-icon-button"
-              title="添加图片"
+              title={copy.addImage}
               disabled={running}
               onClick={() => void props.onChooseImages().then((paths) => setImages((items) => [...new Set([...items, ...paths])].slice(0, 10)))}
-            ><ImagePlus size={15} /></button>
-            <label className="select-control model-select" title="模型">
+            ><ImagePlus size={15} /></button>}
+            {capabilities?.models && <label className="select-control model-select" title={copy.model}>
               <span className="model-glyph">M</span>
               <select value={props.model} disabled={running} onChange={(event) => props.onModelChange(event.target.value)}>
-                <option value="">配置默认</option>
-                <option value="gpt-5.6-sol">GPT-5.6 Sol</option>
-                <option value="gpt-5.6-terra">GPT-5.6 Terra</option>
-                <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
+                <option value="">{copy.configuredDefault}</option>
+                {(props.provider?.models ?? []).map((model) => <option value={model.id} key={model.id}>{model.label}</option>)}
               </select>
               <ChevronDown size={12} />
-            </label>
-            <label className="select-control" title="推理强度">
+            </label>}
+            {capabilities?.reasoningEffort && <label className="select-control" title={copy.reasoning}>
               <BrainCircuit size={14} />
               <select value={props.reasoningEffort} disabled={running} onChange={(event) => props.onReasoningEffortChange(event.target.value as ReasoningEffort)}>
-                <option value="low">低推理</option>
-                <option value="medium">中推理</option>
-                <option value="high">高推理</option>
-                <option value="xhigh">超高推理</option>
+                <option value="low">{copy.reasoningLow}</option>
+                <option value="medium">{copy.reasoningMedium}</option>
+                <option value="high">{copy.reasoningHigh}</option>
+                <option value="xhigh">{copy.reasoningXHigh}</option>
               </select>
               <ChevronDown size={12} />
-            </label>
-            <label className={`select-control sandbox-select ${props.sandboxMode === "danger-full-access" ? "danger" : ""}`} title="沙箱权限">
+            </label>}
+            {capabilities?.sandboxMode && <label className={`select-control sandbox-select ${props.sandboxMode === "danger-full-access" ? "danger" : ""}`} title={copy.sandbox}>
               <Shield size={14} />
               <select value={props.sandboxMode} disabled={running} onChange={(event) => props.onSandboxModeChange(event.target.value as SandboxMode)}>
-                <option value="read-only">只读</option>
-                <option value="workspace-write">工作区</option>
-                <option value="danger-full-access">完全访问</option>
+                <option value="read-only">{copy.readOnly}</option>
+                <option value="workspace-write">{copy.workspaceWrite}</option>
+                <option value="danger-full-access">{copy.fullAccess}</option>
               </select>
               <ChevronDown size={12} />
-            </label>
+            </label>}
           </div>
           <button
             className={`send-button ${running ? "stop" : ""}`}
-            title={running ? "停止" : "发送"}
-            disabled={!running && (!value.trim() || sending || !props.codexAvailable || props.loadingHistory)}
+            title={running ? copy.stop : copy.send}
+            disabled={!running && (!value.trim() || sending || !available || props.loadingHistory)}
             onClick={() => void submit()}
           >
             {sending ? <LoaderCircle className="spin" size={15} /> : running ? <Square size={12} fill="currentColor" /> : <ArrowUp size={16} />}
@@ -208,8 +209,9 @@ export default function Composer(props: ComposerProps) {
         </div>
       </div>
       <div className="composer-status">
-        <span>{props.conversation.isDraft ? "新会话" : `Thread ${props.conversation.id.slice(0, 8)}`}</span>
-        <span>{props.sandboxMode === "read-only" ? "只读沙箱" : props.sandboxMode === "workspace-write" ? "工作区沙箱" : "完全访问"}</span>
+        <span>{props.conversation.isDraft ? copy.newSession : `${copy.thread} ${props.conversation.id.slice(0, 8)}`}</span>
+        <span>{props.provider?.shortName || "Provider"}</span>
+        {capabilities?.sandboxMode && <span>{props.sandboxMode === "read-only" ? copy.readOnlySandbox : props.sandboxMode === "workspace-write" ? copy.workspaceSandbox : copy.fullAccess}</span>}
       </div>
     </div>
   );
