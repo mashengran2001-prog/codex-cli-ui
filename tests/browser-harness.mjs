@@ -45,6 +45,11 @@ export async function launchBrowser() {
 
 export async function installMockBridge(page) {
   await page.addInitScript(() => {
+    // Headless browsers cannot read the real clipboard; resolve with empty text
+    // so Ctrl+V deterministically falls through to the image-paste bridge.
+    if (navigator.clipboard?.readText) {
+      navigator.clipboard.readText = async () => "";
+    }
     const runListeners = [];
     const terminalListeners = [];
     const launcherListeners = [];
@@ -53,7 +58,7 @@ export async function installMockBridge(page) {
       backgroundBlur: false, backgroundOpacity: 0.92, restoreTerminalTabs: true,
       resizablePanels: false, completionEnabled: true, copyOnSelect: true, powerlinePrompt: true,
       quickTerminal: true, shellStartupIntegration: false, defaultShellId: "powershell", cursorStyle: "bar", cursorBlink: true,
-      bellSound: true, loadShellProfile: false, cliProfiles: [],
+      bellSound: true, loadShellProfile: false, newTabPlacement: "after-active", cliProfiles: [],
       keybindings: {
         "command-palette": "Ctrl+Shift+P", "new-terminal": "Ctrl+Shift+T", "split-right": "Ctrl+Shift+D",
         "quick-terminal": "Ctrl+`", "open-settings": "Ctrl+,",
@@ -100,7 +105,7 @@ export async function installMockBridge(page) {
       window.setTimeout(() => emit({ providerId: request.providerId, runId: request.runId, type: "exit", code: 0, stopped: false }), 115);
     };
 
-    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites };
+    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null };
     window.codex = {
       getInfo: async () => codexProvider,
       listProviders: async () => [codexProvider, deepseekProvider],
@@ -114,6 +119,7 @@ export async function installMockBridge(page) {
       chooseBackgroundImage: async () => "F:\\demo\\background.png",
       revealPath: async () => true,
       copyText: async () => true,
+      pasteClipboardImage: async () => window.__mock.clipboardImage,
       openTerminal: async () => true,
       listShells: async () => [
         { id: "powershell", label: "Windows PowerShell", command: "powershell.exe", kind: "powershell" },

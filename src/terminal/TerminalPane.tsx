@@ -119,6 +119,31 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
       if (!copyOnSelectRef.current || !terminal.hasSelection()) return;
       selectionTimer = window.setTimeout(copySelection, 100);
     });
+    const pasteFromClipboard = () => {
+      // Reading the clipboard can hang (no document focus, locked clipboard) or
+      // reject; resolve within a short window so the image fallback still runs.
+      const readClipboard = () => new Promise<string>((resolve) => {
+        let settled = false;
+        const finish = (text: string) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          resolve(text);
+        };
+        const timer = window.setTimeout(() => finish(""), 400);
+        navigator.clipboard.readText().then(
+          (text) => finish(text),
+          () => finish(""),
+        );
+      });
+      void readClipboard().then((text) => {
+        if (text) { terminal.paste(text); return; }
+        if (session.kind === "ssh") return;
+        void window.codex.pasteClipboardImage().then((path) => {
+          if (path) return window.codex.writeTerminal(session.id, quotePath(path, session));
+        });
+      });
+    };
     const contextMenu = (event: MouseEvent) => {
       event.preventDefault();
       onFocusRef.current();
@@ -127,7 +152,7 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
         terminal.clearSelection();
         return;
       }
-      void navigator.clipboard.readText().then((text) => { if (text) terminal.paste(text); }).catch(() => undefined);
+      pasteFromClipboard();
     };
     const dragOver = (event: DragEvent) => {
       if (!event.dataTransfer?.types.includes(draggedPathType)) return;
@@ -182,11 +207,11 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
         return false;
       }
       if (event.ctrlKey && event.shiftKey && key === "v") {
-        void navigator.clipboard.readText().then((text) => { if (text) terminal.paste(text); });
+        pasteFromClipboard();
         return false;
       }
       if (event.ctrlKey && !event.shiftKey && key === "v") {
-        void navigator.clipboard.readText().then((text) => { if (text) terminal.paste(text); });
+        pasteFromClipboard();
         return false;
       }
       return true;

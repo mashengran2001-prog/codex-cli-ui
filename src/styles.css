@@ -465,6 +465,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .terminal-top-tabs::-webkit-scrollbar { display: none; }
 .terminal-top-tab {
   display: flex;
+  position: relative;
   width: 178px;
   min-width: 128px;
   max-width: 210px;
@@ -485,6 +486,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .terminal-top-tab .terminal-tab-retry { opacity: 0; }
 .terminal-top-tab:hover .terminal-tab-retry, .terminal-top-tab.active .terminal-tab-retry { opacity: 1; }
 .terminal-top-tab em { padding: 1px 4px; border-radius: 3px; background: var(--t-panel-2); color: var(--t-muted); font-size: 8px; font-style: normal; }
+.terminal-tab-color { position: absolute; top: 4px; bottom: 4px; left: 3px; width: 3px; border-radius: 2px; pointer-events: none; }
+.terminal-top-tab .terminal-tab-color { top: 5px; bottom: 5px; left: 4px; width: 3px; }
+.terminal-tab[data-tab-color] { position: relative; }
+.terminal-tab[data-tab-color] .terminal-tab-main { padding-left: 10px; }
+.terminal-tab-colors { display: flex; align-items: center; gap: 5px; padding: 6px 8px 4px; border-top: 1px solid var(--t-border); }
+.terminal-tab-colors button { width: 18px; height: 18px; flex: 0 0 auto; padding: 0; border: 2px solid transparent; border-radius: 50%; opacity: 0.78; }
+.terminal-tab-colors button:hover { opacity: 1; }
+.terminal-tab-colors button.selected { border-color: var(--t-text); opacity: 1; }
+.terminal-tab-colors button.clear { display: grid; place-items: center; border-color: var(--t-border); background: var(--t-panel); color: var(--t-muted); opacity: 1; }
+.terminal-tab-colors button.clear:hover { color: var(--t-danger); }
 .terminal-rename-input {
   width: 86px;
   min-width: 0;
@@ -502,7 +513,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   position: fixed;
   z-index: 70;
   display: grid;
-  width: 150px;
+  width: 206px;
   gap: 1px;
   padding: 4px;
   border: 1px solid var(--t-border);

@@ -40,6 +40,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   quickTerminal: true,
   shellStartupIntegration: false,
   defaultShellId: "powershell",
+  newTabPlacement: "after-active",
   cursorStyle: "bar",
   cursorBlink: true,
   bellSound: true,

@@ -67,7 +67,10 @@ interface SavedLayout {
 
 const layoutKey = "codex-cli-ui:terminal-layout-v4";
 const renameKey = "codex-cli-ui:terminal-renames-v1";
+const colorKey = "codex-cli-ui:terminal-colors-v1";
 const stageDockId = "_stage";
+
+const TAB_COLORS = ["#e06c75", "#d19a66", "#e5c07b", "#98c379", "#56b6c2", "#61afef", "#c678dd"];
 
 function loadLayout(): SavedLayout {
   try { return JSON.parse(localStorage.getItem(layoutKey) || "{}") as SavedLayout; }
@@ -239,6 +242,10 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   });
   const [renamingSession, setRenamingSession] = useState<string>();
   const [renameDraft, setRenameDraft] = useState("");
+  const [tabColors, setTabColors] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem(colorKey) || "{}") as Record<string, string>; }
+    catch { return {}; }
+  });
   const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number }>();
   const [dockTarget, setDockTarget] = useState<{ sessionId: string; edge: DockEdge } | null>(null);
   const [commandText, setCommandText] = useState("");
@@ -300,14 +307,22 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     try {
       const session = await window.codex.createTerminal({ cwd: path, cols: 100, rows: 30, reuseExisting: options.reuseExisting, shellId: options.shellId, profileId: options.profileId, sshProfileId: options.sshProfileId, title: options.title });
       if (!mountedRef.current) { await window.codex.detachTerminal(session.id); return null; }
-      setSessions((current) => current.some((item) => item.id === session.id) ? current.map((item) => item.id === session.id ? session : item) : [...current, session]);
+      setSessions((current) => {
+        if (current.some((item) => item.id === session.id)) return current.map((item) => item.id === session.id ? session : item);
+        if (settings.newTabPlacement === "end") return [...current, session];
+        const activeIndex = current.findIndex((item) => item.id === activeSessionIdRef.current);
+        const insertAt = activeIndex >= 0 ? activeIndex + 1 : current.length;
+        const next = [...current];
+        next.splice(insertAt, 0, session);
+        return next;
+      });
       if (options.activate !== false) assignSession(session.id);
       return session;
     } catch (reason) {
       onError(reason instanceof Error ? reason.message : workbenchCopy.createTerminalFailed);
       return null;
     }
-  }, [assignSession, onError, workbenchCopy]);
+  }, [assignSession, onError, settings.newTabPlacement, workbenchCopy]);
 
   const refreshSshProfiles = useCallback(() => window.codex.listSshProfiles().then(setSshProfiles).catch((reason) => onError(reason instanceof Error ? reason.message : workbenchCopy.loadSshFailed)), [onError, workbenchCopy]);
 
@@ -474,6 +489,13 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
       try { localStorage.setItem(renameKey, JSON.stringify(next)); } catch { /* Renames are cosmetic and safe to drop. */ }
       return next;
     });
+    setTabColors((current) => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      try { localStorage.setItem(colorKey, JSON.stringify(next)); } catch { /* Colors are cosmetic and safe to drop. */ }
+      return next;
+    });
     setUnread((current) => { const next = new Set(current); next.delete(id); return next; });
   };
 
@@ -499,6 +521,17 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const persistRenames = (next: Record<string, string>) => {
     setRenames(next);
     try { localStorage.setItem(renameKey, JSON.stringify(next)); } catch { /* Renames are cosmetic and safe to drop. */ }
+  };
+
+  const setTabColor = (sessionId: string, color?: string) => {
+    setTabColors((current) => {
+      const next = { ...current };
+      if (color) next[sessionId] = color;
+      else delete next[sessionId];
+      try { localStorage.setItem(colorKey, JSON.stringify(next)); } catch { /* Colors are cosmetic and safe to drop. */ }
+      return next;
+    });
+    setTabMenu(undefined);
   };
 
   const startRename = (sessionId: string) => {
@@ -782,6 +815,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
             <div
               className={`terminal-top-tab ${containsLeaf(paneTree, session.id) ? "active" : ""}`}
               data-session-id={session.id}
+              data-tab-color={tabColors[session.id] || ""}
               key={session.id}
               draggable
               onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }}
@@ -792,6 +826,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const source = event.dataTransfer.getData("text/terminal-session"); if (source) reorderSession(source, session.id); setDraggingSession(undefined); }}
             >
+              {tabColors[session.id] && <i className="terminal-tab-color" style={{ background: tabColors[session.id] }} />}
               <button className="terminal-tab-main" title={session.cwd} onClick={() => assignSession(session.id)}>
                 <span className={`terminal-state ${session.status} ${session.activity} ${unread.has(session.id) ? "unread" : ""}`}>{session.activity === "running" ? <LoaderCircle className="spin" size={11} /> : session.activity === "attention" ? <TriangleAlert size={11} /> : session.status === "exited" ? <CircleX size={11} /> : undefined}</span>
                 {terminalIcon(session)}
@@ -809,6 +844,10 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
       {tabMenu && (
         <div className="terminal-tab-menu" style={{ left: tabMenu.x, top: tabMenu.y }} onClick={(event) => event.stopPropagation()}>
           <button onClick={() => startRename(tabMenu.sessionId)}><Pencil size={12} />{workbenchCopy.renameTerminal}</button>
+          <div className="terminal-tab-colors" role="group" aria-label={workbenchCopy.tabColor}>
+            {TAB_COLORS.map((color) => <button key={color} className={tabColors[tabMenu.sessionId] === color ? "selected" : ""} title={workbenchCopy.tabColor} onClick={() => setTabColor(tabMenu.sessionId, color)} style={{ background: color }} />)}
+            <button className="clear" title={workbenchCopy.clearTabColor} onClick={() => setTabColor(tabMenu.sessionId)}><X size={10} /></button>
+          </div>
           <button className="danger" onClick={() => { const id = tabMenu.sessionId; setTabMenu(undefined); void closeTerminal(id); }}><X size={12} />{workbenchCopy.closeTerminal}</button>
         </div>
       )}
@@ -816,7 +855,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
         {showSidePanel && chatView && <aside className="terminal-side-panel chat-side-panel">{chatSidebar}</aside>}
         {showSidePanel && terminalView && <aside className="terminal-side-panel">
           <div className="side-section-heading"><button title={workbenchCopy.toggleTabs} onClick={() => setTabsCollapsed((value) => !value)}>{tabsCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}<strong>{workbenchCopy.tabs}</strong></button><span>{sessions.length}</span><button title={workbenchCopy.newTerminal} onClick={() => void createTerminal(active?.cwd || projectPath, { reuseExisting: false, shellId: settings.defaultShellId })}><Plus size={13} /></button></div>
-          {!tabsCollapsed && <div className="terminal-side-tabs">{sessions.map((session) => <div className={`terminal-tab ${containsLeaf(paneTree, session.id) ? "active" : ""}`} data-session-id={session.id} key={session.id} draggable onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }} onAuxClick={(event) => { if (event.button !== 1) return; event.preventDefault(); event.stopPropagation(); void closeTerminal(session.id); }} onContextMenu={(event) => { event.preventDefault(); setTabMenu({ sessionId: session.id, x: event.clientX, y: event.clientY }); }} onDragStart={(event) => { setDraggingSession(session.id); event.dataTransfer.setData("text/terminal-session", session.id); }} onDragEnd={() => { setDraggingSession(undefined); setDockTarget(null); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const source = event.dataTransfer.getData("text/terminal-session"); if (source) reorderSession(source, session.id); }}><button className="terminal-tab-main" title={session.cwd} onClick={() => assignSession(session.id)}><span className={`terminal-state ${session.status} ${session.activity} ${unread.has(session.id) ? "unread" : ""}`}>{session.activity === "running" ? <LoaderCircle className="spin" size={11} /> : session.activity === "attention" ? <TriangleAlert size={11} /> : session.status === "exited" ? <CircleX size={11} /> : undefined}</span>{terminalIcon(session)}<span><strong>{tabDisplayTitle(session)}</strong><small>{session.activity === "running" ? session.activeCommand : session.remoteHost || session.cwd}</small></span>{session.activity === "idle" && <em>{shellTag(session)}</em>}</button>{session.kind === "ssh" && session.exitedAt && <button className="terminal-tab-retry" title={workbenchCopy.xRetryTerminal} onClick={() => void restartSsh(session)}><RefreshCw size={11} /></button>}<button className="terminal-tab-close" title={workbenchCopy.closeTerminal} onClick={() => void closeTerminal(session.id)}><X size={11} /></button></div>)}</div>}
+          {!tabsCollapsed && <div className="terminal-side-tabs">{sessions.map((session) => <div className={`terminal-tab ${containsLeaf(paneTree, session.id) ? "active" : ""}`} data-session-id={session.id} data-tab-color={tabColors[session.id] || ""} key={session.id} draggable onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }} onAuxClick={(event) => { if (event.button !== 1) return; event.preventDefault(); event.stopPropagation(); void closeTerminal(session.id); }} onContextMenu={(event) => { event.preventDefault(); setTabMenu({ sessionId: session.id, x: event.clientX, y: event.clientY }); }} onDragStart={(event) => { setDraggingSession(session.id); event.dataTransfer.setData("text/terminal-session", session.id); }} onDragEnd={() => { setDraggingSession(undefined); setDockTarget(null); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const source = event.dataTransfer.getData("text/terminal-session"); if (source) reorderSession(source, session.id); }}>{tabColors[session.id] && <i className="terminal-tab-color" style={{ background: tabColors[session.id] }} />}<button className="terminal-tab-main" title={session.cwd} onClick={() => assignSession(session.id)}><span className={`terminal-state ${session.status} ${session.activity} ${unread.has(session.id) ? "unread" : ""}`}>{session.activity === "running" ? <LoaderCircle className="spin" size={11} /> : session.activity === "attention" ? <TriangleAlert size={11} /> : session.status === "exited" ? <CircleX size={11} /> : undefined}</span>{terminalIcon(session)}<span><strong>{tabDisplayTitle(session)}</strong><small>{session.activity === "running" ? session.activeCommand : session.remoteHost || session.cwd}</small></span>{session.activity === "idle" && <em>{shellTag(session)}</em>}</button>{session.kind === "ssh" && session.exitedAt && <button className="terminal-tab-retry" title={workbenchCopy.xRetryTerminal} onClick={() => void restartSsh(session)}><RefreshCw size={11} /></button>}<button className="terminal-tab-close" title={workbenchCopy.closeTerminal} onClick={() => void closeTerminal(session.id)}><X size={11} /></button></div>)}</div>}
           <div className="side-section-heading cli-tools-heading"><button title={workbenchCopy.toggleCliTools} onClick={() => setToolsCollapsed((value) => !value)}>{toolsCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}<strong>{workbenchCopy.cliTools}</strong></button><span>{cliTools.length}</span><button title={workbenchCopy.cliToolSettings} onClick={openSettings}><Settings2 size={12} /></button></div>
           {!toolsCollapsed && <div className="cli-tool-list">{cliTools.map((tool) => <button className={tool.available ? "available" : "unavailable"} title={tool.available ? workbenchCopy.launchTool(tool.name) : tool.installCommand || workbenchCopy.toolNotDetected(tool.name)} onClick={() => void launchCliTool(tool)} key={tool.id}>{cliToolIcon(tool)}<span className="cli-tool-copy"><strong>{tool.name}</strong><small>{tool.available ? tool.description : workbenchCopy.toolNotInstalled}</small></span><i className={tool.available ? "online" : "offline"} /></button>)}</div>}
           <div className="side-section-heading ssh-heading"><button title={workbenchCopy.toggleSshHosts} onClick={() => setSshCollapsed((value) => !value)}>{sshCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}<strong>{workbenchCopy.sshHosts}</strong></button><span>{sshProfiles.length}</span><button title={workbenchCopy.newSshHost} onClick={() => setSshEditor("new")}><Plus size={13} /></button></div>

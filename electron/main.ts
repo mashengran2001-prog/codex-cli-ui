@@ -135,6 +135,8 @@ const MAX_TERMINAL_INPUT = 64 * 1024;
 const MAX_TERMINALS = 16;
 const MAX_DOCUMENT_BYTES = 4 * 1024 * 1024;
 const MAX_HISTORY_ENTRIES = 1_000;
+const TRAY_ICON_NORMAL = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAj0lEQVR42mNgGAWDGShpmf2nFA+o5WQ7gpqWk+wIWlhOtCNoaTlRjhh1ADYNN+69BGNSLMGnh6wQIMURhNSSHQXEOIIYNRSlAXwWEBtKFCdCbBaREkVUyQXIFpKaSKmWDWEWk5pDhocDBjQKBjQRDopsOCCVEXKCQ8fDqzYc8BbRoGgTDopW8aDoF4yCEQMAaFvXhPR1GkEAAAAASUVORK5CYII=";
+const TRAY_ICON_ATTENTION = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAkUlEQVR42mNgGAWDGShpmf2nFA+I5V+XKWPgAbWcJEfQynKiHEFpfI86gCYOuHHvJRgPaAhQyxEEywV8BhPjCJgaXJZT5ABCjiA2lChOhNgsIiWKqJILkC0kxXKqOQDZYlIsHz4OGNAoGNBEOCiyIU1bSMQkOHRMFwfQLQRo7Qi6toYpbh0PqOWDol8wCkYMAABlMijOt8suCgAAAABJRU5ErkJggg==";
 const VALID_THEMES = new Set(["nebula", "silver", "steel", "limestone", "coal", "linen", "moss"]);
 const DEFAULT_SETTINGS: AppSettings = {
   closeBehavior: "tray",
@@ -152,6 +154,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   quickTerminal: true,
   shellStartupIntegration: false,
   defaultShellId: "powershell",
+  newTabPlacement: "after-active",
   cursorStyle: "bar",
   cursorBlink: true,
   bellSound: true,
@@ -340,8 +343,7 @@ function showMainWindow(request?: LauncherRequest | null) {
 
 function ensureTray() {
   if (tray && !tray.isDestroyed()) return tray;
-  const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-  const icon = nativeImage.createFromBuffer(Buffer.from(pixel, "base64")).resize({ width: 18, height: 18 });
+  const icon = nativeImage.createFromBuffer(Buffer.from(TRAY_ICON_NORMAL, "base64")).resize({ width: 18, height: 18 });
   tray = new Tray(icon);
   tray.setToolTip("Codex CLI UI");
   tray.setContextMenu(Menu.buildFromTemplate([
@@ -349,8 +351,21 @@ function ensureTray() {
     { type: "separator" },
     { label: "退出", click: () => quitApplication() },
   ]));
-  tray.on("click", () => showMainWindow());
+  tray.on("click", () => {
+    showMainWindow();
+    const attentionSession = [...terminalSessions.values()].find((session) => session.activity === "attention");
+    if (attentionSession) sendTerminalEvent(attentionSession, { type: "focus" });
+  });
+  syncTrayAttention();
   return tray;
+}
+
+function syncTrayAttention() {
+  if (!tray || tray.isDestroyed()) return;
+  const attention = [...terminalSessions.values()].some((session) => session.activity === "attention");
+  const icon = nativeImage.createFromBuffer(Buffer.from(attention ? TRAY_ICON_ATTENTION : TRAY_ICON_NORMAL, "base64")).resize({ width: 18, height: 18 });
+  tray.setImage(icon);
+  tray.setToolTip(attention ? "Codex CLI UI — 有待处理任务" : "Codex CLI UI");
 }
 
 function quitApplication() {
@@ -553,6 +568,7 @@ function normalizeAppSettings(value: Partial<AppSettings> | null | undefined): A
     defaultShellId: typeof value?.defaultShellId === "string" && /^[a-zA-Z0-9:_-]{1,120}$/.test(value.defaultShellId)
       ? value.defaultShellId
       : "powershell",
+    newTabPlacement: value?.newTabPlacement === "end" ? "end" : "after-active",
     cursorStyle: value?.cursorStyle === "block" || value?.cursorStyle === "underline" ? value.cursorStyle : "bar",
     cursorBlink: value?.cursorBlink !== false,
     bellSound: value?.bellSound !== false,
@@ -742,6 +758,7 @@ function terminalInfo(session: TerminalSession): TerminalInfo {
 }
 
 function sendTerminalMeta(session: TerminalSession) {
+  syncTrayAttention();
   sendTerminalEvent(session, { type: "meta", terminal: terminalInfo(session) });
 }
 
@@ -1385,7 +1402,7 @@ function isAuthorizedTerminalRoot(senderId: number, root: string) {
 
 function gitStatus(path: string) {
   return new Promise<GitStatus>((resolveStatus) => {
-    execFile("git", ["-C", path, "status", "--short", "--branch"], { windowsHide: true, timeout: 7_000, maxBuffer: 512 * 1024 }, (error, stdout, stderr) => {
+    execFile("git", ["-c", "safe.directory=*", "-C", path, "status", "--short", "--branch"], { windowsHide: true, timeout: 7_000, maxBuffer: 512 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         resolveStatus({ available: false, branch: "", entries: [], error: stderr.trim() || error.message });
         return;
@@ -1427,7 +1444,7 @@ async function runGitOperation(request: GitActionRequest): Promise<OperationResu
       return { ok: false, message: "Unsupported Git action" };
   }
   try {
-    const { stdout, stderr } = await execFileText("git", ["-C", request.root, ...args], { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
+    const { stdout, stderr } = await execFileText("git", ["-c", "safe.directory=*", "-C", request.root, ...args], { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
     return { ok: true, message: (stdout || stderr || `${request.action} completed`).trim() };
   } catch (reason) {
     const error = reason as Error & { stdout?: string; stderr?: string };
@@ -2180,6 +2197,18 @@ ipcMain.handle("clipboard:write", (_event, value: unknown) => {
   return true;
 });
 
+ipcMain.handle("clipboard:paste-image", async () => {
+  const image = clipboard.readImage();
+  if (image.isEmpty()) return null;
+  const target = join(app.getPath("temp"), `codex-ui-paste-${Date.now()}.png`);
+  try {
+    await writeFile(target, image.toPNG());
+    return target;
+  } catch {
+    return null;
+  }
+});
+
 ipcMain.handle("path:terminal", async (_event, value: unknown) => {
   if (!isDirectory(value)) return false;
   const escaped = value.replace(/'/g, "''");
@@ -2314,6 +2343,7 @@ ipcMain.handle("terminal:close", (event, id: unknown) => {
   session.subscribers.clear();
   try { session.pty.kill(); } catch { /* The terminal may already have exited. */ }
   queueTerminalSnapshotSave();
+  syncTrayAttention();
   return true;
 });
 

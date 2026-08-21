@@ -97,6 +97,7 @@ export interface AppSettings {
   quickTerminal: boolean;
   shellStartupIntegration: boolean;
   defaultShellId: string;
+  newTabPlacement: "after-active" | "end";
   cursorStyle: TerminalCursorStyle;
   cursorBlink: boolean;
   bellSound: boolean;
@@ -368,6 +369,7 @@ export interface CodexBridge {
   chooseBackgroundImage(): Promise<string | null>;
   revealPath(path: string): Promise<boolean>;
   copyText(text: string): Promise<boolean>;
+  pasteClipboardImage(): Promise<string | null>;
   openTerminal(path: string): Promise<boolean>;
   listShells(): Promise<ShellProfile[]>;
   listCliTools(): Promise<CliToolInfo[]>;

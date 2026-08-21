@@ -73,6 +73,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
         <section>
           <h2>{copy.terminal}</h2>
           <div className="settings-row"><label>{copy.defaultShell}</label><select value={settings.defaultShellId} onChange={(event) => update("defaultShellId", event.target.value)}>{shells.map((shell) => <option value={shell.id} key={shell.id}>{shell.label}</option>)}</select></div>
+          <div className="settings-row"><label>{copy.newTabPlacement}</label><select aria-label={copy.newTabPlacement} value={settings.newTabPlacement} onChange={(event) => update("newTabPlacement", event.target.value as AppSettings["newTabPlacement"])}><option value="after-active">{copy.afterActiveTab}</option><option value="end">{copy.appendToEnd}</option></select></div>
           <div className="settings-row"><label>{copy.cursorShape}</label><select aria-label={copy.cursorShape} value={settings.cursorStyle} onChange={(event) => update("cursorStyle", event.target.value as AppSettings["cursorStyle"])}><option value="bar">{copy.cursorBar}</option><option value="block">{copy.cursorBlock}</option><option value="underline">{copy.cursorUnderline}</option></select></div>
           <Toggle label={copy.cursorBlink} checked={settings.cursorBlink} onChange={(value) => update("cursorBlink", value)} />
           <Toggle label={copy.terminalBell} checked={settings.bellSound} onChange={(value) => update("bellSound", value)} />
