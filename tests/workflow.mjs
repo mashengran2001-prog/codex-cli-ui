@@ -86,6 +86,18 @@ try {
   await page.getByLabel("加载 PowerShell 配置").check();
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).loadShellProfile, true);
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).language, "zh-CN");
+
+  // 快捷键录制：点命令面板行，按 Ctrl+Alt+K，断言设置持久化且页面显示新 chord
+  const paletteRow = page.locator(".keybinding-row").filter({ hasText: "命令面板" });
+  await paletteRow.getByRole("button", { name: "Ctrl+Shift+P" }).click();
+  await page.keyboard.press("Control+Alt+K");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).keybindings["command-palette"], "Ctrl+Alt+K");
+  assert.equal(await paletteRow.getByText("Ctrl+Alt+K", { exact: true }).count(), 1);
+
+  // 界面密度三档：选择紧凑并断言设置与根元素 data-density 同步
+  await page.getByLabel("界面密度").selectOption("compact");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).density, "compact");
+  assert.equal(await page.locator(".terminal-workspace").getAttribute("data-density"), "compact");
   await page.getByRole("button", { name: "返回工作台" }).click();
 
   const tabCountBeforeMiddleClick = await page.locator(".terminal-tab").count();

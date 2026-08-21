@@ -49,11 +49,15 @@ export async function installMockBridge(page) {
     const terminalListeners = [];
     const launcherListeners = [];
     let settings = {
-      closeBehavior: "tray", notifyOnCompletion: true, language: "system", theme: "nebula",
+      closeBehavior: "tray", notifyOnCompletion: true, language: "system", theme: "nebula", density: "normal",
       backgroundBlur: false, backgroundOpacity: 0.92, restoreTerminalTabs: true,
       resizablePanels: false, completionEnabled: true, copyOnSelect: true, powerlinePrompt: true,
       quickTerminal: true, shellStartupIntegration: false, defaultShellId: "powershell", cursorStyle: "bar", cursorBlink: true,
       bellSound: true, loadShellProfile: false, cliProfiles: [],
+      keybindings: {
+        "command-palette": "Ctrl+Shift+P", "new-terminal": "Ctrl+Shift+T", "split-right": "Ctrl+Shift+D",
+        "quick-terminal": "Ctrl+`", "open-settings": "Ctrl+,",
+      },
     };
     let cliLifecycleStatus = {
       enabled: false,
