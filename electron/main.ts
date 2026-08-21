@@ -47,6 +47,7 @@ import type {
   SshConnectionStage,
   SshProfile,
   SshTestResult,
+  AiForkRequest,
   TerminalCreateRequest,
   TerminalEvent,
   TerminalInfo,
@@ -74,6 +75,8 @@ interface TerminalSession {
   shell: string;
   shellId: string;
   profileId?: string;
+  aiSource?: "codex" | "claude";
+  aiSessionId?: string;
   kind: "local" | "ssh";
   remoteHost?: string;
   sshProfileId?: string;
@@ -107,6 +110,8 @@ interface TerminalSnapshot {
   shellId?: string;
   profileId?: string;
   sshProfileId?: string;
+  aiSource?: "codex" | "claude";
+  aiSessionId?: string;
 }
 
 interface DetectedShell extends ShellProfile {
@@ -126,6 +131,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const RUN_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,99}$/;
 const PROVIDER_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9:_-]{0,119}$/;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9:_-]{0,199}$/;
+const AI_SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9:_\-.]{0,199}$/;
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 const MAX_PROMPT_LENGTH = 1_000_000;
 const MAX_SESSION_BYTES = 30 * 1024 * 1024;
@@ -159,6 +165,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   cursorBlink: true,
   fontFamily: "",
   bellSound: true,
+  resumeAiSessions: true,
   loadShellProfile: false,
   cliProfiles: [],
   keybindings: { ...DEFAULT_KEYBINDINGS },
@@ -599,6 +606,7 @@ function normalizeAppSettings(value: Partial<AppSettings> | null | undefined): A
       ? value.fontFamily.replace(/[^\p{L}\p{N} ,"'-]/gu, "").slice(0, 240)
       : "",
     bellSound: value?.bellSound !== false,
+    resumeAiSessions: value?.resumeAiSessions !== false,
     loadShellProfile: value?.loadShellProfile === true,
     cliProfiles: normalizeCliProfiles(value?.cliProfiles),
     keybindings: normalizeKeybindings(value?.keybindings),
@@ -770,6 +778,8 @@ function terminalInfo(session: TerminalSession): TerminalInfo {
     shellId: session.shellId,
     profileId: session.profileId,
     sshProfileId: session.sshProfileId,
+    aiSource: session.aiSource,
+    aiSessionId: session.aiSessionId,
     kind: session.kind,
     remoteHost: session.remoteHost,
     activity: session.activity,
@@ -828,11 +838,37 @@ function notifyTerminalAttention(session: TerminalSession, message = "Attention 
   notification.show();
 }
 
+function aiSessionIdIsValid(value: string | undefined): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 200 && AI_SESSION_ID_PATTERN.test(value);
+}
+
+function aiResumeCommand(source: "codex" | "claude", sessionId: string | undefined) {
+  if (source === "codex") return aiSessionIdIsValid(sessionId) ? `codex resume ${sessionId}` : undefined;
+  return aiSessionIdIsValid(sessionId) ? `claude --resume ${sessionId}` : "claude --continue";
+}
+
+function aiForkCommand(source: "codex" | "claude", sessionId: string | undefined) {
+  if (!aiSessionIdIsValid(sessionId)) return undefined;
+  return source === "codex" ? `codex fork ${sessionId}` : `claude --resume ${sessionId} --fork-session`;
+}
+
+function applyAiSessionIdentity(session: TerminalSession, event: CliLifecycleEvent) {
+  if (event.aiSessionId && session.aiSessionId !== event.aiSessionId) {
+    session.aiSource = event.source;
+    session.aiSessionId = event.aiSessionId;
+    sendTerminalMeta(session);
+  } else if (!session.aiSource) {
+    session.aiSource = event.source;
+    sendTerminalMeta(session);
+  }
+}
+
 function handleCliLifecycleEvent(event: CliLifecycleEvent) {
   const session = event.sessionId ? terminalSessions.get(event.sessionId) : undefined;
   const source = event.source === "claude" ? "Claude Code" : "Codex";
   if (event.kind === "started") {
     if (session) {
+      applyAiSessionIdentity(session, event);
       session.activity = "running";
       session.updatedAt = Date.now();
       sendTerminalMeta(session);
@@ -843,6 +879,7 @@ function handleCliLifecycleEvent(event: CliLifecycleEvent) {
   const completion = event.kind === "done";
   const message = event.message || (completion ? "Turn completed and waiting for input" : "Your input is required");
   if (session) {
+    applyAiSessionIdentity(session, event);
     session.activity = "attention";
     session.updatedAt = Date.now();
     sendTerminalMeta(session);
@@ -922,6 +959,8 @@ function queueTerminalSnapshotSave() {
       shellId: session.shellId,
       profileId: session.profileId,
       sshProfileId: session.sshProfileId,
+      aiSource: session.aiSource,
+      aiSessionId: session.aiSessionId,
     }));
   terminalSaveQueue = terminalSaveQueue.then(async () => {
     const path = terminalSnapshotsPath();
@@ -1152,6 +1191,7 @@ function createTerminalSession(
   owner: Electron.WebContents,
   request: TerminalCreateRequest,
   restored?: TerminalSnapshot,
+  seedCommand?: string,
 ) {
   if (terminalSessions.size >= MAX_TERMINALS) throw new Error(`终端数量不能超过 ${MAX_TERMINALS} 个`);
   const profileId = request.profileId || restored?.profileId;
@@ -1214,13 +1254,20 @@ function createTerminalSession(
     sendTerminalEvent(session, { type: "exit", code: exitCode });
     if (!isQuitting) queueTerminalSnapshotSave();
   });
-  if (cliProfile) {
-    const command = cliCommandLine(cliProfile, shellProfile.kind);
+  let injection = seedCommand;
+  let injectionDelay = seedCommand ? 500 : 80;
+  if (!injection && cliProfile) {
+    injection = cliCommandLine(cliProfile, shellProfile.kind);
+  } else if (!injection && !cliProfile && !sshProfile && restored?.aiSource && appSettings.resumeAiSessions) {
+    injection = aiResumeCommand(restored.aiSource, restored.aiSessionId);
+    injectionDelay = 400;
+  }
+  if (injection) {
     setTimeout(() => {
       if (session.status !== "running") return;
-      trackTerminalInput(session, `${command}\r`);
-      terminal.write(`${command}\r`);
-    }, 80);
+      trackTerminalInput(session, `${injection}\r`);
+      terminal.write(`${injection}\r`);
+    }, injectionDelay);
   }
   queueTerminalSnapshotSave();
   return session;
@@ -2317,6 +2364,46 @@ ipcMain.handle("terminal:create", async (event, value: unknown) => {
     sshProfileId: typeof request.sshProfileId === "string" ? request.sshProfileId : undefined,
     title: typeof request.title === "string" ? request.title : undefined,
   });
+  return terminalInfo(session);
+});
+
+ipcMain.handle("terminal:ai-resume", (event, id: unknown) => {
+  if (typeof id !== "string" || !UUID_PATTERN.test(id)) return false;
+  const session = terminalSessions.get(id);
+  if (!session || session.status !== "running" || !session.subscribers.has(event.sender.id) || !session.aiSource) return false;
+  const command = aiResumeCommand(session.aiSource, session.aiSessionId);
+  if (!command) return false;
+  try {
+    trackTerminalInput(session, `${command}\r`);
+    session.pty.write(`${command}\r`);
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle("terminal:ai-fork", async (event, value: unknown) => {
+  if (!value || typeof value !== "object") throw new Error("无效的分叉请求");
+  const request = value as Partial<AiForkRequest>;
+  const source = typeof request.sessionId === "string" && UUID_PATTERN.test(request.sessionId)
+    ? terminalSessions.get(request.sessionId)
+    : undefined;
+  if (!source || source.status !== "running" || !source.aiSource) throw new Error("当前会话暂不支持分叉");
+  const command = aiForkCommand(source.aiSource, source.aiSessionId);
+  if (!command) throw new Error("当前会话缺少 AI 会话 ID，无法分叉");
+  await terminalIntegrationReady;
+  const session = createTerminalSession(
+    event.sender,
+    {
+      cwd: source.cwd,
+      cols: terminalDimension(request.cols, 100, 400),
+      rows: terminalDimension(request.rows, 30, 200),
+      shellId: source.kind === "ssh" ? undefined : source.shellId,
+      title: `${source.title} (fork)`,
+    },
+    undefined,
+    command,
+  );
   return terminalInfo(session);
 });
 

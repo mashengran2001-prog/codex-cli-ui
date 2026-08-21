@@ -58,7 +58,7 @@ export async function installMockBridge(page) {
       backgroundBlur: false, backgroundOpacity: 0.92, restoreTerminalTabs: true,
       resizablePanels: false, completionEnabled: true, copyOnSelect: true, powerlinePrompt: true,
       quickTerminal: true, shellStartupIntegration: false, defaultShellId: "powershell", cursorStyle: "bar", cursorBlink: true, fontFamily: "",
-      bellSound: true, loadShellProfile: false, newTabPlacement: "after-active", cliProfiles: [],
+      bellSound: true, resumeAiSessions: true, loadShellProfile: false, newTabPlacement: "after-active", cliProfiles: [],
       keybindings: {
         "command-palette": "Ctrl+Shift+P", "new-terminal": "Ctrl+Shift+T", "split-right": "Ctrl+Shift+D",
         "quick-terminal": "Ctrl+`", "open-settings": "Ctrl+,",
@@ -81,6 +81,28 @@ export async function installMockBridge(page) {
     const terminalWrites = [];
     const emit = (event) => runListeners.forEach((listener) => listener(event));
     const emitTerminal = (event) => terminalListeners.forEach((listener) => listener(event));
+    const makeTerminal = (request, titleSuffix = "") => {
+      terminalCounter += 1;
+      return {
+        id: `22222222-2222-4222-8222-${String(terminalCounter).padStart(12, "0")}`,
+        title: `${request.cwd.split(/[\\/]/).at(-1) || "Terminal"}${titleSuffix}`,
+        cwd: request.cwd,
+        shell: "powershell.exe",
+        shellId: request.sshProfileId ? `ssh:${request.sshProfileId}` : request.shellId || "powershell",
+        profileId: request.profileId,
+        sshProfileId: request.sshProfileId,
+        kind: request.sshProfileId ? "ssh" : "local",
+        remoteHost: request.sshProfileId ? "dev@example.com" : undefined,
+        activity: "idle",
+        status: "running",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        cols: request.cols,
+        rows: request.rows,
+        aiSource: request.aiSource,
+        aiSessionId: request.aiSessionId,
+      };
+    };
     const completeRun = (request) => {
       const threadId = "11111111-1111-4111-8111-111111111111";
       window.setTimeout(() => emit({ providerId: request.providerId, runId: request.runId, type: "message", data: { type: "thread.started", thread_id: threadId } }), 20);
@@ -105,7 +127,7 @@ export async function installMockBridge(page) {
       window.setTimeout(() => emit({ providerId: request.providerId, runId: request.runId, type: "exit", code: 0, stopped: false }), 115);
     };
 
-    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null, lastPasteProfileId: null };
+    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null, lastPasteProfileId: null, lastResumeId: null, lastFork: null };
     window.codex = {
       getInfo: async () => codexProvider,
       listProviders: async () => [codexProvider, deepseekProvider],
@@ -134,25 +156,22 @@ export async function installMockBridge(page) {
       createTerminal: async (request) => {
         const existing = request.reuseExisting !== false && terminalSessions.find((item) => item.cwd.toLowerCase() === request.cwd.toLowerCase() && item.status === "running");
         if (existing) return existing;
-        terminalCounter += 1;
-        const session = {
-          id: `22222222-2222-4222-8222-${String(terminalCounter).padStart(12, "0")}`,
-          title: request.cwd.split(/[\\/]/).at(-1) || "Terminal",
-          cwd: request.cwd,
-          shell: "powershell.exe",
-          shellId: request.sshProfileId ? `ssh:${request.sshProfileId}` : request.shellId || "powershell",
-          profileId: request.profileId,
-          sshProfileId: request.sshProfileId,
-          kind: request.sshProfileId ? "ssh" : "local",
-          remoteHost: request.sshProfileId ? "dev@example.com" : undefined,
-          activity: "idle",
-          status: "running",
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
+        const session = makeTerminal(request);
+        terminalSessions.push(session);
+        return session;
+      },
+      resumeAiSession: async (id) => { window.__mock.lastResumeId = id; return true; },
+      forkAiSession: async (request) => {
+        const source = terminalSessions.find((item) => item.id === request.sessionId);
+        const session = makeTerminal({
+          cwd: source?.cwd || "F:\\demo\\atlas-workspace",
           cols: request.cols,
           rows: request.rows,
-        };
+          aiSource: source?.aiSource || "codex",
+          aiSessionId: request.sessionId,
+        }, " (fork)");
         terminalSessions.push(session);
+        window.__mock.lastFork = request;
         return session;
       },
       attachTerminal: async (id) => {

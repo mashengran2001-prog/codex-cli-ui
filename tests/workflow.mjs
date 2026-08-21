@@ -86,6 +86,11 @@ try {
   await page.getByLabel("加载 PowerShell 配置").check();
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).loadShellProfile, true);
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).language, "zh-CN");
+  assert.equal(await page.getByLabel("恢复时自动接续 AI 对话").isChecked(), true);
+  await page.getByLabel("恢复时自动接续 AI 对话").uncheck();
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).resumeAiSessions, false);
+  await page.getByLabel("恢复时自动接续 AI 对话").check();
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).resumeAiSessions, true);
 
   // 快捷键录制：点命令面板行，按 Ctrl+Alt+K，断言设置持久化且页面显示新 chord
   const paletteRow = page.locator(".keybinding-row").filter({ hasText: "命令面板" });
@@ -158,6 +163,27 @@ try {
   await page.keyboard.press("Control+v");
   await page.waitForFunction(() => window.__mock.terminalWrites.some((write) => String(write.data).includes("codex-ui-paste-123.png")));
   assert.equal(await page.evaluate(() => window.__mock.lastPasteProfileId), "ssh-mock");
+  // AI 会话恢复与分叉：meta 事件写入 aiSource/aiSessionId 后，标签右键菜单出现两个入口
+  const aiSessionId = await page.evaluate(() => {
+    const sessionId = window.__mock.terminalSessions[0].id;
+    window.__mock.terminalListeners.forEach((listener) => listener({
+      sessionId,
+      type: "meta",
+      terminal: { ...window.__mock.terminalSessions[0], aiSource: "codex", aiSessionId: "run_9f2c1b" },
+    }));
+    return sessionId;
+  });
+  const aiTab = page.locator(".terminal-top-tab").first();
+  await aiTab.click({ button: "right" });
+  await page.getByRole("button", { name: "继续上次 AI 会话" }).waitFor();
+  await page.getByRole("button", { name: "继续上次 AI 会话" }).click();
+  assert.equal(await page.evaluate(() => window.__mock.lastResumeId), aiSessionId);
+  await aiTab.click({ button: "right" });
+  await page.getByRole("button", { name: "分叉 AI 会话" }).waitFor();
+  const forkTabCount = await page.locator(".terminal-top-tab").count();
+  await page.getByRole("button", { name: "分叉 AI 会话" }).click();
+  await page.waitForFunction((count) => document.querySelectorAll(".terminal-top-tab").length === count + 1, forkTabCount);
+  assert.equal((await page.evaluate(() => window.__mock.lastFork)).sessionId, aiSessionId);
   await page.evaluate(() => { window.__mock.clipboardImage = null; });
   await page.getByRole("tab", { name: "对话" }).click();
   await page.locator(".composer textarea").waitFor();

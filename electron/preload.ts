@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AgentProviderId, AppSettings, CodexBridge, GitActionRequest, LauncherRequest, RunEvent, RunRequest, SftpActionRequest, ShellProfile, SshProfile, TerminalCreateRequest, TerminalEvent } from "../src/types";
+import type { AgentProviderId, AiForkRequest, AppSettings, CodexBridge, GitActionRequest, LauncherRequest, RunEvent, RunRequest, SftpActionRequest, ShellProfile, SshProfile, TerminalCreateRequest, TerminalEvent } from "../src/types";
 
 const bridge: CodexBridge = {
   getInfo: () => ipcRenderer.invoke("codex:info"),
@@ -21,6 +21,8 @@ const bridge: CodexBridge = {
   getCommandHistory: (prefix: string, cwd: string) => ipcRenderer.invoke("terminal:history", prefix, cwd),
   listTerminals: () => ipcRenderer.invoke("terminal:list"),
   createTerminal: (request: TerminalCreateRequest) => ipcRenderer.invoke("terminal:create", request),
+  resumeAiSession: (id: string) => ipcRenderer.invoke("terminal:ai-resume", id),
+  forkAiSession: (request: AiForkRequest) => ipcRenderer.invoke("terminal:ai-fork", request),
   attachTerminal: (id: string) => ipcRenderer.invoke("terminal:attach", id),
   detachTerminal: (id: string) => ipcRenderer.invoke("terminal:detach", id),
   writeTerminal: (id: string, data: string) => ipcRenderer.invoke("terminal:write", id, data),

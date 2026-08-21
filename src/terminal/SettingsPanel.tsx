@@ -83,6 +83,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <Toggle label={copy.copyOnSelect} checked={settings.copyOnSelect} onChange={(value) => update("copyOnSelect", value)} />
           <Toggle label={copy.powerlinePrompt} checked={settings.powerlinePrompt} onChange={(value) => update("powerlinePrompt", value)} />
           <Toggle label={copy.restoreTabs} checked={settings.restoreTerminalTabs} onChange={(value) => update("restoreTerminalTabs", value)} />
+          <Toggle label={copy.resumeAiSessions} checked={settings.resumeAiSessions} onChange={(value) => update("resumeAiSessions", value)} />
         </section>
         <section>
           <h2>{copy.cliTools}</h2>

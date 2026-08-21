@@ -68,16 +68,36 @@ const decoded = decodeCliLifecycleEvent({
   version: 1,
   source: "claude",
   sessionId: "22222222-2222-4222-8222-222222222222",
-  payload: JSON.stringify({ hook_event_name: "Notification", message: "Permission required" }),
+  payload: JSON.stringify({ hook_event_name: "Notification", message: "Permission required", session_id: "abc-123" }),
   timestamp: 123,
 });
 assert.deepEqual(decoded, {
   source: "claude",
   sessionId: "22222222-2222-4222-8222-222222222222",
+  aiSessionId: "abc-123",
   kind: "attention",
   message: "Permission required",
   timestamp: 123,
 });
+
+const decodedCodex = decodeCliLifecycleEvent({
+  version: 1,
+  source: "codex",
+  sessionId: "33333333-3333-4333-8333-333333333333",
+  payload: JSON.stringify({ hook_event_name: "UserPromptSubmit", thread_id: "run_9f2c1b" }),
+  timestamp: 124,
+});
+assert.equal(decodedCodex?.kind, "started");
+assert.equal(decodedCodex?.aiSessionId, "run_9f2c1b");
+
+const decodedNoId = decodeCliLifecycleEvent({
+  version: 1,
+  source: "claude",
+  sessionId: "44444444-4444-4444-8444-444444444444",
+  payload: JSON.stringify({ hook_event_name: "Notification", session_id: "bad id with spaces" }),
+  timestamp: 125,
+});
+assert.equal(decodedNoId?.aiSessionId, undefined);
 
 if (process.platform === "win32") {
   const root = await mkdtemp(join(tmpdir(), "codex-ui-lifecycle-"));

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Bell, Bot, ChevronDown, ChevronLeft, ChevronRight, CircleX, Columns2, Command, Copy,
-  FolderOpen, FolderTree, GitBranch, Globe2, GripVertical, LoaderCircle, PanelLeftClose,
+  FolderOpen, FolderTree, GitBranch, GitFork, Globe2, GripVertical, LoaderCircle, PanelLeftClose,
   PanelLeftOpen, Pencil, Plus, RefreshCw, Rows2, Search, Server, Settings2, SquareTerminal, TerminalSquare, TriangleAlert, Upload, X,
+  RotateCcw,
 } from "lucide-react";
 import BrandIcon from "./BrandIcon";
 import type { AppSettings, CliLifecycleStatus, CliToolInfo, DocumentFile, ProjectRecord, ShellProfile, SshProfile, TerminalEvent, TerminalInfo } from "./types";
@@ -508,6 +509,38 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     await createTerminal(session.cwd, { reuseExisting: false, sshProfileId: session.sshProfileId, shellId: settings.defaultShellId });
   };
 
+  const resumeAiSession = async (id: string) => {
+    try {
+      await window.codex.resumeAiSession(id);
+    } catch (reason) {
+      onError(reason instanceof Error ? reason.message : workbenchCopy.resumeAiSession);
+    }
+    setTabMenu(undefined);
+    assignSession(id);
+  };
+
+  const forkAiSession = async (id: string) => {
+    const source = sessions.find((session) => session.id === id);
+    setTabMenu(undefined);
+    if (!source) return;
+    try {
+      const session = await window.codex.forkAiSession({ sessionId: id, cols: 100, rows: 30 });
+      if (!mountedRef.current) { await window.codex.detachTerminal(session.id); return; }
+      setSessions((current) => {
+        if (current.some((item) => item.id === session.id)) return current;
+        if (settings.newTabPlacement === "end") return [...current, session];
+        const activeIndex = current.findIndex((item) => item.id === activeSessionIdRef.current);
+        const insertAt = activeIndex >= 0 ? activeIndex + 1 : current.length;
+        const next = [...current];
+        next.splice(insertAt, 0, session);
+        return next;
+      });
+      assignSession(session.id);
+    } catch (reason) {
+      onError(reason instanceof Error ? reason.message : workbenchCopy.createTerminalFailed);
+    }
+  };
+
   const reorderSession = (sourceId: string, targetId: string) => setSessions((current) => {
     const source = current.findIndex((item) => item.id === sourceId);
     const target = current.findIndex((item) => item.id === targetId);
@@ -782,6 +815,8 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     );
   };
 
+  const tabMenuSession = tabMenu ? sessions.find((session) => session.id === tabMenu.sessionId) : undefined;
+
   return (
     <main className="terminal-workspace" data-terminal-theme={settings.theme} data-density={settings.density} data-workspace-view={view} data-window-focused={windowFocused} style={{ "--terminal-sidebar-width": `${sidebarWidth}px`, "--terminal-drawer-width": `${drawerWidth}px`, "--terminal-bg-opacity": settings.backgroundOpacity, "--terminal-bg-image": pathToCssUrl(settings.backgroundImage) } as React.CSSProperties}>
       <header className="terminal-header">
@@ -848,6 +883,8 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
             {TAB_COLORS.map((color) => <button key={color} className={tabColors[tabMenu.sessionId] === color ? "selected" : ""} title={workbenchCopy.tabColor} onClick={() => setTabColor(tabMenu.sessionId, color)} style={{ background: color }} />)}
             <button className="clear" title={workbenchCopy.clearTabColor} onClick={() => setTabColor(tabMenu.sessionId)}><X size={10} /></button>
           </div>
+          {tabMenuSession?.aiSource && tabMenuSession.status === "running" && (tabMenuSession.aiSessionId || tabMenuSession.aiSource === "claude") && <button onClick={() => void resumeAiSession(tabMenu.sessionId)}><RotateCcw size={12} />{workbenchCopy.resumeAiSession}</button>}
+          {tabMenuSession?.aiSource && tabMenuSession.aiSessionId && tabMenuSession.status === "running" && <button onClick={() => void forkAiSession(tabMenu.sessionId)}><GitFork size={12} />{workbenchCopy.forkAiSession}</button>}
           <button className="danger" onClick={() => { const id = tabMenu.sessionId; setTabMenu(undefined); void closeTerminal(id); }}><X size={12} />{workbenchCopy.closeTerminal}</button>
         </div>
       )}

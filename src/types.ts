@@ -102,6 +102,7 @@ export interface AppSettings {
   cursorBlink: boolean;
   fontFamily: string;
   bellSound: boolean;
+  resumeAiSessions: boolean;
   loadShellProfile: boolean;
   cliProfiles: CliProfile[];
   keybindings: Record<KeybindingAction, string>;
@@ -231,6 +232,8 @@ export interface TerminalInfo {
   updatedAt: number;
   cols: number;
   rows: number;
+  aiSource?: "codex" | "claude";
+  aiSessionId?: string;
 }
 
 export interface TerminalCreateRequest {
@@ -242,6 +245,12 @@ export interface TerminalCreateRequest {
   profileId?: string;
   sshProfileId?: string;
   title?: string;
+}
+
+export interface AiForkRequest {
+  sessionId: string;
+  cols?: number;
+  rows?: number;
 }
 
 export interface TerminalEvent {
@@ -377,6 +386,8 @@ export interface CodexBridge {
   getCommandHistory(prefix: string, cwd: string): Promise<string[]>;
   listTerminals(): Promise<TerminalInfo[]>;
   createTerminal(request: TerminalCreateRequest): Promise<TerminalInfo>;
+  resumeAiSession(id: string): Promise<boolean>;
+  forkAiSession(request: AiForkRequest): Promise<TerminalInfo>;
   attachTerminal(id: string): Promise<{ terminal: TerminalInfo; snapshot: string } | null>;
   detachTerminal(id: string): Promise<boolean>;
   writeTerminal(id: string, data: string): Promise<boolean>;

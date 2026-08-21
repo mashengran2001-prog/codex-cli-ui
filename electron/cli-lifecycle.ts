@@ -44,6 +44,7 @@ interface BridgeWireMessage {
 export interface CliLifecycleEvent {
   source: "codex" | "claude";
   sessionId?: string;
+  aiSessionId?: string;
   kind: "started" | "done" | "attention";
   message?: string;
   timestamp: number;
@@ -267,6 +268,14 @@ function messageText(payload: Record<string, unknown>) {
   return undefined;
 }
 
+function aiSessionIdFromPayload(payload: Record<string, unknown>) {
+  for (const key of ["session_id", "thread_id", "thread-id"]) {
+    const value = payload[key];
+    if (typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9:_\-.]{0,199}$/.test(value)) return value.slice(0, 200);
+  }
+  return undefined;
+}
+
 export function decodeCliLifecycleEvent(message: BridgeWireMessage): CliLifecycleEvent | null {
   if (message.version !== CONFIG_VERSION || (message.source !== "codex" && message.source !== "claude") || typeof message.payload !== "string") return null;
   let payload: Record<string, unknown> = {};
@@ -286,6 +295,7 @@ export function decodeCliLifecycleEvent(message: BridgeWireMessage): CliLifecycl
   return {
     source: message.source,
     sessionId,
+    aiSessionId: aiSessionIdFromPayload(payload),
     kind,
     message: messageText(payload),
     timestamp: typeof message.timestamp === "number" && Number.isFinite(message.timestamp) ? message.timestamp : Date.now(),

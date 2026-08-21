@@ -45,6 +45,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   cursorStyle: "bar",
   cursorBlink: true,
   bellSound: true,
+  resumeAiSessions: true,
   loadShellProfile: false,
   cliProfiles: [],
   keybindings: { ...DEFAULT_KEYBINDINGS },
