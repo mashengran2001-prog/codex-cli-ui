@@ -972,6 +972,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .document-content code { font-family: "Cascadia Code", Consolas, monospace; font-size: .9em; }
 .document-content :not(pre) > code { padding: 2px 4px; border-radius: 3px; background: var(--t-panel); }
 .document-content pre { max-width: 100%; padding: 12px; overflow: auto; border: 1px solid var(--t-border); border-radius: 5px; background: var(--t-panel); }
+.document-content pre.code-viewer { padding: 8px 0; }
+.code-viewer .code-line { display: block; min-height: 1.55em; }
+.code-viewer .line-no { display: inline-block; width: 3.4em; margin-right: 0.8em; padding-right: 0.7em; border-right: 1px solid var(--t-border); color: var(--t-muted); text-align: right; user-select: none; }
 .document-content table { width: 100%; border-collapse: collapse; }
 .document-content th, .document-content td { padding: 6px 8px; border: 1px solid var(--t-border); text-align: left; }
 .document-content blockquote { margin-left: 0; padding-left: 12px; border-left: 3px solid var(--t-accent); color: var(--t-muted); }

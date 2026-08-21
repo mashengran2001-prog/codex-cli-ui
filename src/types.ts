@@ -100,6 +100,7 @@ export interface AppSettings {
   newTabPlacement: "after-active" | "end";
   cursorStyle: TerminalCursorStyle;
   cursorBlink: boolean;
+  fontFamily: string;
   bellSound: boolean;
   loadShellProfile: boolean;
   cliProfiles: CliProfile[];
@@ -369,7 +370,7 @@ export interface CodexBridge {
   chooseBackgroundImage(): Promise<string | null>;
   revealPath(path: string): Promise<boolean>;
   copyText(text: string): Promise<boolean>;
-  pasteClipboardImage(): Promise<string | null>;
+  pasteClipboardImage(sshProfileId?: string): Promise<string | null>;
   openTerminal(path: string): Promise<boolean>;
   listShells(): Promise<ShellProfile[]>;
   listCliTools(): Promise<CliToolInfo[]>;

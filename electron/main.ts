@@ -157,6 +157,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   newTabPlacement: "after-active",
   cursorStyle: "bar",
   cursorBlink: true,
+  fontFamily: "",
   bellSound: true,
   loadShellProfile: false,
   cliProfiles: [],
@@ -346,11 +347,6 @@ function ensureTray() {
   const icon = nativeImage.createFromBuffer(Buffer.from(TRAY_ICON_NORMAL, "base64")).resize({ width: 18, height: 18 });
   tray = new Tray(icon);
   tray.setToolTip("Codex CLI UI");
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "打开 Codex CLI UI", click: () => showMainWindow() },
-    { type: "separator" },
-    { label: "退出", click: () => quitApplication() },
-  ]));
   tray.on("click", () => {
     showMainWindow();
     const attentionSession = [...terminalSessions.values()].find((session) => session.activity === "attention");
@@ -360,12 +356,40 @@ function ensureTray() {
   return tray;
 }
 
+function rebuildTrayMenu() {
+  if (!tray || tray.isDestroyed()) return;
+  const template: Electron.MenuItemConstructorOptions[] = [
+    { label: "打开 Codex CLI UI", click: () => showMainWindow() },
+  ];
+  const sessions = [...terminalSessions.values()];
+  if (sessions.length > 0) {
+    template.push({ type: "separator" }, { label: "AI 终端", enabled: false });
+    for (const session of sessions) {
+      const stateLabel = session.activity === "attention" ? "等待输入"
+        : session.activity === "running" ? "运行中"
+        : session.status === "exited" ? "已退出"
+        : "空闲";
+      const label = `${session.title || session.cwd} — ${stateLabel}`;
+      template.push({
+        label,
+        click: () => {
+          showMainWindow();
+          sendTerminalEvent(session, { type: "focus" });
+        },
+      });
+    }
+  }
+  template.push({ type: "separator" }, { label: "退出", click: () => quitApplication() });
+  tray.setContextMenu(Menu.buildFromTemplate(template));
+}
+
 function syncTrayAttention() {
   if (!tray || tray.isDestroyed()) return;
   const attention = [...terminalSessions.values()].some((session) => session.activity === "attention");
   const icon = nativeImage.createFromBuffer(Buffer.from(attention ? TRAY_ICON_ATTENTION : TRAY_ICON_NORMAL, "base64")).resize({ width: 18, height: 18 });
   tray.setImage(icon);
   tray.setToolTip(attention ? "Codex CLI UI — 有待处理任务" : "Codex CLI UI");
+  rebuildTrayMenu();
 }
 
 function quitApplication() {
@@ -571,6 +595,9 @@ function normalizeAppSettings(value: Partial<AppSettings> | null | undefined): A
     newTabPlacement: value?.newTabPlacement === "end" ? "end" : "after-active",
     cursorStyle: value?.cursorStyle === "block" || value?.cursorStyle === "underline" ? value.cursorStyle : "bar",
     cursorBlink: value?.cursorBlink !== false,
+    fontFamily: typeof value?.fontFamily === "string"
+      ? value.fontFamily.replace(/[^\p{L}\p{N} ,"'-]/gu, "").slice(0, 240)
+      : "",
     bellSound: value?.bellSound !== false,
     loadShellProfile: value?.loadShellProfile === true,
     cliProfiles: normalizeCliProfiles(value?.cliProfiles),
@@ -2197,13 +2224,23 @@ ipcMain.handle("clipboard:write", (_event, value: unknown) => {
   return true;
 });
 
-ipcMain.handle("clipboard:paste-image", async () => {
+ipcMain.handle("clipboard:paste-image", async (_event, sshProfileId: unknown) => {
   const image = clipboard.readImage();
   if (image.isEmpty()) return null;
-  const target = join(app.getPath("temp"), `codex-ui-paste-${Date.now()}.png`);
+  const stamp = Date.now();
+  const target = join(app.getPath("temp"), `codex-ui-paste-${stamp}.png`);
   try {
     await writeFile(target, image.toPNG());
-    return target;
+    if (typeof sshProfileId !== "string" || !sshProfileId) return target;
+    const profile = sshProfiles.find((item) => item.id === sshProfileId);
+    if (!profile) return null;
+    const remote = `/tmp/codex-ui-paste-${stamp}.png`;
+    try {
+      await runSftpBatch(profile, [`put ${quoteSftpPath(target)} ${quoteSftpPath(remote)}`], 60_000);
+      return remote;
+    } catch {
+      return null;
+    }
   } catch {
     return null;
   }

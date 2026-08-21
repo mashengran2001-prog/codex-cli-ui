@@ -22,7 +22,9 @@ export default function DocumentViewer({ document, onClose }: { document: Docume
         {document.kind === "markdown" ? (
           <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{document.content}</ReactMarkdown>
         ) : (
-          <pre><code>{document.content}</code></pre>
+          <pre className="code-viewer"><code>{document.content.split("\n").map((line, index) => (
+            <span className="code-line" key={index}><i className="line-no" aria-hidden="true">{index + 1}</i>{line || "\u00A0"}</span>
+          ))}</code></pre>
         )}
       </div>
     </article>

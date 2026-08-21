@@ -30,6 +30,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   language: "system",
   theme: "nebula",
   density: "normal",
+  fontFamily: "",
   backgroundBlur: false,
   backgroundOpacity: 0.92,
   restoreTerminalTabs: true,

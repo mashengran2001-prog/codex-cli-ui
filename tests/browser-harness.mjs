@@ -57,7 +57,7 @@ export async function installMockBridge(page) {
       closeBehavior: "tray", notifyOnCompletion: true, language: "system", theme: "nebula", density: "normal",
       backgroundBlur: false, backgroundOpacity: 0.92, restoreTerminalTabs: true,
       resizablePanels: false, completionEnabled: true, copyOnSelect: true, powerlinePrompt: true,
-      quickTerminal: true, shellStartupIntegration: false, defaultShellId: "powershell", cursorStyle: "bar", cursorBlink: true,
+      quickTerminal: true, shellStartupIntegration: false, defaultShellId: "powershell", cursorStyle: "bar", cursorBlink: true, fontFamily: "",
       bellSound: true, loadShellProfile: false, newTabPlacement: "after-active", cliProfiles: [],
       keybindings: {
         "command-palette": "Ctrl+Shift+P", "new-terminal": "Ctrl+Shift+T", "split-right": "Ctrl+Shift+D",
@@ -105,7 +105,7 @@ export async function installMockBridge(page) {
       window.setTimeout(() => emit({ providerId: request.providerId, runId: request.runId, type: "exit", code: 0, stopped: false }), 115);
     };
 
-    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null };
+    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null, lastPasteProfileId: null };
     window.codex = {
       getInfo: async () => codexProvider,
       listProviders: async () => [codexProvider, deepseekProvider],
@@ -119,7 +119,7 @@ export async function installMockBridge(page) {
       chooseBackgroundImage: async () => "F:\\demo\\background.png",
       revealPath: async () => true,
       copyText: async () => true,
-      pasteClipboardImage: async () => window.__mock.clipboardImage,
+      pasteClipboardImage: async (sshProfileId) => { window.__mock.lastPasteProfileId = sshProfileId ?? null; return window.__mock.clipboardImage; },
       openTerminal: async () => true,
       listShells: async () => [
         { id: "powershell", label: "Windows PowerShell", command: "powershell.exe", kind: "powershell" },
@@ -142,6 +142,7 @@ export async function installMockBridge(page) {
           shell: "powershell.exe",
           shellId: request.sshProfileId ? `ssh:${request.sshProfileId}` : request.shellId || "powershell",
           profileId: request.profileId,
+          sshProfileId: request.sshProfileId,
           kind: request.sshProfileId ? "ssh" : "local",
           remoteHost: request.sshProfileId ? "dev@example.com" : undefined,
           activity: "idle",

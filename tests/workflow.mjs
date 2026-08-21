@@ -101,6 +101,11 @@ try {
   // 新标签位置：切换为追加到末尾并断言持久化
   await page.getByLabel("新标签页位置").selectOption("end");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).newTabPlacement, "end");
+  // 字体族：输入自定义字体链并断言持久化，再清空恢复默认
+  await page.getByLabel("字体族").fill("JetBrains Mono, Consolas");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).fontFamily, "JetBrains Mono, Consolas");
+  await page.getByLabel("字体族").fill("");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).fontFamily, "");
   await page.getByRole("button", { name: "返回工作台" }).click();
 
   const tabCountBeforeMiddleClick = await page.locator(".terminal-tab").count();
@@ -144,6 +149,15 @@ try {
   await page.locator(".terminal-pane-leaf").first().locator(".xterm-screen").click();
   await page.keyboard.press("Control+v");
   await page.waitForFunction(() => window.__mock.terminalWrites.some((write) => write.data === "'F:\\demo\\clipboard.png'"));
+  await page.evaluate(() => { window.__mock.clipboardImage = null; });
+  // SSH 截图粘贴：SSH 会话粘贴时应把 sshProfileId 传给 bridge，远端图片路径写入终端
+  await page.evaluate(() => { window.__mock.clipboardImage = "/tmp/codex-ui-paste-123.png"; });
+  await page.getByTitle("连接 Dev server").click();
+  await page.waitForFunction(() => window.__mock.terminalSessions.some((session) => session.kind === "ssh"));
+  await page.locator(".terminal-pane-shell").last().locator(".xterm-screen").click();
+  await page.keyboard.press("Control+v");
+  await page.waitForFunction(() => window.__mock.terminalWrites.some((write) => String(write.data).includes("codex-ui-paste-123.png")));
+  assert.equal(await page.evaluate(() => window.__mock.lastPasteProfileId), "ssh-mock");
   await page.evaluate(() => { window.__mock.clipboardImage = null; });
   await page.getByRole("tab", { name: "对话" }).click();
   await page.locator(".composer textarea").waitFor();

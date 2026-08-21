@@ -14,12 +14,14 @@ interface TerminalPaneProps {
   theme: TerminalThemeName;
   cursorStyle: TerminalCursorStyle;
   cursorBlink: boolean;
+  fontFamily: string;
   copyOnSelect: boolean;
   active: boolean;
   onFocus(): void;
 }
 
 const draggedPathType = "application/x-codex-ui-path";
+const DEFAULT_FONT_STACK = '"Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, "Noto Sans Mono CJK SC", "Microsoft YaHei UI", monospace';
 
 function pathForShell(path: string, session: TerminalInfo) {
   const shellId = session.shellId.toLowerCase();
@@ -44,7 +46,7 @@ function quotePath(path: string, session: TerminalInfo) {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
-export default function TerminalPane({ session, theme, cursorStyle, cursorBlink, copyOnSelect, active, onFocus }: TerminalPaneProps) {
+export default function TerminalPane({ session, theme, cursorStyle, cursorBlink, fontFamily, copyOnSelect, active, onFocus }: TerminalPaneProps) {
   const copy = useUiCopy().workbench;
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTerm | undefined>(undefined);
@@ -65,7 +67,7 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
       cursorBlink,
       cursorStyle,
       cursorInactiveStyle: "outline",
-      fontFamily: '"Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, "Noto Sans Mono CJK SC", "Microsoft YaHei UI", monospace',
+      fontFamily: fontFamily.trim() || DEFAULT_FONT_STACK,
       fontSize: 12,
       lineHeight: 1.2,
       reflowCursorLine: true,
@@ -138,8 +140,7 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
       });
       void readClipboard().then((text) => {
         if (text) { terminal.paste(text); return; }
-        if (session.kind === "ssh") return;
-        void window.codex.pasteClipboardImage().then((path) => {
+        void window.codex.pasteClipboardImage(session.kind === "ssh" ? session.sshProfileId : undefined).then((path) => {
           if (path) return window.codex.writeTerminal(session.id, quotePath(path, session));
         });
       });
@@ -260,6 +261,20 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
     terminal.options.cursorInactiveStyle = "outline";
     terminal.options.cursorBlink = cursorBlink;
   }, [cursorBlink, cursorStyle]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const next = fontFamily.trim() || DEFAULT_FONT_STACK;
+    if (terminal.options.fontFamily === next) return;
+    terminal.options.fontFamily = next;
+    window.requestAnimationFrame(() => {
+      try {
+        fitRef.current?.fit();
+        void window.codex.resizeTerminal(session.id, terminal.cols, terminal.rows);
+      } catch { /* Font swap can race with layout changes. */ }
+    });
+  }, [fontFamily]);
 
   useEffect(() => {
     if (!active) return;
