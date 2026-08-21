@@ -82,6 +82,7 @@ interface TerminalSession {
   inputBuffer: string;
   pty: IPty;
   status: "running" | "exited";
+  exitedAt?: number;
   createdAt: number;
   updatedAt: number;
   cols: number;
@@ -622,12 +623,14 @@ function terminalInfo(session: TerminalSession): TerminalInfo {
     shell: session.shell,
     shellId: session.shellId,
     profileId: session.profileId,
+    sshProfileId: session.sshProfileId,
     kind: session.kind,
     remoteHost: session.remoteHost,
     activity: session.activity,
     activeCommand: session.activeCommand,
     lastCommandDuration: session.lastCommandDuration,
     status: session.status,
+    exitedAt: session.exitedAt,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     cols: session.cols,
@@ -1059,6 +1062,7 @@ function createTerminalSession(
   terminal.onExit(({ exitCode }) => {
     flushTerminalOutput(session);
     session.status = "exited";
+    session.exitedAt = Date.now();
     session.updatedAt = Date.now();
     sendTerminalEvent(session, { type: "exit", code: exitCode });
     if (!isQuitting) queueTerminalSnapshotSave();

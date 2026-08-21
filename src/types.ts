@@ -190,12 +190,14 @@ export interface TerminalInfo {
   shell: string;
   shellId: string;
   profileId?: string;
+  sshProfileId?: string;
   kind: TerminalKind;
   remoteHost?: string;
   activity: TerminalActivity;
   activeCommand?: string;
   lastCommandDuration?: number;
   status: TerminalStatus;
+  exitedAt?: number;
   createdAt: number;
   updatedAt: number;
   cols: number;

@@ -50,16 +50,13 @@ try {
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "向右拆分" }).click();
   await page.locator(".xterm-screen").nth(1).waitFor();
-  assert.equal(await page.locator(".terminal-grid-cell").count(), 2);
+  assert.equal(await page.locator(".terminal-pane-leaf").count(), 2);
   assert.equal(await page.locator('.terminal-pane-shell[data-active="true"]').count(), 1);
 
-  const secondScreen = page.locator(".terminal-grid-cell").nth(1).locator(".xterm-screen");
-  await secondScreen.evaluate((element) => { element.dataset.persistenceProbe = "mounted-once"; });
-  await page.locator(".terminal-grid-cell").nth(1).getByRole("button", { name: "关闭分屏" }).click();
-  assert.equal(await page.locator(".terminal-grid-cell").count(), 1);
-  assert.equal(await page.locator(".terminal-grid-cache-cell").count(), 1);
+  await page.locator(".terminal-pane-leaf").nth(1).getByRole("button", { name: "关闭分屏" }).click();
+  assert.equal(await page.locator(".terminal-pane-leaf").count(), 1);
   await page.locator(".terminal-tab-main").nth(1).click();
-  await page.waitForFunction(() => document.querySelector(".terminal-grid-cell .xterm-screen")?.dataset.persistenceProbe === "mounted-once");
+  await page.waitForFunction(() => document.querySelector(".terminal-pane-leaf")?.dataset.sessionId === window.__mock.terminalSessions[1].id);
 
   await page.getByRole("button", { name: "设置", exact: true }).click();
   await page.locator(".terminal-settings").waitFor();
@@ -98,7 +95,7 @@ try {
   await page.getByRole("button", { name: "文件", exact: true }).click();
   const readmeRow = page.locator(".file-row", { hasText: "README.md" });
   await readmeRow.waitFor();
-  await readmeRow.dragTo(page.locator(".terminal-grid-cell .terminal-canvas"));
+  await readmeRow.dragTo(page.locator(".terminal-pane-leaf .terminal-canvas"));
   await page.waitForFunction(() => window.__mock.terminalWrites.some((write) => write.data === "'F:\\demo\\atlas-workspace\\README.md'"));
   await readmeRow.click();
   await page.getByRole("heading", { name: "Atlas" }).waitFor();
