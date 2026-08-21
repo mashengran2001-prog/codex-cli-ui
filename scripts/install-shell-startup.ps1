@@ -145,8 +145,30 @@ try {
   $rootValue = Escape-SingleQuoted $ProjectRoot
   $hookValue = Escape-SingleQuoted $HookPath
   $hookScript = @"
-param([string]`$WorkingDirectory = "")
+param(
+  [string]`$WorkingDirectory = "",
+  [ValidateSet("powershell", "cmd")][string]`$Origin = "powershell",
+  [int]`$ShellProcessId = 0,
+  [switch]`$SkipParentCheck
+)
 if (`$env:CODEX_UI_TERMINAL -eq "1" -or `$env:CODEX_UI_SHELL_STARTUP_GUARD -eq "1") { return }
+function Get-ProcessRecord([int]`$Id) {
+  if (`$Id -le 0) { return `$null }
+  try { return Get-CimInstance Win32_Process -Filter "ProcessId=`$Id" -Property Name,ParentProcessId -ErrorAction Stop } catch { return `$null }
+}
+function Get-ExecutableName([object]`$Process) {
+  if (-not `$Process) { return "" }
+  return [IO.Path]::GetFileNameWithoutExtension([string]`$Process.Name).ToLowerInvariant()
+}
+function Test-UserShellParent {
+  # Only shells opened by Windows' interactive shell/terminal hosts may launch
+  # the workbench. Unknown parents are automation by default.
+  `$allowed = @("explorer", "windowsterminal", "openconsole", "conhost", "wt")
+  `$shell = if (`$ShellProcessId -gt 0) { Get-ProcessRecord `$ShellProcessId } else { Get-ProcessRecord `$PID | ForEach-Object { Get-ProcessRecord ([int]`$_.ParentProcessId) } }
+  `$parent = if (`$shell) { Get-ProcessRecord ([int]`$shell.ParentProcessId) } else { `$null }
+  return `$allowed -contains (Get-ExecutableName `$parent)
+}
+if (-not `$SkipParentCheck -and -not (Test-UserShellParent)) { return }
 `$previousGuard = `$env:CODEX_UI_SHELL_STARTUP_GUARD
 `$env:CODEX_UI_SHELL_STARTUP_GUARD = "1"
 try {
@@ -163,7 +185,8 @@ try {
 @echo off
 if /I "%CODEX_UI_TERMINAL%"=="1" exit /b 0
 if /I "%CODEX_UI_SHELL_STARTUP_GUARD%"=="1" exit /b 0
-start "" /b powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$HookPath" -WorkingDirectory "%CD%"
+start "" /b powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$HookPath" -Origin cmd -WorkingDirectory "%CD%"
+set "CODEX_UI_SHELL_STARTUP_GUARD=1"
 exit /b 0
 "@
   Write-Utf8 $HookPath ($hookScript + [Environment]::NewLine)
@@ -173,7 +196,9 @@ exit /b 0
 $startMarker
 if (`$env:CODEX_UI_TERMINAL -ne '1' -and `$env:CODEX_UI_SHELL_STARTUP_GUARD -ne '1') {
   `$codexUiCwd = if (`$pwd.Provider.Name -eq 'FileSystem') { `$pwd.ProviderPath } else { `$HOME }
-  & '$hookValue' -WorkingDirectory `$codexUiCwd
+  & '$hookValue' -Origin powershell -ShellProcessId `$PID -WorkingDirectory `$codexUiCwd
+  # Keep the marker in this shell so Codex and every child shell inherit it.
+  `$env:CODEX_UI_SHELL_STARTUP_GUARD = '1'
 }
 $endMarker
 "@

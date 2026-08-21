@@ -179,6 +179,9 @@ let sshProfiles: SshProfile[] = [];
 let terminalRestoreQuarantined = false;
 let providerRegistry: ProviderRegistry | null = null;
 let cliLifecycleBridge: CliLifecycleBridge | null = null;
+let terminalIntegrationReady: Promise<void> = Promise.resolve();
+let sshProfilesReady: Promise<void> = Promise.resolve();
+let cliLifecycleReady: Promise<void> = Promise.resolve();
 const bootStartedAt = Date.now();
 
 app.setName("Codex CLI UI");
@@ -254,6 +257,7 @@ function createWindow() {
     height: 880,
     minWidth: 760,
     minHeight: 620,
+    show: false,
     backgroundColor: "#f7f7f5",
     title: "Codex CLI UI",
     titleBarStyle: "hidden",
@@ -272,6 +276,18 @@ function createWindow() {
   applyWindowAppearance(window);
 
   const devServer = process.env.VITE_DEV_SERVER_URL;
+  const showWhenReady = () => {
+    if (!window.isDestroyed() && !window.isVisible()) {
+      window.show();
+      window.focus();
+      bootTrace("window:shown");
+    }
+  };
+  window.once("ready-to-show", showWhenReady);
+  window.webContents.once("did-fail-load", showWhenReady);
+  // A renderer failure should never leave an invisible process running forever.
+  setTimeout(showWhenReady, 8_000).unref();
+  bootTrace("renderer-load:start");
   if (devServer) void window.loadURL(devServer);
   else void window.loadFile(join(__dirname, "../../dist/index.html"));
 
@@ -839,17 +855,26 @@ async function detectTerminalShells() {
     if (existsSync(cmd)) profiles.push({ id: "cmd", label: "Command Prompt", command: cmd, args: ["/Q"], kind: "cmd" });
     const gitBash = join(programFiles, "Git", "bin", "bash.exe");
     if (existsSync(gitBash)) profiles.push({ id: "git-bash", label: "Git Bash", command: gitBash, args: ["--noprofile", "--norc", "-i"], kind: "git-bash" });
+    // WSL discovery can block while the subsystem starts. Keep it out of the
+    // critical boot path and publish the profiles when the optional probe ends.
     const wsl = join(systemRoot, "System32", "wsl.exe");
     if (existsSync(wsl)) {
-      try {
-        const { stdout } = await execFileText(wsl, ["--list", "--quiet"]);
-        for (const distro of stdout.replaceAll("\0", "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean)) {
-          const id = `wsl:${Buffer.from(distro).toString("base64url")}`;
-          profiles.push({ id, label: distro, detail: "WSL", command: wsl, args: ["--distribution", distro], kind: "wsl" });
-        }
-      } catch {
-        // WSL is optional.
-      }
+      void execFileText(wsl, ["--list", "--quiet"]).then(({ stdout }) => {
+        const wslProfiles = stdout.replaceAll("\0", "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((distro) => ({
+          id: `wsl:${Buffer.from(distro).toString("base64url")}`,
+          label: distro,
+          detail: "WSL",
+          command: wsl,
+          args: ["--distribution", distro],
+          kind: "wsl" as const,
+        }));
+        const existing = new Set(detectedShells.map((profile) => profile.id));
+        detectedShells = [...detectedShells, ...wslProfiles.filter((profile) => !existing.has(profile.id))];
+        const target = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : undefined;
+        target?.send("terminal:shells-changed", detectedShells.map(({ args: _args, ...profile }) => profile));
+      }).catch(() => {
+        // WSL is optional and may be disabled or unavailable.
+      });
     }
   } else {
     const shell = process.env.SHELL || "/bin/bash";
@@ -2061,6 +2086,7 @@ ipcMain.handle("path:terminal", async (_event, value: unknown) => {
 });
 
 ipcMain.handle("terminal:list", async (event) => {
+  await terminalIntegrationReady;
   await restoreTerminalSessions(event.sender);
   for (const session of terminalSessions.values()) session.subscribers.add(event.sender.id);
   return [...terminalSessions.values()].map(terminalInfo).sort((left, right) => left.createdAt - right.createdAt);
@@ -2096,6 +2122,7 @@ ipcMain.handle("terminal:create", async (event, value: unknown) => {
   if (!value || typeof value !== "object") throw new Error("无效的终端请求");
   const request = value as Partial<TerminalCreateRequest>;
   if (!isDirectory(request.cwd)) throw new Error("终端工作目录不存在");
+  await terminalIntegrationReady;
   await restoreTerminalSessions(event.sender);
   if (request.reuseExisting !== false) {
     const expected = normalizePath(request.cwd);
@@ -2213,7 +2240,10 @@ ipcMain.handle("terminal:git-action", async (event, value: unknown): Promise<Ope
   return runGitOperation(request as GitActionRequest);
 });
 
-ipcMain.handle("terminal:ssh-profiles", () => sshProfiles);
+ipcMain.handle("terminal:ssh-profiles", async () => {
+  await sshProfilesReady;
+  return sshProfiles;
+});
 ipcMain.handle("terminal:ssh-save", async (_event, value: unknown) => {
   if (!value || typeof value !== "object") throw new Error("Invalid SSH profile");
   const source = value as Partial<SshProfile>;
@@ -2281,12 +2311,12 @@ ipcMain.handle("launcher:install", () => runLauncherAction("Install"));
 ipcMain.handle("launcher:uninstall", () => runLauncherAction("Uninstall"));
 ipcMain.handle("cli-lifecycle:status", () => {
   if (!cliLifecycleBridge) throw new Error("CLI lifecycle bridge is not ready");
-  return cliLifecycleBridge.status();
+  return cliLifecycleReady.then(() => cliLifecycleBridge!.status());
 });
 ipcMain.handle("cli-lifecycle:set-enabled", (_event, enabled: unknown) => {
   if (!cliLifecycleBridge) throw new Error("CLI lifecycle bridge is not ready");
   if (typeof enabled !== "boolean") throw new Error("Invalid CLI lifecycle setting");
-  return cliLifecycleBridge.setEnabled(enabled);
+  return cliLifecycleReady.then(() => cliLifecycleBridge!.setEnabled(enabled));
 });
 
 app.on("second-instance", (_event, argv) => showMainWindow(parseLauncherRequest(argv)));
@@ -2319,11 +2349,24 @@ void app.whenReady().then(async () => {
     helperTemplatePath: cliLifecycleHelperTemplatePath(),
     onEvent: handleCliLifecycleEvent,
   });
-  await Promise.all([prepareTerminalIntegration(), loadSshProfiles(), cliLifecycleBridge.initialize()]);
-  bootTrace("profiles-loaded");
+  // Start optional integrations before the window, but do not make the first
+  // paint wait for filesystem discovery or WSL startup.
+  terminalIntegrationReady = prepareTerminalIntegration();
+  sshProfilesReady = loadSshProfiles();
+  cliLifecycleReady = cliLifecycleBridge.initialize();
+  void Promise.all([terminalIntegrationReady, sshProfilesReady, cliLifecycleReady])
+    .then(() => bootTrace("profiles-loaded"))
+    .catch((reason) => bootTrace(`profiles-error:${reason instanceof Error ? reason.message : String(reason)}`));
   await detectTerminalShells();
   bootTrace("shells-detected");
   updateQuickTerminalShortcut();
   queuedLauncherRequest = parseLauncherRequest(process.argv);
   createWindow();
+  bootTrace("window-created");
+  if (appSettings.shellStartupIntegration) {
+    void runShellStartupAction("Install").then((status) => {
+      if (status.error) bootTrace(`shell-startup-repair-error:${status.error}`);
+      else bootTrace("shell-startup-repaired");
+    });
+  }
 });

@@ -169,11 +169,23 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
         resize();
         return false;
       }
-      if (event.ctrlKey && event.shiftKey && key === "c" && terminal.hasSelection()) {
-        void navigator.clipboard.writeText(terminal.getSelection());
+      if (event.ctrlKey && event.shiftKey && key === "c") {
+        if (terminal.hasSelection()) {
+          copySelection();
+          terminal.clearSelection();
+        }
+        return false;
+      }
+      if (event.ctrlKey && !event.shiftKey && key === "c" && terminal.hasSelection()) {
+        copySelection();
+        terminal.clearSelection();
         return false;
       }
       if (event.ctrlKey && event.shiftKey && key === "v") {
+        void navigator.clipboard.readText().then((text) => { if (text) terminal.paste(text); });
+        return false;
+      }
+      if (event.ctrlKey && !event.shiftKey && key === "v") {
         void navigator.clipboard.readText().then((text) => { if (text) terminal.paste(text); });
         return false;
       }

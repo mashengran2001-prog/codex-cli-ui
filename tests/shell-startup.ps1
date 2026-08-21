@@ -10,6 +10,8 @@ $installScript = Join-Path $workspace "scripts\install-shell-startup.ps1"
 $launchScript = Join-Path $workspace "scripts\launch-ui.ps1"
 $fakeLaunchScript = Join-Path $testRoot "fake-launch-ui.ps1"
 $launchCapture = Join-Path $testRoot "launch-capture.json"
+$agentChildScript = Join-Path $testRoot "agent-child.ps1"
+$agentParentScript = Join-Path $testRoot "agent-parent.cjs"
 $electron = Join-Path $workspace "node_modules\electron\dist\electron.exe"
 $windowsProfile = Join-Path $testRoot "WindowsPowerShell\profile.ps1"
 $powerShellProfile = Join-Path $testRoot "PowerShell\profile.ps1"
@@ -40,6 +42,19 @@ param([string]`$AppExecutable, [string]`$ProjectRoot, [string]`$WorkingDirectory
 [IO.File]::WriteAllText('$captureValue', (`$result | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new(`$false))
 "@
   [IO.File]::WriteAllText($fakeLaunchScript, $fakeLauncher, [Text.UTF8Encoding]::new($false))
+  $agentChild = @"
+param([string]`$HookPath, [string]`$WorkingDirectory)
+& `$HookPath -Origin powershell -ShellProcessId `$PID -WorkingDirectory `$WorkingDirectory
+"@
+  $agentParent = @"
+const { spawnSync } = require("node:child_process");
+const [, , childScript, hookPath, cwd] = process.argv;
+const env = { ...process.env, CODEX_UI_TERMINAL: "", CODEX_UI_SHELL_STARTUP_GUARD: "" };
+const result = spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", childScript, "-HookPath", hookPath, "-WorkingDirectory", cwd], { env, stdio: "inherit" });
+process.exit(result.status ?? 1);
+"@
+  [IO.File]::WriteAllText($agentChildScript, $agentChild, [Text.UTF8Encoding]::new($false))
+  [IO.File]::WriteAllText($agentParentScript, $agentParent, [Text.UTF8Encoding]::new($false))
 
   New-Item -ItemType Directory -Path (Split-Path -Parent $windowsProfile) -Force | Out-Null
   New-Item -ItemType Directory -Path (Split-Path -Parent $powerShellProfile) -Force | Out-Null
@@ -76,12 +91,25 @@ param([string]`$AppExecutable, [string]`$ProjectRoot, [string]`$WorkingDirectory
 
   Remove-Item Env:CODEX_UI_TERMINAL -ErrorAction SilentlyContinue
   Remove-Item Env:CODEX_UI_SHELL_STARTUP_GUARD -ErrorAction SilentlyContinue
-  & $hookPath -WorkingDirectory $workspace
+  & $hookPath -SkipParentCheck -WorkingDirectory $workspace
   if (-not (Test-Path -LiteralPath $launchCapture)) { throw "external PowerShell startup did not request a UI launch" }
   $capture = [IO.File]::ReadAllText($launchCapture) | ConvertFrom-Json
   if ($capture.cwd -ne $workspace) { throw "startup hook did not preserve the external shell directory" }
   if ($capture.guard -ne "1") { throw "startup hook did not guard the launched UI process" }
   if ($env:CODEX_UI_SHELL_STARTUP_GUARD) { throw "startup hook leaked its recursion guard into the shell" }
+
+  Remove-Item -LiteralPath $launchCapture -Force
+  & node $agentParentScript $agentChildScript $hookPath $workspace
+  if ($LASTEXITCODE -ne 0) { throw "agent child-shell fixture failed" }
+  if (Test-Path -LiteralPath $launchCapture) { throw "agent-launched PowerShell requested a UI launch" }
+
+  $hookText = [IO.File]::ReadAllText($hookPath)
+  if ($hookText -notmatch 'explorer.*windowsterminal.*openconsole.*conhost') { throw "interactive shell parent allowlist is missing" }
+  if ($hookText -match 'Origin -eq "cmd".*ParentProcessId') { throw "CMD guard skips past its actual parent process" }
+  $windowsProfileText = [IO.File]::ReadAllText($windowsProfile)
+  if ($windowsProfileText -notmatch '-Origin powershell -ShellProcessId [`$]PID') { throw "PowerShell profile did not pass its process identity to the guard" }
+  $cmdHookText = [IO.File]::ReadAllText($cmdHookPath)
+  if ($cmdHookText -notmatch '-Origin cmd') { throw "CMD hook did not identify its shell origin" }
 
   $reinstall = Invoke-Installer "Install"
   if (-not $reinstall.enabled) { throw "idempotent reinstall disabled integration" }

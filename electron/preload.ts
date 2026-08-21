@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AgentProviderId, AppSettings, CodexBridge, GitActionRequest, LauncherRequest, RunEvent, RunRequest, SftpActionRequest, SshProfile, TerminalCreateRequest, TerminalEvent } from "../src/types";
+import type { AgentProviderId, AppSettings, CodexBridge, GitActionRequest, LauncherRequest, RunEvent, RunRequest, SftpActionRequest, ShellProfile, SshProfile, TerminalCreateRequest, TerminalEvent } from "../src/types";
 
 const bridge: CodexBridge = {
   getInfo: () => ipcRenderer.invoke("codex:info"),
@@ -55,6 +55,11 @@ const bridge: CodexBridge = {
     const handler = (_event: Electron.IpcRendererEvent, value: TerminalEvent) => listener(value);
     ipcRenderer.on("terminal:event", handler);
     return () => ipcRenderer.removeListener("terminal:event", handler);
+  },
+  onShellsChanged: (listener: (shells: ShellProfile[]) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: ShellProfile[]) => listener(value);
+    ipcRenderer.on("terminal:shells-changed", handler);
+    return () => ipcRenderer.removeListener("terminal:shells-changed", handler);
   },
   onQuickTerminal: (listener: () => void) => {
     const handler = () => listener();

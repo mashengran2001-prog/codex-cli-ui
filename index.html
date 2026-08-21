@@ -8,7 +8,31 @@
     <title>Codex CLI UI</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="boot-screen" role="status" aria-live="polite">
+        <div class="boot-mark"><span></span><span></span><span></span><span></span></div>
+        <strong>正在启动工作台</strong>
+        <small>准备终端与 Provider...</small>
+      </div>
+    </div>
+    <style>
+      html, body, #root { width: 100%; height: 100%; margin: 0; }
+      body { overflow: hidden; background: #12151b; font-family: "Segoe UI", system-ui, sans-serif; }
+      .boot-screen { display: grid; width: 100%; height: 100%; place-content: center; justify-items: center; gap: 10px; color: #d8dee9; background: #12151b; }
+      .boot-screen strong { font-size: 13px; font-weight: 650; }
+      .boot-screen small { color: #8791a1; font-size: 10px; }
+      .boot-mark { display: grid; grid-template-columns: repeat(2, 8px); grid-template-rows: repeat(2, 8px); gap: 2px; width: 22px; height: 22px; padding: 2px; border: 1px solid #4e667f; border-radius: 5px; background: #1c2635; }
+      .boot-mark span { border-radius: 2px; background: #d8dee9; }
+      .boot-mark span:nth-child(2) { background: #78aee8; }
+      .boot-mark span:nth-child(3) { background: #77b8aa; }
+      .boot-mark span:nth-child(4) { background: #e6b878; }
+      @media (prefers-color-scheme: light) {
+        body, .boot-screen { background: #f7f7f5; color: #2d2d29; }
+        .boot-screen small { color: #77776f; }
+        .boot-mark { border-color: #bfc6c8; background: #eaedef; }
+        .boot-mark span { background: #2d2d29; }
+      }
+    </style>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

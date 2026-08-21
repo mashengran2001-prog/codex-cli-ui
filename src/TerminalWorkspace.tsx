@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  Bell, Bot, ChevronDown, ChevronLeft, ChevronRight, Columns2, Command, Copy,
+  Bell, Bot, ChevronDown, ChevronLeft, ChevronRight, CircleX, Columns2, Command, Copy,
   FolderOpen, FolderTree, GitBranch, Globe2, GripVertical, LoaderCircle, PanelLeftClose,
-  PanelLeftOpen, Plus, RefreshCw, Rows2, Search, Server, Settings2, SquareTerminal, TerminalSquare, Upload, X,
+  PanelLeftOpen, Pencil, Plus, RefreshCw, Rows2, Search, Server, Settings2, SquareTerminal, TerminalSquare, TriangleAlert, Upload, X,
 } from "lucide-react";
 import BrandIcon from "./BrandIcon";
 import type { AppSettings, CliLifecycleStatus, CliToolInfo, DocumentFile, ProjectRecord, ShellProfile, SshProfile, TerminalEvent, TerminalInfo } from "./types";
@@ -49,6 +49,7 @@ interface SavedLayout {
 }
 
 const layoutKey = "codex-cli-ui:terminal-layout-v3";
+const renameKey = "codex-cli-ui:terminal-renames-v1";
 
 function loadLayout(): SavedLayout {
   try { return JSON.parse(localStorage.getItem(layoutKey) || "{}") as SavedLayout; }
@@ -116,8 +117,17 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const [toolsCollapsed, setToolsCollapsed] = useState(initialLayout.toolsCollapsed || false);
   const [sshCollapsed, setSshCollapsed] = useState(initialLayout.sshCollapsed || false);
   const [draggingSession, setDraggingSession] = useState<string>();
+  const [renames, setRenames] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem(renameKey) || "{}") as Record<string, string>; }
+    catch { return {}; }
+  });
+  const [renamingSession, setRenamingSession] = useState<string>();
+  const [renameDraft, setRenameDraft] = useState("");
+  const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number }>();
   const [commandText, setCommandText] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const tabDragXRef = useRef(0);
+  const tabScrollFrameRef = useRef(0);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [windowFocused, setWindowFocused] = useState(window.document.hasFocus());
   const [terminalStateLoaded, setTerminalStateLoaded] = useState(false);
@@ -197,6 +207,11 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   }, [onError, workbenchCopy]);
 
   useEffect(() => {
+    if (typeof window.codex.onShellsChanged !== "function") return undefined;
+    return window.codex.onShellsChanged(setShells);
+  }, []);
+
+  useEffect(() => {
     if (!terminalStateLoaded || workspaceMode !== "terminal" || !projectPath) return;
     const currentPanes = panesRef.current.filter((id) => sessionsRef.current.some((session) => session.id === id));
     if (currentPanes.some((id) => {
@@ -265,11 +280,26 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
       else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "t") { event.preventDefault(); void createTerminal(active?.cwd || projectPath, { shellId: settings.defaultShellId }); }
       else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "d") { event.preventDefault(); void splitPane("columns"); }
       else if (event.ctrlKey && event.key === ",") { event.preventDefault(); setDrawer(null); setView("settings"); }
-      else if (event.key === "Escape") setPaletteOpen(false);
+      else if (event.key === "Escape") {
+        setPaletteOpen(false);
+        setRenamingSession(undefined);
+        setTabMenu(undefined);
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [active?.cwd, createTerminal, projectPath, settings.defaultShellId, splitPane]);
+
+  useEffect(() => {
+    if (!tabMenu) return;
+    const handler = (event: PointerEvent) => {
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest(".terminal-tab-menu")) return;
+      setTabMenu(undefined);
+    };
+    window.addEventListener("pointerdown", handler, true);
+    return () => window.removeEventListener("pointerdown", handler, true);
+  }, [tabMenu]);
 
   useEffect(() => {
     if (!settings.completionEnabled || !active || !commandText.trim()) { setSuggestions([]); return; }
@@ -305,6 +335,51 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     next.splice(target, 0, item);
     return next;
   });
+
+  const persistRenames = (next: Record<string, string>) => {
+    setRenames(next);
+    try { localStorage.setItem(renameKey, JSON.stringify(next)); } catch { /* Renames are cosmetic and safe to drop. */ }
+  };
+
+  const startRename = (sessionId: string) => {
+    setRenamingSession(sessionId);
+    setRenameDraft(renames[sessionId] || sessions.find((item) => item.id === sessionId)?.title || "");
+    setTabMenu(undefined);
+  };
+
+  const commitRename = () => {
+    if (renamingSession) {
+      const next = { ...renames };
+      const value = renameDraft.trim();
+      if (value) next[renamingSession] = value;
+      else delete next[renamingSession];
+      persistRenames(next);
+    }
+    setRenamingSession(undefined);
+  };
+
+  const tabDisplayTitle = (session: TerminalInfo) => renames[session.id] || session.title;
+
+  useEffect(() => {
+    if (!draggingSession) {
+      cancelAnimationFrame(tabScrollFrameRef.current);
+      return;
+    }
+    const tick = () => {
+      const strip = window.document.querySelector<HTMLElement>(".terminal-top-tabs");
+      if (!strip || !draggingSession) return;
+      const rect = strip.getBoundingClientRect();
+      const edge = 44;
+      const left = Math.max(0, edge - (tabDragXRef.current - rect.left));
+      const right = Math.max(0, edge - (rect.right - tabDragXRef.current));
+      const speed = Math.min(18, Math.max(3, (left || right) / 3));
+      if (left > 0) strip.scrollLeft -= speed;
+      else if (right > 0) strip.scrollLeft += speed;
+      tabScrollFrameRef.current = requestAnimationFrame(tick);
+    };
+    tabScrollFrameRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(tabScrollFrameRef.current);
+  }, [draggingSession]);
 
   const dockSession = (sessionId: string, paneIndex: number, edge: "center" | "left" | "right" | "top" | "bottom") => {
     if (edge === "center") { assignSession(sessionId, paneIndex); return; }
@@ -438,11 +513,46 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
           <button className={view === "settings" ? "active" : ""} title={view === "settings" ? workbenchCopy.back : workbenchCopy.settings} onClick={() => view === "settings" ? setView("terminal") : openSettings()}>{view === "settings" ? (workspaceMode === "chat" ? <Bot size={14} /> : <TerminalSquare size={14} />) : <Settings2 size={14} />}</button>
         </div>
       </header>
+      {primaryView && terminalView && sessions.length > 0 && (
+        <div className="terminal-top-tabs" role="tablist" aria-label={workbenchCopy.topTabs} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; tabDragXRef.current = event.clientX; }}>
+          {sessions.map((session) => (
+            <div
+              className={`terminal-top-tab ${panes.includes(session.id) ? "active" : ""}`}
+              data-session-id={session.id}
+              key={session.id}
+              draggable
+              onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }}
+              onAuxClick={(event) => { if (event.button !== 1) return; event.preventDefault(); event.stopPropagation(); void closeTerminal(session.id); }}
+              onContextMenu={(event) => { event.preventDefault(); setTabMenu({ sessionId: session.id, x: event.clientX, y: event.clientY }); }}
+              onDragStart={(event) => { setDraggingSession(session.id); event.dataTransfer.setData("text/terminal-session", session.id); event.dataTransfer.effectAllowed = "move"; }}
+              onDragEnd={() => setDraggingSession(undefined)}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const source = event.dataTransfer.getData("text/terminal-session"); if (source) reorderSession(source, session.id); setDraggingSession(undefined); }}
+            >
+              <button className="terminal-tab-main" title={session.cwd} onClick={() => assignSession(session.id)}>
+                <span className={`terminal-state ${session.status} ${session.activity} ${unread.has(session.id) ? "unread" : ""}`}>{session.activity === "running" ? <LoaderCircle className="spin" size={11} /> : session.activity === "attention" ? <TriangleAlert size={11} /> : session.status === "exited" ? <CircleX size={11} /> : undefined}</span>
+                {terminalIcon(session)}
+                {renamingSession === session.id
+                  ? <input className="terminal-rename-input" autoFocus value={renameDraft} aria-label={workbenchCopy.renameTerminal} placeholder={workbenchCopy.renameTabPlaceholder} onClick={(event) => event.stopPropagation()} onChange={(event) => setRenameDraft(event.target.value)} onBlur={commitRename} onKeyDown={(event) => { if (event.key === "Enter") commitRename(); else if (event.key === "Escape") setRenamingSession(undefined); }} />
+                  : <span className="terminal-tab-title">{tabDisplayTitle(session)}</span>}
+                {session.activity === "idle" && <em>{shellTag(session)}</em>}
+              </button>
+              <button className="terminal-tab-close" title={workbenchCopy.closeTerminal} onClick={() => void closeTerminal(session.id)}><X size={11} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      {tabMenu && (
+        <div className="terminal-tab-menu" style={{ left: tabMenu.x, top: tabMenu.y }} onClick={(event) => event.stopPropagation()}>
+          <button onClick={() => startRename(tabMenu.sessionId)}><Pencil size={12} />{workbenchCopy.renameTerminal}</button>
+          <button className="danger" onClick={() => { const id = tabMenu.sessionId; setTabMenu(undefined); void closeTerminal(id); }}><X size={12} />{workbenchCopy.closeTerminal}</button>
+        </div>
+      )}
       <div className="terminal-main">
         {showSidePanel && chatView && <aside className="terminal-side-panel chat-side-panel">{chatSidebar}</aside>}
         {showSidePanel && terminalView && <aside className="terminal-side-panel">
           <div className="side-section-heading"><button title={workbenchCopy.toggleTabs} onClick={() => setTabsCollapsed((value) => !value)}>{tabsCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}<strong>{workbenchCopy.tabs}</strong></button><span>{sessions.length}</span><button title={workbenchCopy.newTerminal} onClick={() => void createTerminal(active?.cwd || projectPath, { reuseExisting: false, shellId: settings.defaultShellId })}><Plus size={13} /></button></div>
-          {!tabsCollapsed && <div className="terminal-side-tabs">{sessions.map((session) => <div className={`terminal-tab ${panes.includes(session.id) ? "active" : ""}`} data-session-id={session.id} key={session.id} draggable onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }} onAuxClick={(event) => { if (event.button !== 1) return; event.preventDefault(); event.stopPropagation(); void closeTerminal(session.id); }} onDragStart={(event) => { setDraggingSession(session.id); event.dataTransfer.setData("text/terminal-session", session.id); }} onDragEnd={() => setDraggingSession(undefined)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const source = event.dataTransfer.getData("text/terminal-session"); if (source) reorderSession(source, session.id); }}><button className="terminal-tab-main" title={session.cwd} onClick={() => assignSession(session.id)}><span className={`terminal-state ${session.status} ${session.activity} ${unread.has(session.id) ? "unread" : ""}`}>{session.activity === "running" && <LoaderCircle className="spin" size={11} />}</span>{terminalIcon(session)}<span><strong>{session.title}</strong><small>{session.activity === "running" ? session.activeCommand : session.remoteHost || session.cwd}</small></span>{session.activity === "idle" && <em>{shellTag(session)}</em>}</button><button className="terminal-tab-close" title={workbenchCopy.closeTerminal} onClick={() => void closeTerminal(session.id)}><X size={11} /></button></div>)}</div>}
+          {!tabsCollapsed && <div className="terminal-side-tabs">{sessions.map((session) => <div className={`terminal-tab ${panes.includes(session.id) ? "active" : ""}`} data-session-id={session.id} key={session.id} draggable onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }} onAuxClick={(event) => { if (event.button !== 1) return; event.preventDefault(); event.stopPropagation(); void closeTerminal(session.id); }} onContextMenu={(event) => { event.preventDefault(); setTabMenu({ sessionId: session.id, x: event.clientX, y: event.clientY }); }} onDragStart={(event) => { setDraggingSession(session.id); event.dataTransfer.setData("text/terminal-session", session.id); }} onDragEnd={() => setDraggingSession(undefined)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const source = event.dataTransfer.getData("text/terminal-session"); if (source) reorderSession(source, session.id); }}><button className="terminal-tab-main" title={session.cwd} onClick={() => assignSession(session.id)}><span className={`terminal-state ${session.status} ${session.activity} ${unread.has(session.id) ? "unread" : ""}`}>{session.activity === "running" ? <LoaderCircle className="spin" size={11} /> : session.activity === "attention" ? <TriangleAlert size={11} /> : session.status === "exited" ? <CircleX size={11} /> : undefined}</span>{terminalIcon(session)}<span><strong>{tabDisplayTitle(session)}</strong><small>{session.activity === "running" ? session.activeCommand : session.remoteHost || session.cwd}</small></span>{session.activity === "idle" && <em>{shellTag(session)}</em>}</button><button className="terminal-tab-close" title={workbenchCopy.closeTerminal} onClick={() => void closeTerminal(session.id)}><X size={11} /></button></div>)}</div>}
           <div className="side-section-heading cli-tools-heading"><button title={workbenchCopy.toggleCliTools} onClick={() => setToolsCollapsed((value) => !value)}>{toolsCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}<strong>{workbenchCopy.cliTools}</strong></button><span>{cliTools.length}</span><button title={workbenchCopy.cliToolSettings} onClick={openSettings}><Settings2 size={12} /></button></div>
           {!toolsCollapsed && <div className="cli-tool-list">{cliTools.map((tool) => <button className={tool.available ? "available" : "unavailable"} title={tool.available ? workbenchCopy.launchTool(tool.name) : tool.installCommand || workbenchCopy.toolNotDetected(tool.name)} onClick={() => void launchCliTool(tool)} key={tool.id}>{cliToolIcon(tool)}<span className="cli-tool-copy"><strong>{tool.name}</strong><small>{tool.available ? tool.description : workbenchCopy.toolNotInstalled}</small></span><i className={tool.available ? "online" : "offline"} /></button>)}</div>}
           <div className="side-section-heading ssh-heading"><button title={workbenchCopy.toggleSshHosts} onClick={() => setSshCollapsed((value) => !value)}>{sshCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}<strong>{workbenchCopy.sshHosts}</strong></button><span>{sshProfiles.length}</span><button title={workbenchCopy.newSshHost} onClick={() => setSshEditor("new")}><Plus size={13} /></button></div>

@@ -373,6 +373,7 @@ export interface CodexBridge {
   setCliLifecycleEnabled(enabled: boolean): Promise<CliLifecycleStatus>;
   onRunEvent(listener: (event: RunEvent) => void): () => void;
   onTerminalEvent(listener: (event: TerminalEvent) => void): () => void;
+  onShellsChanged(listener: (shells: ShellProfile[]) => void): () => void;
   onQuickTerminal(listener: () => void): () => void;
   onLauncherRequest(listener: (request: LauncherRequest) => void): () => void;
 }
