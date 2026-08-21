@@ -44,6 +44,8 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   newTabPlacement: "after-active",
   cursorStyle: "bar",
   cursorBlink: true,
+  cellWidth: "compact",
+  completionStyle: "inline",
   bellSound: true,
   resumeAiSessions: true,
   loadShellProfile: false,

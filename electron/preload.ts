@@ -19,6 +19,7 @@ const bridge: CodexBridge = {
   listShells: () => ipcRenderer.invoke("terminal:shells"),
   listCliTools: () => ipcRenderer.invoke("terminal:cli-tools"),
   getCommandHistory: (prefix: string, cwd: string) => ipcRenderer.invoke("terminal:history", prefix, cwd),
+  getCompletions: (prefix: string, cwd: string) => ipcRenderer.invoke("terminal:completions", prefix, cwd),
   listTerminals: () => ipcRenderer.invoke("terminal:list"),
   createTerminal: (request: TerminalCreateRequest) => ipcRenderer.invoke("terminal:create", request),
   resumeAiSession: (id: string) => ipcRenderer.invoke("terminal:ai-resume", id),

@@ -39,6 +39,8 @@ try {
     const sessionId = window.__mock.terminalSessions[0].id;
     window.__mock.terminalListeners.forEach((listener) => listener({ sessionId, type: "bell" }));
   });
+  // 响铃时分屏工具栏闪烁（bell flash 指示）
+  await page.locator(".pane-toolbar.bell-flash").waitFor();
   await page.getByText("需要处理").waitFor();
   await page.locator(".terminal-notice").click();
   await page.getByRole("button", { name: "命令面板" }).click();
@@ -143,6 +145,11 @@ try {
   await page.getByLabel("界面密度").selectOption("compact");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).density, "compact");
   assert.equal(await page.locator(".terminal-workspace").getAttribute("data-density"), "compact");
+  // 补全样式与字符宽度：选择弹窗候选与宽松并断言持久化
+  await page.getByLabel("补全样式").selectOption("popup");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).completionStyle, "popup");
+  await page.getByLabel("字符宽度").selectOption("relaxed");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).cellWidth, "relaxed");
   // 新标签位置：切换为追加到末尾并断言持久化
   await page.getByLabel("新标签页位置").selectOption("end");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).newTabPlacement, "end");
@@ -152,6 +159,74 @@ try {
   await page.getByLabel("字体族").fill("");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).fontFamily, "");
   await page.getByRole("button", { name: "返回工作台" }).click();
+
+  // 弹窗补全：输入命令后弹出候选列表；Tab 接受、Esc 关闭
+  await page.locator(".command-dock input").fill("npm run");
+  await page.locator(".completion-popup").waitFor();
+  assert.equal(await page.locator(".completion-popup button").count(), 2);
+  assert.match(await page.locator(".completion-popup").textContent(), /历史/);
+  assert.match(await page.locator(".completion-popup").textContent(), /命令/);
+  // Tab 接受高亮候选（默认首个）；再验证方向键切换候选
+  await page.locator(".command-dock input").press("Tab");
+  assert.equal(await page.locator(".command-dock input").inputValue(), "npm run --help");
+  await page.locator(".command-dock input").fill("npm run");
+  await page.locator(".completion-popup").waitFor();
+  await page.locator(".command-dock input").press("ArrowDown");
+  await page.locator(".command-dock input").press("Tab");
+  assert.equal(await page.locator(".command-dock input").inputValue(), "npm run.ps1");
+  await page.locator(".command-dock input").press("Escape");
+  await page.locator(".command-dock input").fill("");
+  // 恢复默认补全样式与字符宽度，避免影响后续用例
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.locator(".terminal-settings").waitFor();
+  await page.getByLabel("补全样式").selectOption("inline");
+  await page.getByLabel("字符宽度").selectOption("compact");
+  await page.getByRole("button", { name: "返回工作台" }).click();
+
+  // 拖拽标签到分屏左缘：dock 为左右分屏并持久化分屏树
+  const beforeDockTabs = await page.locator(".terminal-top-tab").count();
+  // 新建两个终端，再把第一个会话放回 pane，让最后一个会话保持“未分配”作为拖拽源
+  await page.locator(".terminal-side-panel").getByRole("button", { name: "新建终端" }).first().click();
+  await page.waitForFunction((count) => document.querySelectorAll(".terminal-top-tab").length === count + 1, beforeDockTabs);
+  await page.locator(".terminal-side-panel").getByRole("button", { name: "新建终端" }).first().click();
+  await page.waitForFunction((count) => document.querySelectorAll(".terminal-top-tab").length === count + 2, beforeDockTabs);
+  const firstSessionId = await page.locator(".terminal-top-tab").first().getAttribute("data-session-id");
+  await page.locator(".terminal-top-tab").nth(0).locator(".terminal-tab-main").click();
+  await page.waitForFunction((sessionId) => document.querySelector(".terminal-pane-leaf")?.getAttribute("data-session-id") === sessionId, firstSessionId);
+  const dockSourceId = await page.locator(".terminal-top-tab").last().getAttribute("data-session-id");
+  const dockTargetId = await page.locator(".terminal-pane-leaf").first().getAttribute("data-session-id");
+  assert.notEqual(dockSourceId, dockTargetId, "拖拽源应不同于 pane 会话，否则属于自拖");
+  const dockSource = page.locator(`.terminal-top-tab[data-session-id="${dockSourceId}"]`);
+  const dockTarget = page.locator(`.terminal-pane-leaf[data-session-id="${dockTargetId}"]`);
+  await dockTarget.waitFor();
+  const dockLeafCountBefore = await page.locator(".terminal-pane-leaf").count();
+  // 用 CDP 派发受信拖拽事件：按住标签 → 拖到目标 pane 左缘中部 → 松开触发 dock
+  // （React 19 会忽略合成 DragEvent，必须走受信事件流）
+  const cdp = await context.newCDPSession(page);
+  const dockSourceBox = await dockSource.boundingBox();
+  const dockTargetBox = await dockTarget.boundingBox();
+  assert.ok(dockSourceBox && dockTargetBox, "dock 拖拽起点/目标可用");
+  const dockStartX = dockSourceBox.x + dockSourceBox.width * 0.3;
+  const dockStartY = dockSourceBox.y + dockSourceBox.height / 2;
+  const dockDropX = dockTargetBox.x + 2;
+  const dockDropY = dockTargetBox.y + 34 + (dockTargetBox.height - 34) * 0.5;
+  const dockDragData = { items: [{ mimeType: "text/terminal-session", data: dockSourceId }], dragOperationsMask: 1 | 2 | 16 };
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: dockStartX, y: dockStartY, button: "left", clickCount: 1 });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: dockStartX + 10, y: dockStartY + 6, button: "left", buttons: 1 });
+  await page.waitForTimeout(120);
+  await cdp.send("Input.dispatchDragEvent", { type: "dragEnter", x: dockDropX, y: dockDropY, data: dockDragData });
+  await cdp.send("Input.dispatchDragEvent", { type: "dragOver", x: dockDropX, y: dockDropY, data: dockDragData });
+  await page.locator(".dock-overlay").waitFor();
+  await page.waitForFunction((targetId) => document.querySelector(`.terminal-pane-leaf[data-session-id="${targetId}"]`)?.classList.contains("dock-left"), dockTargetId);
+  await page.waitForTimeout(150);
+  await cdp.send("Input.dispatchDragEvent", { type: "drop", x: dockDropX, y: dockDropY, data: dockDragData });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: dockDropX, y: dockDropY, button: "left", clickCount: 1 });
+  await page.waitForFunction((count) => document.querySelectorAll(".terminal-pane-leaf").length === count + 1, dockLeafCountBefore);
+  const dockedTree = await page.evaluate(() => JSON.parse(localStorage.getItem("codex-cli-ui:terminal-layout-v4") || "{}").tree ?? null);
+  assert.equal(dockedTree?.type === "split" && dockedTree.direction === "columns" ? dockedTree.children[0].sessionId : null, dockSourceId);
+  // 收回分屏，后续用例保持单 pane 布局假设
+  await page.locator(".terminal-pane-leaf").nth(1).getByRole("button", { name: "关闭分屏" }).click();
+  await page.waitForFunction(() => document.querySelectorAll(".terminal-pane-leaf").length === 1);
 
   const tabCountBeforeMiddleClick = await page.locator(".terminal-tab").count();
   await page.locator(".terminal-tab").nth(1).click({ button: "middle" });

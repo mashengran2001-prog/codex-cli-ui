@@ -15,6 +15,8 @@ interface TerminalPaneProps {
   cursorStyle: TerminalCursorStyle;
   cursorBlink: boolean;
   fontFamily: string;
+  cellWidth: "compact" | "relaxed";
+  bellFlash: boolean;
   copyOnSelect: boolean;
   active: boolean;
   onFocus(): void;
@@ -46,7 +48,7 @@ function quotePath(path: string, session: TerminalInfo) {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
-export default function TerminalPane({ session, theme, cursorStyle, cursorBlink, fontFamily, copyOnSelect, active, onFocus }: TerminalPaneProps) {
+export default function TerminalPane({ session, theme, cursorStyle, cursorBlink, fontFamily, cellWidth, bellFlash, copyOnSelect, active, onFocus }: TerminalPaneProps) {
   const copy = useUiCopy().workbench;
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTerm | undefined>(undefined);
@@ -69,7 +71,8 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
       cursorInactiveStyle: "outline",
       fontFamily: fontFamily.trim() || DEFAULT_FONT_STACK,
       fontSize: 12,
-      lineHeight: 1.2,
+      lineHeight: cellWidth === "relaxed" ? 1.35 : 1.2,
+      letterSpacing: cellWidth === "relaxed" ? 1 : 0,
       reflowCursorLine: true,
       rescaleOverlappingGlyphs: true,
       scrollback: 10_000,
@@ -275,6 +278,20 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
       } catch { /* Font swap can race with layout changes. */ }
     });
   }, [fontFamily]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const relaxed = cellWidth === "relaxed";
+    terminal.options.lineHeight = relaxed ? 1.35 : 1.2;
+    terminal.options.letterSpacing = relaxed ? 1 : 0;
+    window.requestAnimationFrame(() => {
+      try {
+        fitRef.current?.fit();
+        void window.codex.resizeTerminal(session.id, terminal.cols, terminal.rows);
+      } catch { /* Cell-width swap can race with layout changes. */ }
+    });
+  }, [cellWidth, session.id]);
 
   useEffect(() => {
     if (!active) return;

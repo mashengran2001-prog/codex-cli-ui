@@ -153,6 +153,10 @@ export async function installMockBridge(page) {
         { id: "builtin:claude", name: "Claude Code", command: "claude", args: [], icon: "code", description: "Anthropic Claude Code", builtIn: true, available: false, installCommand: "npm install -g @anthropic-ai/claude-code" },
       ],
       getCommandHistory: async (prefix) => prefix ? [`${prefix} --help`] : [],
+      getCompletions: async (prefix) => prefix ? [
+        { value: `${prefix} --help`, source: "history" },
+        { value: `${prefix}.ps1`, source: "command" },
+      ] : [],
       listTerminals: async () => [...terminalSessions],
       createTerminal: async (request) => {
         const existing = request.reuseExisting !== false && terminalSessions.find((item) => item.cwd.toLowerCase() === request.cwd.toLowerCase() && item.status === "running");

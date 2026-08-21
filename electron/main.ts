@@ -31,6 +31,7 @@ import type {
   CliProfile,
   CliToolInfo,
   CodexInfo,
+  CompletionCandidate,
   DocumentFile,
   FileSystemEntry,
   GitActionRequest,
@@ -164,6 +165,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   cursorStyle: "bar",
   cursorBlink: true,
   fontFamily: "",
+  cellWidth: "compact",
+  completionStyle: "inline",
   bellSound: true,
   resumeAiSessions: true,
   loadShellProfile: false,
@@ -605,6 +608,8 @@ function normalizeAppSettings(value: Partial<AppSettings> | null | undefined): A
     fontFamily: typeof value?.fontFamily === "string"
       ? value.fontFamily.replace(/[^\p{L}\p{N} ,"'-]/gu, "").slice(0, 240)
       : "",
+    cellWidth: value?.cellWidth === "relaxed" ? "relaxed" : "compact",
+    completionStyle: value?.completionStyle === "popup" ? "popup" : "inline",
     bellSound: value?.bellSound !== false,
     resumeAiSessions: value?.resumeAiSessions !== false,
     loadShellProfile: value?.loadShellProfile === true,
@@ -2336,6 +2341,74 @@ ipcMain.handle("terminal:history", async (_event, prefix: unknown, cwd: unknown)
   } catch {
     return [];
   }
+});
+
+ipcMain.handle("terminal:completions", async (_event, prefix: unknown, cwd: unknown) => {
+  if (typeof prefix !== "string" || prefix.length > 4096 || typeof cwd !== "string" || cwd.length > 4096) return [];
+  const trimmed = prefix.trim();
+  if (!trimmed) return [];
+  const spaceIndex = trimmed.lastIndexOf(" ");
+  const before = spaceIndex >= 0 ? trimmed.slice(0, spaceIndex + 1) : "";
+  const token = spaceIndex >= 0 ? trimmed.slice(spaceIndex + 1) : trimmed;
+  const lower = token.toLowerCase();
+  const seen = new Set<string>();
+  const out: CompletionCandidate[] = [];
+  const push = (value: string, source: CompletionCandidate["source"]) => {
+    const key = value.toLowerCase();
+    if (seen.has(key) || value.length > 4096) return;
+    seen.add(key);
+    out.push({ value, source });
+  };
+  // 1. Shared command history for this working directory (whole-line prefix match).
+  try {
+    const content = (await readFile(commandHistoryPath(), "utf8")).slice(-2 * 1024 * 1024);
+    const expected = normalizePath(cwd);
+    for (const line of content.split(/\r?\n/).reverse()) {
+      try {
+        const record = JSON.parse(line) as { command?: unknown; cwd?: unknown };
+        if (typeof record.command !== "string" || typeof record.cwd !== "string" || normalizePath(record.cwd) !== expected) continue;
+        if (!record.command.toLowerCase().startsWith(trimmed.toLowerCase()) || record.command === trimmed) continue;
+        push(record.command, "history");
+        if (out.length >= 8) return out;
+      } catch { /* Skip partial history records. */ }
+    }
+  } catch { /* No shared history yet. */ }
+  // 2. Files and directories under the pane's working directory.
+  try {
+    const entries = await readdir(cwd, { withFileTypes: true });
+    const visible = (entry: Dirent) => entry.name.toLowerCase().startsWith(lower) && (entry.name.startsWith(".") ? token.startsWith(".") : true);
+    const dirs = entries.filter((entry) => entry.isDirectory() && visible(entry));
+    const files = entries.filter((entry) => !entry.isDirectory() && visible(entry));
+    const pick = (entry: Dirent, source: "dir" | "file") => {
+      if (out.length >= 8) return false;
+      push(`${before}${entry.name}`, source);
+      return true;
+    };
+    for (const entry of dirs.sort((a, b) => a.name.localeCompare(b.name))) if (!pick(entry, "dir")) return out;
+    for (const entry of files.sort((a, b) => a.name.localeCompare(b.name))) if (!pick(entry, "file")) return out;
+  } catch { /* Remote or missing cwd: no filesystem candidates. */ }
+  // 3. PATH executables (only in command position).
+  if (!before) {
+    const pathDirs = (process.env.PATH || "").split(";").filter((dir) => dir && isAbsolute(dir));
+    const exts = new Set<string>();
+    if (process.platform === "win32") {
+      for (const ext of (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";")) if (ext) exts.add(ext.toLowerCase());
+      exts.add(".ps1");
+    }
+    for (const dir of pathDirs) {
+      if (out.length >= 8) return out;
+      let names: string[];
+      try { names = await readdir(dir); } catch { continue; }
+      for (const name of names) {
+        if (out.length >= 8) return out;
+        const lowerName = name.toLowerCase();
+        if (!lowerName.startsWith(lower) || lowerName === lower) continue;
+        const executable = process.platform === "win32" ? [...exts].some((ext) => lowerName.endsWith(ext)) : !name.includes(".");
+        if (executable) push(name, "command");
+      }
+    }
+  }
+  return out;
 });
 
 ipcMain.handle("terminal:create", async (event, value: unknown) => {

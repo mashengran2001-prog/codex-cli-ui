@@ -80,6 +80,8 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <Toggle label={copy.terminalBell} checked={settings.bellSound} onChange={(value) => update("bellSound", value)} />
           <Toggle label={copy.loadPowerShellProfile} checked={settings.loadShellProfile} onChange={(value) => update("loadShellProfile", value)} />
           <Toggle label={copy.completions} checked={settings.completionEnabled} onChange={(value) => update("completionEnabled", value)} />
+          <div className="settings-row"><label>{copy.completionStyle}</label><select aria-label={copy.completionStyle} value={settings.completionStyle} onChange={(event) => update("completionStyle", event.target.value as AppSettings["completionStyle"])}><option value="inline">{copy.completionInline}</option><option value="popup">{copy.completionPopup}</option></select></div>
+          <div className="settings-row"><label>{copy.cellWidth}</label><select aria-label={copy.cellWidth} value={settings.cellWidth} onChange={(event) => update("cellWidth", event.target.value as AppSettings["cellWidth"])}><option value="compact">{copy.cellWidthCompact}</option><option value="relaxed">{copy.cellWidthRelaxed}</option></select></div>
           <Toggle label={copy.copyOnSelect} checked={settings.copyOnSelect} onChange={(value) => update("copyOnSelect", value)} />
           <Toggle label={copy.powerlinePrompt} checked={settings.powerlinePrompt} onChange={(value) => update("powerlinePrompt", value)} />
           <Toggle label={copy.restoreTabs} checked={settings.restoreTerminalTabs} onChange={(value) => update("restoreTerminalTabs", value)} />

@@ -104,11 +104,18 @@ export interface AppSettings {
   cursorStyle: TerminalCursorStyle;
   cursorBlink: boolean;
   fontFamily: string;
+  cellWidth: "compact" | "relaxed";
+  completionStyle: "inline" | "popup";
   bellSound: boolean;
   resumeAiSessions: boolean;
   loadShellProfile: boolean;
   cliProfiles: CliProfile[];
   keybindings: Record<KeybindingAction, string>;
+}
+
+export interface CompletionCandidate {
+  value: string;
+  source: "history" | "dir" | "file" | "command";
 }
 
 export interface LauncherStatus {
@@ -387,6 +394,7 @@ export interface CodexBridge {
   listShells(): Promise<ShellProfile[]>;
   listCliTools(): Promise<CliToolInfo[]>;
   getCommandHistory(prefix: string, cwd: string): Promise<string[]>;
+  getCompletions(prefix: string, cwd: string): Promise<CompletionCandidate[]>;
   listTerminals(): Promise<TerminalInfo[]>;
   createTerminal(request: TerminalCreateRequest): Promise<TerminalInfo>;
   resumeAiSession(id: string): Promise<boolean>;

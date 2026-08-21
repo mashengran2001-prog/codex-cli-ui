@@ -6,7 +6,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import BrandIcon from "./BrandIcon";
-import type { AppSettings, CliLifecycleStatus, CliToolInfo, DocumentFile, ProjectRecord, ShellProfile, SshProfile, TerminalEvent, TerminalInfo } from "./types";
+import type { AppSettings, CliLifecycleStatus, CliToolInfo, CompletionCandidate, DocumentFile, ProjectRecord, ShellProfile, SshProfile, TerminalEvent, TerminalInfo } from "./types";
 import { getWorkbenchCopy } from "./i18n";
 import { keybindingMatches } from "./keybindings";
 import CommandPalette, { type PaletteAction } from "./terminal/CommandPalette";
@@ -74,6 +74,13 @@ const colorKey = "codex-cli-ui:terminal-colors-v1";
 const stageDockId = "_stage";
 
 const TAB_COLORS = ["#e06c75", "#d19a66", "#e5c07b", "#98c379", "#56b6c2", "#61afef", "#c678dd"];
+
+const completionSourceLabels = {
+  history: "completionHistory",
+  dir: "completionDir",
+  file: "completionFile",
+  command: "completionCommand",
+} as const;
 
 function loadLayout(): SavedLayout {
   try { return JSON.parse(localStorage.getItem(layoutKey) || "{}") as SavedLayout; }
@@ -294,6 +301,9 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const [dockTarget, setDockTarget] = useState<{ sessionId: string; edge: DockEdge } | null>(null);
   const [commandText, setCommandText] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [completionCandidates, setCompletionCandidates] = useState<CompletionCandidate[]>([]);
+  const [completionDismissed, setCompletionDismissed] = useState(false);
+  const [bellFlash, setBellFlash] = useState<Set<string>>(new Set());
   const tabDragXRef = useRef(0);
   const tabScrollFrameRef = useRef(0);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
@@ -433,6 +443,12 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
       setNotice({ sessionId: event.sessionId, title: previous?.title || workbenchCopy.terminal, message: workbenchCopy.processExited(event.code) });
     } else if (event.type === "bell") {
       setNotice({ sessionId: event.sessionId, title: previous?.title || workbenchCopy.terminal, message: previous?.activity === "attention" ? workbenchCopy.inputRequested : workbenchCopy.attentionRequested });
+      setBellFlash((current) => new Set(current).add(event.sessionId));
+      window.setTimeout(() => setBellFlash((current) => {
+        const next = new Set(current);
+        next.delete(event.sessionId);
+        return next;
+      }), 700);
     } else if (event.type === "focus") assignSession(event.sessionId);
     else if (event.type === "error" && event.message) onError(event.message);
   }), [assignSession, onError, workbenchCopy]);
@@ -469,6 +485,20 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     const index = ids.indexOf(activeSessionIdRef.current ?? "");
     const next = ids[(index < 0 ? 0 : index + offset + ids.length) % ids.length];
     setActiveSessionId(next);
+    setView("terminal");
+    onWorkspaceModeChange("terminal");
+  }, [onWorkspaceModeChange]);
+
+  const resetLayout = useCallback(() => {
+    const ids = collectLeafIds(treeRef.current);
+    const keep = activeSessionIdRef.current && ids.includes(activeSessionIdRef.current)
+      ? activeSessionIdRef.current
+      : ids[0] ?? sessionsRef.current[0]?.id;
+    if (!keep) return;
+    // Collapse back to a single pane; other sessions stay alive in the tab list
+    // and can be re-docked by dragging them back in.
+    setPaneTree({ type: "leaf", sessionId: keep });
+    setActiveSessionId(keep);
     setView("terminal");
     onWorkspaceModeChange("terminal");
   }, [onWorkspaceModeChange]);
@@ -545,14 +575,21 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   }, [tabMenu]);
 
   useEffect(() => {
-    if (!settings.completionEnabled || !active || !commandText.trim()) { setSuggestions([]); return; }
+    if (!settings.completionEnabled || !active || !commandText.trim() || completionDismissed) { setSuggestions([]); setCompletionCandidates([]); return; }
     let cancelled = false;
     const timeout = window.setTimeout(async () => {
-      const history = await window.codex.getCommandHistory(commandText, active.cwd);
-      if (!cancelled) { setSuggestions(history); setSuggestionIndex(0); }
+      if (settings.completionStyle === "popup") {
+        const items = await window.codex.getCompletions(commandText, active.cwd);
+        if (!cancelled) { setCompletionCandidates(items); setSuggestionIndex(0); }
+      } else {
+        const history = await window.codex.getCommandHistory(commandText, active.cwd);
+        if (!cancelled) { setSuggestions(history); setSuggestionIndex(0); }
+      }
     }, 90);
     return () => { cancelled = true; window.clearTimeout(timeout); };
-  }, [active?.cwd, active?.id, commandText, settings.completionEnabled]);
+  }, [active?.cwd, active?.id, commandText, completionDismissed, settings.completionEnabled, settings.completionStyle]);
+
+  useEffect(() => { setCompletionDismissed(false); }, [commandText]);
 
   const closePane = (sessionId: string) => {
     setPaneTree((current) => removeLeaf(current, sessionId));
@@ -800,6 +837,14 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     void window.codex.writeTerminal(active.id, `${command}\r`);
     setCommandText("");
     setSuggestions([]);
+    setCompletionCandidates([]);
+  };
+
+  const acceptCompletion = (value: string) => {
+    setCommandText(value);
+    setCompletionCandidates([]);
+    setSuggestions([]);
+    setCompletionDismissed(true);
   };
 
   const openSftp = (profile: SshProfile) => { setSelectedSsh(profile); setDrawer("sftp"); };
@@ -845,6 +890,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     { id: "next-terminal", group: workbenchCopy.terminalActions, label: workbenchCopy.nextTerminal, icon: <ChevronRight size={14} />, run: () => { if (!sessions.length) return; const index = Math.max(0, sessions.findIndex((session) => session.id === active?.id)); assignSession(sessions[(index + 1) % sessions.length].id); } },
     { id: "split-columns", group: workbenchCopy.layout, label: workbenchCopy.splitRight, icon: <Columns2 size={14} />, run: () => void splitPane("columns") },
     { id: "split-rows", group: workbenchCopy.layout, label: workbenchCopy.splitDown, icon: <Rows2 size={14} />, run: () => void splitPane("rows") },
+    { id: "reset-layout", group: workbenchCopy.layout, label: workbenchCopy.resetLayout, icon: <RotateCcw size={14} />, run: resetLayout },
     { id: "sidebar", group: workbenchCopy.layout, label: workbenchCopy.showTabSidebar, icon: sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />, checked: !sidebarCollapsed, run: () => setSidebarCollapsed((value) => !value) },
     { id: "resize", group: workbenchCopy.layout, label: workbenchCopy.resizePanels, icon: <GripVertical size={14} />, checked: settings.resizablePanels, run: () => onSettingsChange({ ...settings, resizablePanels: !settings.resizablePanels }) },
     { id: "files", group: workbenchCopy.workspace, label: workbenchCopy.files, icon: <FolderTree size={14} />, checked: drawer === "files", run: () => setDrawer((value) => value === "files" ? null : "files") },
@@ -908,7 +954,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
         onDragOver={(event) => handlePaneDragOver(event, session.id)}
         onDrop={(event) => handlePaneDrop(event, session.id)}
       >
-        <div className="pane-toolbar">
+        <div className={`pane-toolbar${bellFlash.has(session.id) ? " bell-flash" : ""}`}>
           <span>{terminalIcon(session)}<strong>{tabDisplayTitle(session)}</strong><small>{session.remoteHost || session.cwd}</small>{session.activity === "attention" && <i />}</span>
           <span className="pane-toolbar-actions">
             <button aria-label={workbenchCopy.splitPaneRight} title={workbenchCopy.splitPaneRight} onClick={() => void splitPane("columns", session.id, session.id)}><Columns2 size={11} /></button>
@@ -916,7 +962,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
             {leafCount(paneTree) > 1 && <button aria-label={workbenchCopy.closePane} title={workbenchCopy.closePane} onClick={() => closePane(session.id)}><X size={11} /></button>}
           </span>
         </div>
-        <TerminalPane session={session} theme={settings.theme} cursorStyle={settings.cursorStyle} cursorBlink={settings.cursorBlink} fontFamily={settings.fontFamily} copyOnSelect={settings.copyOnSelect} active={isActive && terminalView && windowFocused} onFocus={() => { setActiveSessionId(session.id); setUnread((current) => { const next = new Set(current); next.delete(session.id); return next; }); }} />
+        <TerminalPane session={session} theme={settings.theme} cursorStyle={settings.cursorStyle} cursorBlink={settings.cursorBlink} fontFamily={settings.fontFamily} cellWidth={settings.cellWidth} bellFlash={bellFlash.has(session.id)} copyOnSelect={settings.copyOnSelect} active={isActive && terminalView && windowFocused} onFocus={() => { setActiveSessionId(session.id); setUnread((current) => { const next = new Set(current); next.delete(session.id); return next; }); }} />
         {draggingSession && draggingSession !== session.id && <div className="dock-overlay">
           <button className={`dock-top${hoverEdge === "top" ? " active" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); dockSession(draggingSession, session.id, "top"); }} />
           <button className={`dock-right${hoverEdge === "right" ? " active" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); dockSession(draggingSession, session.id, "right"); }} />
@@ -1018,7 +1064,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
             <div className={`terminal-pane-tree${paneResizing ? " pane-resizing" : ""}`}>
               {paneTree ? renderPaneNode(paneTree) : <div className="terminal-empty"><TerminalSquare size={24} /><button onClick={() => void createTerminal(projectPath, { reuseExisting: false, shellId: settings.defaultShellId })}><Plus size={14} />{workbenchCopy.newTerminal}</button></div>}
             </div>
-            {active && <div className="command-dock"><Search size={13} /><div><input aria-label={workbenchCopy.commandInput} value={commandText} placeholder={workbenchCopy.runCommandPlaceholder} onChange={(event) => setCommandText(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); sendCommand(); } else if (event.key === "Tab" && ghost) { event.preventDefault(); setCommandText(ghost); } else if (event.key === "ArrowDown" && suggestions.length) { event.preventDefault(); setSuggestionIndex((value) => (value + 1) % suggestions.length); } else if (event.key === "ArrowUp" && suggestions.length) { event.preventDefault(); setSuggestionIndex((value) => (value - 1 + suggestions.length) % suggestions.length); } }} />{ghostSuffix && <span aria-hidden="true"><b>{commandText}</b>{ghostSuffix}</span>}</div><button title={workbenchCopy.runCommand} disabled={!commandText.trim()} onClick={() => sendCommand()}><ChevronRight size={14} /></button></div>}
+            {active && <div className="command-dock"><Search size={13} /><div><input aria-label={workbenchCopy.commandInput} value={commandText} placeholder={workbenchCopy.runCommandPlaceholder} onChange={(event) => setCommandText(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); if (completionCandidates[suggestionIndex]) acceptCompletion(completionCandidates[suggestionIndex].value); else sendCommand(); } else if (event.key === "Tab" && completionCandidates.length) { event.preventDefault(); acceptCompletion(completionCandidates[suggestionIndex]?.value ?? completionCandidates[0].value); } else if (event.key === "Tab" && ghost) { event.preventDefault(); setCommandText(ghost); } else if (event.key === "ArrowDown" && completionCandidates.length) { event.preventDefault(); setSuggestionIndex((value) => (value + 1) % completionCandidates.length); } else if (event.key === "ArrowUp" && completionCandidates.length) { event.preventDefault(); setSuggestionIndex((value) => (value - 1 + completionCandidates.length) % completionCandidates.length); } else if (event.key === "ArrowDown" && suggestions.length) { event.preventDefault(); setSuggestionIndex((value) => (value + 1) % suggestions.length); } else if (event.key === "ArrowUp" && suggestions.length) { event.preventDefault(); setSuggestionIndex((value) => (value - 1 + suggestions.length) % suggestions.length); } else if (event.key === "Escape" && completionCandidates.length) { event.preventDefault(); setCompletionCandidates([]); setCompletionDismissed(true); } }} />{!completionCandidates.length && ghostSuffix && <span aria-hidden="true"><b>{commandText}</b>{ghostSuffix}</span>}{completionCandidates.length > 0 && <div className="completion-popup" role="listbox" aria-label={workbenchCopy.commandSuggestions}>{completionCandidates.map((candidate, index) => <button key={`${candidate.source}:${candidate.value}`} role="option" aria-selected={index === suggestionIndex} className={index === suggestionIndex ? "selected" : ""} onMouseDown={(event) => { event.preventDefault(); acceptCompletion(candidate.value); }} onMouseEnter={() => setSuggestionIndex(index)}><span>{candidate.value}</span><em>{workbenchCopy[completionSourceLabels[candidate.source]]}</em></button>)}</div>}</div><button title={workbenchCopy.runCommand} disabled={!commandText.trim()} onClick={() => sendCommand()}><ChevronRight size={14} /></button></div>}
           </div>
           {view === "settings" && <SettingsPanel settings={settings} shells={shells} cliTools={cliTools} cliLifecycleStatus={cliLifecycleStatus} cliLifecycleBusy={cliLifecycleBusy} onChange={onSettingsChange} onCliLifecycleToggle={onCliLifecycleToggle} onClose={() => setView("terminal")} />}
           {view === "document" && document && <DocumentViewer document={document} onClose={() => setView("terminal")} />}
