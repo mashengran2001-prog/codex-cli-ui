@@ -61,6 +61,7 @@ export async function installMockBridge(page) {
       bellSound: true, resumeAiSessions: true, loadShellProfile: false, newTabPlacement: "after-active", cliProfiles: [],
       keybindings: {
         "command-palette": "Ctrl+Shift+P", "new-terminal": "Ctrl+Shift+T", "split-right": "Ctrl+Shift+D",
+        "split-down": "Ctrl+Shift+E", "pane-next": "Ctrl+Alt+ArrowRight", "pane-prev": "Ctrl+Alt+ArrowLeft",
         "quick-terminal": "Ctrl+`", "open-settings": "Ctrl+,",
       },
     };

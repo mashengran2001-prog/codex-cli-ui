@@ -48,15 +48,55 @@ try {
   assert.equal(await page.locator(".palette-list section").first().locator("h3").textContent(), "最近使用");
   assert.match(await page.locator(".palette-list section").first().locator("button").first().textContent(), /复制路径/);
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "向右拆分" }).click();
+  await page.locator(".terminal-actions").getByRole("button", { name: "向右拆分" }).click();
   await page.locator(".xterm-screen").nth(1).waitFor();
   assert.equal(await page.locator(".terminal-pane-leaf").count(), 2);
   assert.equal(await page.locator('.terminal-pane-shell[data-active="true"]').count(), 1);
 
   await page.locator(".terminal-pane-leaf").nth(1).getByRole("button", { name: "关闭分屏" }).click();
   assert.equal(await page.locator(".terminal-pane-leaf").count(), 1);
-  await page.locator(".terminal-tab-main").nth(1).click();
-  await page.waitForFunction(() => document.querySelector(".terminal-pane-leaf")?.dataset.sessionId === window.__mock.terminalSessions[1].id);
+
+  // 每个分屏的工具栏可独立拆分（此分屏向下拆分）
+  await page.locator(".terminal-pane-leaf").first().getByRole("button", { name: "向下拆分此分屏" }).click();
+  await page.waitForFunction(() => document.querySelectorAll(".terminal-pane-leaf").length === 2);
+  assert.equal(await page.locator(".pane-divider.rows").count(), 1);
+
+  // 拖拽分隔条调整分屏大小，尺寸写入分屏树并持久化到 localStorage
+  const dividerBox = await page.locator(".pane-divider.rows").boundingBox();
+  assert.ok(dividerBox && dividerBox.width > 2 && dividerBox.height >= 4, "divider should have a grab area");
+  await page.mouse.move(dividerBox.x + dividerBox.width / 2, dividerBox.y + dividerBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(dividerBox.x + dividerBox.width / 2, dividerBox.y + 90, { steps: 8 });
+  await page.mouse.up();
+  const slotStyle = await page.locator(".terminal-pane-split.rows > .pane-slot").first().getAttribute("style");
+  assert.match(slotStyle ?? "", /0 1 \d+(?:\.\d+)?%/);
+  await page.waitForFunction(() => {
+    const layout = JSON.parse(localStorage.getItem("codex-cli-ui:terminal-layout-v4") || "{}");
+    const sizes = layout.tree?.sizes;
+    return Array.isArray(sizes) && sizes.length === 2 && Math.abs(sizes[0] + sizes[1] - 100) < 0.6;
+  });
+
+  // 快捷键：向下分屏（Ctrl+Shift+E）与分屏焦点切换（Ctrl+Alt+←/→）
+  await page.keyboard.press("Control+Shift+E");
+  await page.waitForFunction(() => document.querySelectorAll(".terminal-pane-leaf").length === 3);
+  const activePaneId = () => page.evaluate(() => document.querySelector('.terminal-pane-shell[data-active="true"]')?.closest(".terminal-pane-leaf")?.dataset.sessionId ?? "");
+  assert.ok(await activePaneId());
+  const activeAfterSplit = await activePaneId();
+  await page.keyboard.press("Control+Alt+ArrowRight");
+  await page.waitForFunction((previous) => document.querySelector('.terminal-pane-shell[data-active="true"]')?.closest(".terminal-pane-leaf")?.dataset.sessionId !== previous, activeAfterSplit);
+  const activeAfterNext = await activePaneId();
+  await page.keyboard.press("Control+Alt+ArrowLeft");
+  await page.waitForFunction((previous) => document.querySelector('.terminal-pane-shell[data-active="true"]')?.closest(".terminal-pane-leaf")?.dataset.sessionId !== previous, activeAfterNext);
+
+  // 收回多余分屏，恢复单 pane，后续用例保持原布局假设
+  await page.locator(".terminal-pane-leaf").nth(1).getByRole("button", { name: "关闭分屏" }).click();
+  await page.waitForFunction(() => document.querySelectorAll(".terminal-pane-leaf").length === 2);
+  await page.locator(".terminal-pane-leaf").nth(1).getByRole("button", { name: "关闭分屏" }).click();
+  await page.waitForFunction(() => document.querySelectorAll(".terminal-pane-leaf").length === 1);
+  const secondSessionId = await page.evaluate(() => window.__mock.terminalSessions[1].id);
+  const secondTab = page.locator(`.terminal-top-tab[data-session-id="${secondSessionId}"]`);
+  await secondTab.locator(".terminal-tab-main").click();
+  await page.waitForFunction((id) => document.querySelector(".terminal-pane-leaf")?.dataset.sessionId === id, secondSessionId);
 
   await page.getByRole("button", { name: "设置", exact: true }).click();
   await page.locator(".terminal-settings").waitFor();

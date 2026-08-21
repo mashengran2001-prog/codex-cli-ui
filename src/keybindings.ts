@@ -4,6 +4,9 @@ export const KEYBINDING_ACTIONS: KeybindingAction[] = [
   "command-palette",
   "new-terminal",
   "split-right",
+  "split-down",
+  "pane-next",
+  "pane-prev",
   "quick-terminal",
   "open-settings",
 ];

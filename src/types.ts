@@ -5,13 +5,16 @@ export type AppLanguage = "system" | "zh-CN" | "en-US";
 export type TerminalThemeName = "nebula" | "silver" | "steel" | "limestone" | "coal" | "linen" | "moss";
 export type TerminalCursorStyle = "bar" | "block" | "underline";
 export type UiDensity = "compact" | "normal" | "comfortable";
-export type KeybindingAction = "command-palette" | "new-terminal" | "split-right" | "quick-terminal" | "open-settings";
+export type KeybindingAction = "command-palette" | "new-terminal" | "split-right" | "split-down" | "pane-next" | "pane-prev" | "quick-terminal" | "open-settings";
 export type AgentProviderId = "codex" | "deepseek" | (string & {});
 
 export const DEFAULT_KEYBINDINGS: Record<KeybindingAction, string> = {
   "command-palette": "Ctrl+Shift+P",
   "new-terminal": "Ctrl+Shift+T",
   "split-right": "Ctrl+Shift+D",
+  "split-down": "Ctrl+Shift+E",
+  "pane-next": "Ctrl+Alt+ArrowRight",
+  "pane-prev": "Ctrl+Alt+ArrowLeft",
   "quick-terminal": "Ctrl+`",
   "open-settings": "Ctrl+,",
 };

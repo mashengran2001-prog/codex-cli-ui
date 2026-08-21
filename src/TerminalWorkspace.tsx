@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Bell, Bot, ChevronDown, ChevronLeft, ChevronRight, CircleX, Columns2, Command, Copy,
   FolderOpen, FolderTree, GitBranch, GitFork, Globe2, GripVertical, LoaderCircle, PanelLeftClose,
@@ -48,6 +48,8 @@ interface PaneSplit {
   type: "split";
   direction: SplitDirection;
   children: PaneNode[];
+  /** Optional flex percentages (sum ≈ 100). Absent means equal split. */
+  sizes?: number[];
 }
 
 type PaneNode = PaneLeaf | PaneSplit;
@@ -94,8 +96,17 @@ function collectLeafIds(node: PaneNode | null): string[] {
   return node.children.flatMap(collectLeafIds);
 }
 
+function nodeKey(node: PaneNode): string {
+  return node.type === "leaf" ? node.sessionId : collectLeafIds(node).join(",");
+}
+
 function containsLeaf(node: PaneNode | null, sessionId: string): boolean {
   return collectLeafIds(node).includes(sessionId);
+}
+
+function rebuildSplit(node: PaneSplit, children: PaneNode[], keepSizes: boolean): PaneSplit {
+  const sizes = keepSizes && node.sizes && node.sizes.length === children.length ? node.sizes : undefined;
+  return sizes ? { type: "split", direction: node.direction, children, sizes } : { type: "split", direction: node.direction, children };
 }
 
 function removeLeaf(node: PaneNode | null, sessionId: string): PaneNode | null {
@@ -106,14 +117,14 @@ function removeLeaf(node: PaneNode | null, sessionId: string): PaneNode | null {
     .filter((child): child is PaneNode => child !== null);
   if (children.length === 0) return null;
   if (children.length === 1) return children[0];
-  return { type: "split", direction: node.direction, children };
+  return rebuildSplit(node, children, false);
 }
 
 function replaceLeaf(node: PaneNode | null, targetId: string, newSessionId: string): PaneNode | null {
   if (!node) return { type: "leaf", sessionId: newSessionId };
   if (node.type === "leaf") return node.sessionId === targetId ? { type: "leaf", sessionId: newSessionId } : node;
   const children = node.children.map((child) => replaceLeaf(child, targetId, newSessionId)).filter((child): child is PaneNode => child !== null);
-  return { type: "split", direction: node.direction, children };
+  return rebuildSplit(node, children, true);
 }
 
 function splitLeaf(node: PaneNode | null, targetId: string, direction: SplitDirection, newSessionId: string): PaneNode | null {
@@ -121,7 +132,7 @@ function splitLeaf(node: PaneNode | null, targetId: string, direction: SplitDire
   if (!node) return leaf;
   if (node.type === "leaf") return node.sessionId === targetId ? { type: "split", direction, children: [node, leaf] } : node;
   const children = node.children.map((child) => splitLeaf(child, targetId, direction, newSessionId)).filter((child): child is PaneNode => child !== null);
-  return { type: "split", direction: node.direction, children };
+  return rebuildSplit(node, children, true);
 }
 
 function insertLeafAt(node: PaneNode | null, targetId: string, edge: DockEdge, draggedId: string): PaneNode | null {
@@ -134,7 +145,7 @@ function insertLeafAt(node: PaneNode | null, targetId: string, edge: DockEdge, d
       if (current.sessionId !== targetId) return current;
       return { type: "split", direction, children: before ? [dragged, current] : [current, dragged] };
     }
-    return { type: "split", direction: current.direction, children: current.children.map(walk) };
+    return rebuildSplit(current, current.children.map(walk), true);
   };
   return walk(node);
 }
@@ -153,13 +164,45 @@ function pruneTree(node: PaneNode | null, validIds: ReadonlySet<string>): PaneNo
     .filter((child): child is PaneNode => child !== null);
   if (children.length === 0) return null;
   if (children.length === 1) return children[0];
-  return { type: "split", direction: node.direction, children };
+  return rebuildSplit(node, children, children.length === node.children.length);
 }
 
 function activeLeafId(node: PaneNode | null, fallback: string | null): string | null {
   if (!node) return null;
   const ids = collectLeafIds(node);
   return ids.includes(fallback ?? "") ? fallback : ids[0];
+}
+
+function findSplit(node: PaneNode | null, splitKey: string): PaneSplit | null {
+  if (!node) return null;
+  if (node.type === "split") {
+    if (collectLeafIds(node).join(",") === splitKey) return node;
+    for (const child of node.children) {
+      const found = findSplit(child, splitKey);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/** Adjust the sizes of a single divider pair (index, index + 1) inside a split node. */
+function updateSplitSizes(node: PaneNode | null, splitKey: string, index: number, deltaPct: number): PaneNode | null {
+  if (!node) return node;
+  if (node.type === "leaf") return node;
+  if (collectLeafIds(node).join(",") !== splitKey) {
+    const children = node.children.map((child) => updateSplitSizes(child, splitKey, index, deltaPct)).filter((child): child is PaneNode => child !== null);
+    return { ...node, children };
+  }
+  const count = node.children.length;
+  const sizes = node.sizes ? [...node.sizes] : Array.from({ length: count }, () => 100 / count);
+  if (index < 0 || index + 1 >= count) return node;
+  const pairTotal = sizes[index] + sizes[index + 1];
+  const minPct = pairTotal * 0.12;
+  const maxPct = pairTotal * 0.88;
+  sizes[index] = Math.min(maxPct, Math.max(minPct, sizes[index] + deltaPct));
+  sizes[index + 1] = Math.max(minPct, Math.min(maxPct, pairTotal - sizes[index]));
+  sizes[index] = pairTotal - sizes[index + 1];
+  return { ...node, sizes };
 }
 
 function legacyPanesToTree(panes: string[], direction: SplitDirection): PaneNode | null {
@@ -260,6 +303,9 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const treeRef = useRef(paneTree);
   const activeSessionIdRef = useRef(activeSessionId);
   const mountedRef = useRef(true);
+  const paneResizeRef = useRef<{ splitKey: string; index: number; startX: number; startY: number; startSizes: number[]; direction: SplitDirection; containerSize: number } | null>(null);
+  const paneResizeCleanupRef = useRef<(() => void) | null>(null);
+  const [paneResizing, setPaneResizing] = useState(false);
 
   const visibleIds = collectLeafIds(paneTree);
   const activeId = activeSessionId && containsLeaf(paneTree, activeSessionId) ? activeSessionId : visibleIds[0] ?? null;
@@ -397,7 +443,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     return () => window.clearTimeout(timeout);
   }, [notice]);
 
-  const splitPane = useCallback(async (direction: SplitDirection, sessionId?: string) => {
+  const splitPane = useCallback(async (direction: SplitDirection, sessionId?: string, anchorId?: string) => {
     if (leafCount(treeRef.current) >= 4) { onError(workbenchCopy.maxPanes); return; }
     let id = sessionId;
     if (!id || containsLeaf(treeRef.current, id)) {
@@ -409,7 +455,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     setPaneTree((current) => {
       if (!current) return { type: "leaf", sessionId: id! };
       if (containsLeaf(current, id!)) return current;
-      const anchor = activeLeafId(current, activeSessionIdRef.current) ?? collectLeafIds(current)[0];
+      const anchor = anchorId && containsLeaf(current, anchorId) ? anchorId : activeLeafId(current, activeSessionIdRef.current) ?? collectLeafIds(current)[0];
       return splitLeaf(current, anchor, direction, id!);
     });
     setActiveSessionId(id);
@@ -417,21 +463,75 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     onWorkspaceModeChange("terminal");
   }, [createTerminal, onError, onWorkspaceModeChange, projectPath, settings.defaultShellId, workbenchCopy]);
 
+  const focusPane = useCallback((offset: number) => {
+    const ids = collectLeafIds(treeRef.current);
+    if (ids.length < 2) return;
+    const index = ids.indexOf(activeSessionIdRef.current ?? "");
+    const next = ids[(index < 0 ? 0 : index + offset + ids.length) % ids.length];
+    setActiveSessionId(next);
+    setView("terminal");
+    onWorkspaceModeChange("terminal");
+  }, [onWorkspaceModeChange]);
+
+  const startPaneResize = (event: React.PointerEvent<HTMLDivElement>, splitKey: string, index: number) => {
+    event.preventDefault();
+    const splitEl = event.currentTarget.closest<HTMLElement>("[data-pane-split-key]");
+    const splitNode = findSplit(treeRef.current, splitKey);
+    if (!splitEl || !splitNode) return;
+    const rect = splitEl.getBoundingClientRect();
+    const count = splitNode.children.length;
+    const startSizes = splitNode.sizes ? [...splitNode.sizes] : Array.from({ length: count }, () => 100 / count);
+    const direction = splitNode.direction;
+    paneResizeRef.current = { splitKey, index, startX: event.clientX, startY: event.clientY, startSizes, direction, containerSize: direction === "columns" ? rect.width : rect.height };
+    setPaneResizing(true);
+    window.document.body.style.cursor = direction === "columns" ? "col-resize" : "row-resize";
+    window.document.body.style.userSelect = "none";
+    const move = (pointer: PointerEvent) => {
+      const ref = paneResizeRef.current;
+      if (!ref) return;
+      const delta = ref.direction === "columns" ? pointer.clientX - ref.startX : pointer.clientY - ref.startY;
+      const deltaPct = ref.containerSize > 0 ? (delta / ref.containerSize) * 100 : 0;
+      setPaneTree((current) => updateSplitSizes(current, ref.splitKey, ref.index, deltaPct));
+    };
+    const up = () => {
+      paneResizeRef.current = null;
+      paneResizeCleanupRef.current = null;
+      setPaneResizing(false);
+      window.document.body.style.cursor = "";
+      window.document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    paneResizeCleanupRef.current = up;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  const cancelPaneResize = () => {
+    paneResizeCleanupRef.current?.();
+  };
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (keybindingMatches(event, settings.keybindings["command-palette"])) { event.preventDefault(); setPaletteOpen(true); }
       else if (keybindingMatches(event, settings.keybindings["new-terminal"])) { event.preventDefault(); void createTerminal(active?.cwd || projectPath, { shellId: settings.defaultShellId }); }
       else if (keybindingMatches(event, settings.keybindings["split-right"])) { event.preventDefault(); void splitPane("columns"); }
+      else if (keybindingMatches(event, settings.keybindings["split-down"])) { event.preventDefault(); void splitPane("rows"); }
+      else if (keybindingMatches(event, settings.keybindings["pane-next"])) { event.preventDefault(); focusPane(1); }
+      else if (keybindingMatches(event, settings.keybindings["pane-prev"])) { event.preventDefault(); focusPane(-1); }
       else if (keybindingMatches(event, settings.keybindings["open-settings"])) { event.preventDefault(); setDrawer(null); setView("settings"); }
       else if (event.key === "Escape") {
+        if (paneResizing) { event.preventDefault(); cancelPaneResize(); return; }
         setPaletteOpen(false);
         setRenamingSession(undefined);
         setTabMenu(undefined);
       }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [active?.cwd, createTerminal, projectPath, settings.defaultShellId, settings.keybindings, splitPane]);
+    // Capture phase so app shortcuts still run while an xterm textarea is focused
+    // (xterm consumes arrow keys and stops propagation during bubbling).
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [active?.cwd, cancelPaneResize, createTerminal, focusPane, paneResizing, projectPath, settings.defaultShellId, settings.keybindings, splitPane]);
 
   useEffect(() => {
     if (!tabMenu) return;
@@ -782,9 +882,17 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
 
   const renderPaneNode = (node: PaneNode): ReactNode => {
     if (node.type === "split") {
+      const splitKey = collectLeafIds(node).join(",");
       return (
-        <div className={`terminal-pane-split ${node.direction}`} key={`${node.direction}:${collectLeafIds(node).join(",")}`}>
-          {node.children.map((child) => renderPaneNode(child))}
+        <div className={`terminal-pane-split ${node.direction}`} data-pane-split-key={splitKey} key={`${node.direction}:${splitKey}`}>
+          {node.children.map((child, index) => (
+            <Fragment key={nodeKey(child)}>
+              {index > 0 && <div className={`pane-divider ${node.direction}`} onPointerDown={(event) => startPaneResize(event, splitKey, index - 1)} />}
+              <div className="pane-slot" style={{ flex: node.sizes ? `0 1 ${node.sizes[index]}%` : "1 1 0" }}>
+                {renderPaneNode(child)}
+              </div>
+            </Fragment>
+          ))}
         </div>
       );
     }
@@ -802,7 +910,11 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
       >
         <div className="pane-toolbar">
           <span>{terminalIcon(session)}<strong>{tabDisplayTitle(session)}</strong><small>{session.remoteHost || session.cwd}</small>{session.activity === "attention" && <i />}</span>
-          {leafCount(paneTree) > 1 && <button title={workbenchCopy.closePane} onClick={() => closePane(session.id)}><X size={11} /></button>}
+          <span className="pane-toolbar-actions">
+            <button aria-label={workbenchCopy.splitPaneRight} title={workbenchCopy.splitPaneRight} onClick={() => void splitPane("columns", session.id, session.id)}><Columns2 size={11} /></button>
+            <button aria-label={workbenchCopy.splitPaneDown} title={workbenchCopy.splitPaneDown} onClick={() => void splitPane("rows", session.id, session.id)}><Rows2 size={11} /></button>
+            {leafCount(paneTree) > 1 && <button aria-label={workbenchCopy.closePane} title={workbenchCopy.closePane} onClick={() => closePane(session.id)}><X size={11} /></button>}
+          </span>
         </div>
         <TerminalPane session={session} theme={settings.theme} cursorStyle={settings.cursorStyle} cursorBlink={settings.cursorBlink} fontFamily={settings.fontFamily} copyOnSelect={settings.copyOnSelect} active={isActive && terminalView && windowFocused} onFocus={() => { setActiveSessionId(session.id); setUnread((current) => { const next = new Set(current); next.delete(session.id); return next; }); }} />
         {draggingSession && draggingSession !== session.id && <div className="dock-overlay">
@@ -903,7 +1015,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
         <section className="terminal-stage">
           {chatView && <div className="chat-session-view">{chatContent}</div>}
           <div className={`terminal-session-view ${terminalView ? "visible" : "hidden"}${dockTarget?.sessionId === stageDockId ? ` stage-dock-${dockTarget.edge}` : ""}`} aria-hidden={!terminalView} onDragOver={handleStageDragOver} onDrop={handleStageDrop}>
-            <div className="terminal-pane-tree">
+            <div className={`terminal-pane-tree${paneResizing ? " pane-resizing" : ""}`}>
               {paneTree ? renderPaneNode(paneTree) : <div className="terminal-empty"><TerminalSquare size={24} /><button onClick={() => void createTerminal(projectPath, { reuseExisting: false, shellId: settings.defaultShellId })}><Plus size={14} />{workbenchCopy.newTerminal}</button></div>}
             </div>
             {active && <div className="command-dock"><Search size={13} /><div><input aria-label={workbenchCopy.commandInput} value={commandText} placeholder={workbenchCopy.runCommandPlaceholder} onChange={(event) => setCommandText(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); sendCommand(); } else if (event.key === "Tab" && ghost) { event.preventDefault(); setCommandText(ghost); } else if (event.key === "ArrowDown" && suggestions.length) { event.preventDefault(); setSuggestionIndex((value) => (value + 1) % suggestions.length); } else if (event.key === "ArrowUp" && suggestions.length) { event.preventDefault(); setSuggestionIndex((value) => (value - 1 + suggestions.length) % suggestions.length); } }} />{ghostSuffix && <span aria-hidden="true"><b>{commandText}</b>{ghostSuffix}</span>}</div><button title={workbenchCopy.runCommand} disabled={!commandText.trim()} onClick={() => sendCommand()}><ChevronRight size={14} /></button></div>}
