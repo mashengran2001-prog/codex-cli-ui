@@ -5,13 +5,14 @@ import ConversationView from "./ConversationView";
 import Sidebar from "./Sidebar";
 import { getUiCopy, UiLocaleContext, useResolvedAppLocale } from "./i18n";
 import { defaultState, loadState, saveState } from "./storage";
-import type {
+import {
   Activity,
   AgentProviderId,
   AgentProviderInfo,
   AppSettings,
   CliLifecycleStatus,
   ConversationRecord,
+  DEFAULT_KEYBINDINGS,
   LauncherRequest,
   LauncherStatus,
   PersistedState,
@@ -28,6 +29,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   notifyOnCompletion: true,
   language: "system",
   theme: "nebula",
+  density: "normal",
   backgroundBlur: false,
   backgroundOpacity: 0.92,
   restoreTerminalTabs: true,
@@ -43,6 +45,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   bellSound: true,
   loadShellProfile: false,
   cliProfiles: [],
+  keybindings: { ...DEFAULT_KEYBINDINGS },
 };
 
 interface PendingDanger {

@@ -4,7 +4,32 @@ export type RunState = "idle" | "running" | "done" | "error" | "stopped";
 export type AppLanguage = "system" | "zh-CN" | "en-US";
 export type TerminalThemeName = "nebula" | "silver" | "steel" | "limestone" | "coal" | "linen" | "moss";
 export type TerminalCursorStyle = "bar" | "block" | "underline";
+export type UiDensity = "compact" | "normal" | "comfortable";
+export type KeybindingAction = "command-palette" | "new-terminal" | "split-right" | "quick-terminal" | "open-settings";
 export type AgentProviderId = "codex" | "deepseek" | (string & {});
+
+export const DEFAULT_KEYBINDINGS: Record<KeybindingAction, string> = {
+  "command-palette": "Ctrl+Shift+P",
+  "new-terminal": "Ctrl+Shift+T",
+  "split-right": "Ctrl+Shift+D",
+  "quick-terminal": "Ctrl+`",
+  "open-settings": "Ctrl+,",
+};
+
+const KEYBINDING_ACTIONS = Object.keys(DEFAULT_KEYBINDINGS) as KeybindingAction[];
+const KEYBINDING_PATTERN = /^(?:(?:ctrl|control|cmd|meta|commandorcontrol|shift|alt)\+)*[^+\s](?:[^+]|\+(?!$))*$/i;
+
+export function normalizeKeybindings(value: unknown): Record<KeybindingAction, string> {
+  const result: Record<KeybindingAction, string> = { ...DEFAULT_KEYBINDINGS };
+  if (!value || typeof value !== "object") return result;
+  for (const action of KEYBINDING_ACTIONS) {
+    const chord = (value as Record<string, unknown>)[action];
+    if (typeof chord === "string" && KEYBINDING_PATTERN.test(chord.trim()) && chord.trim().length <= 40) {
+      result[action] = chord.trim();
+    }
+  }
+  return result;
+}
 
 export interface AgentProviderCapabilities {
   structuredChat: boolean;
@@ -60,6 +85,7 @@ export interface AppSettings {
   notifyOnCompletion: boolean;
   language: AppLanguage;
   theme: TerminalThemeName;
+  density: UiDensity;
   backgroundBlur: boolean;
   backgroundImage?: string;
   backgroundOpacity: number;
@@ -76,6 +102,7 @@ export interface AppSettings {
   bellSound: boolean;
   loadShellProfile: boolean;
   cliProfiles: CliProfile[];
+  keybindings: Record<KeybindingAction, string>;
 }
 
 export interface LauncherStatus {

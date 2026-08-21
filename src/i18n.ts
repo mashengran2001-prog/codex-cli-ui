@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import type { AppLanguage, TerminalThemeName } from "./types";
+import type { AppLanguage, KeybindingAction, TerminalThemeName } from "./types";
 
 export type UiLocale = Exclude<AppLanguage, "system">;
 
@@ -495,6 +495,10 @@ const settingsCopies = {
     clearBackground: "清除背景图片",
     opacity: "背景不透明度",
     backgroundBlur: "背景模糊",
+    density: "界面密度",
+    densityCompact: "紧凑",
+    densityNormal: "适中",
+    densityComfortable: "舒适",
     terminal: "终端",
     defaultShell: "默认 Shell",
     cursorShape: "光标形状",
@@ -528,6 +532,18 @@ const settingsCopies = {
     closeWindow: "关闭窗口时",
     keepRunning: "留在后台",
     quitApplication: "退出应用",
+    keybindings: "快捷键",
+    keybindingsHint: "点击快捷键，再按下新的组合键即可录制；按 Esc 取消。",
+    keybindingActions: {
+      "command-palette": "命令面板",
+      "new-terminal": "新建终端",
+      "split-right": "向右分屏",
+      "quick-terminal": "全局快速终端",
+      "open-settings": "打开设置",
+    } satisfies Record<KeybindingAction, string>,
+    quickTerminalGlobalHint: "全局快捷键，在任意应用中按下都会唤起或隐藏工作台",
+    recordingKeybinding: "按下新快捷键…",
+    resetAllKeybindings: "恢复默认快捷键",
     profileName: "CLI 配置名称",
     name: "名称",
     profileExecutable: "CLI 可执行文件",
@@ -559,6 +575,10 @@ const settingsCopies = {
     clearBackground: "Clear background image",
     opacity: "Background opacity",
     backgroundBlur: "Background blur",
+    density: "Interface density",
+    densityCompact: "Compact",
+    densityNormal: "Normal",
+    densityComfortable: "Comfortable",
     terminal: "Terminal",
     defaultShell: "Default shell",
     cursorShape: "Cursor shape",
@@ -592,6 +612,18 @@ const settingsCopies = {
     closeWindow: "When closing the window",
     keepRunning: "Keep running",
     quitApplication: "Quit application",
+    keybindings: "Keybindings",
+    keybindingsHint: "Click a shortcut, then press the new combination. Esc cancels.",
+    keybindingActions: {
+      "command-palette": "Command palette",
+      "new-terminal": "New terminal",
+      "split-right": "Split right",
+      "quick-terminal": "Global quick terminal",
+      "open-settings": "Open settings",
+    } satisfies Record<KeybindingAction, string>,
+    quickTerminalGlobalHint: "Global shortcut; press from any app to show or hide the workbench",
+    recordingKeybinding: "Press new shortcut…",
+    resetAllKeybindings: "Reset all shortcuts",
     profileName: "CLI profile name",
     name: "Name",
     profileExecutable: "CLI executable",

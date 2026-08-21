@@ -7,6 +7,7 @@ import {
 import BrandIcon from "./BrandIcon";
 import type { AppSettings, CliLifecycleStatus, CliToolInfo, DocumentFile, ProjectRecord, ShellProfile, SshProfile, TerminalEvent, TerminalInfo } from "./types";
 import { getWorkbenchCopy } from "./i18n";
+import { keybindingMatches } from "./keybindings";
 import CommandPalette, { type PaletteAction } from "./terminal/CommandPalette";
 import DocumentViewer from "./terminal/DocumentViewer";
 import { FilesDrawer, GitDrawer, SftpDrawer } from "./terminal/Drawers";
@@ -402,10 +403,10 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "p") { event.preventDefault(); setPaletteOpen(true); }
-      else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "t") { event.preventDefault(); void createTerminal(active?.cwd || projectPath, { shellId: settings.defaultShellId }); }
-      else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "d") { event.preventDefault(); void splitPane("columns"); }
-      else if (event.ctrlKey && event.key === ",") { event.preventDefault(); setDrawer(null); setView("settings"); }
+      if (keybindingMatches(event, settings.keybindings["command-palette"])) { event.preventDefault(); setPaletteOpen(true); }
+      else if (keybindingMatches(event, settings.keybindings["new-terminal"])) { event.preventDefault(); void createTerminal(active?.cwd || projectPath, { shellId: settings.defaultShellId }); }
+      else if (keybindingMatches(event, settings.keybindings["split-right"])) { event.preventDefault(); void splitPane("columns"); }
+      else if (keybindingMatches(event, settings.keybindings["open-settings"])) { event.preventDefault(); setDrawer(null); setView("settings"); }
       else if (event.key === "Escape") {
         setPaletteOpen(false);
         setRenamingSession(undefined);
@@ -414,7 +415,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [active?.cwd, createTerminal, projectPath, settings.defaultShellId, splitPane]);
+  }, [active?.cwd, createTerminal, projectPath, settings.defaultShellId, settings.keybindings, splitPane]);
 
   useEffect(() => {
     if (!tabMenu) return;
@@ -749,7 +750,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   };
 
   return (
-    <main className="terminal-workspace" data-terminal-theme={settings.theme} data-workspace-view={view} data-window-focused={windowFocused} style={{ "--terminal-sidebar-width": `${sidebarWidth}px`, "--terminal-drawer-width": `${drawerWidth}px`, "--terminal-bg-opacity": settings.backgroundOpacity, "--terminal-bg-image": pathToCssUrl(settings.backgroundImage) } as React.CSSProperties}>
+    <main className="terminal-workspace" data-terminal-theme={settings.theme} data-density={settings.density} data-workspace-view={view} data-window-focused={windowFocused} style={{ "--terminal-sidebar-width": `${sidebarWidth}px`, "--terminal-drawer-width": `${drawerWidth}px`, "--terminal-bg-opacity": settings.backgroundOpacity, "--terminal-bg-image": pathToCssUrl(settings.backgroundImage) } as React.CSSProperties}>
       <header className="terminal-header">
         <div className="terminal-heading">
           <span className="terminal-brand">{view === "settings" ? <Settings2 size={17} /> : chatView ? <Bot size={17} /> : <TerminalSquare size={17} />}</span>

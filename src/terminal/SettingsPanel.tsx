@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { BellRing, Check, Image, LoaderCircle, Plus, RotateCcw, Settings2, Trash2, X } from "lucide-react";
 import BrandIcon, { type BrandIconName } from "../BrandIcon";
-import type { AppSettings, CliLifecycleStatus, CliProfile, CliToolInfo, ShellProfile, TerminalThemeName } from "../types";
+import { chordFromEvent, isModifierOnly, KEYBINDING_ACTIONS } from "../keybindings";
+import type { AppSettings, CliLifecycleStatus, CliProfile, CliToolInfo, KeybindingAction, ShellProfile, TerminalThemeName } from "../types";
+import { DEFAULT_KEYBINDINGS } from "../types";
 import { getSettingsCopy } from "../i18n";
 import { terminalThemes } from "./themes";
 
@@ -22,6 +24,9 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
   const copy = getSettingsCopy(settings.language);
   const update = <Key extends keyof AppSettings>(key: Key, value: AppSettings[Key]) => onChange({ ...settings, [key]: value });
   const saveProfile = (next: CliProfile) => update("cliProfiles", settings.cliProfiles.map((profile) => profile.id === next.id ? next : profile));
+  const recordKeybinding = (action: KeybindingAction, chord: string) => update("keybindings", { ...settings.keybindings, [action]: chord });
+  const resetKeybinding = (action: KeybindingAction) => update("keybindings", { ...settings.keybindings, [action]: DEFAULT_KEYBINDINGS[action] });
+  const resetAllKeybindings = () => update("keybindings", { ...DEFAULT_KEYBINDINGS });
   const addProfile = () => {
     const name = newName.trim();
     const command = newCommand.trim();
@@ -50,6 +55,10 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <div className="settings-row">
             <label>{copy.language}</label>
             <select aria-label={copy.language} value={settings.language} onChange={(event) => update("language", event.target.value as AppSettings["language"])}><option value="system">{copy.followSystem}</option><option value="zh-CN">简体中文</option><option value="en-US">English</option></select>
+          </div>
+          <div className="settings-row">
+            <label>{copy.density}</label>
+            <select aria-label={copy.density} value={settings.density} onChange={(event) => update("density", event.target.value as AppSettings["density"])}><option value="compact">{copy.densityCompact}</option><option value="normal">{copy.densityNormal}</option><option value="comfortable">{copy.densityComfortable}</option></select>
           </div>
           <div className="settings-row">
             <label>{copy.backgroundImage}</label>
@@ -108,8 +117,73 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <Toggle label={copy.completionNotifications} checked={settings.notifyOnCompletion} onChange={(value) => update("notifyOnCompletion", value)} />
           <div className="settings-row"><label>{copy.closeWindow}</label><select value={settings.closeBehavior} onChange={(event) => update("closeBehavior", event.target.value as AppSettings["closeBehavior"])}><option value="tray">{copy.keepRunning}</option><option value="quit">{copy.quitApplication}</option></select></div>
         </section>
+        <section>
+          <h2>{copy.keybindings}</h2>
+          <p className="settings-hint">{copy.keybindingsHint}</p>
+          <div className="keybinding-list">
+            {KEYBINDING_ACTIONS.map((action) => (
+              <KeybindingRow
+                key={action}
+                action={action}
+                chord={settings.keybindings[action]}
+                label={copy.keybindingActions[action]}
+                hint={action === "quick-terminal" ? copy.quickTerminalGlobalHint : undefined}
+                copy={copy}
+                onRecord={recordKeybinding}
+                onReset={resetKeybinding}
+              />
+            ))}
+          </div>
+          <div className="keybinding-list-footer">
+            <button className="keybinding-reset" onClick={resetAllKeybindings}><RotateCcw size={12} />{copy.resetAllKeybindings}</button>
+          </div>
+        </section>
       </div>
     </section>
+  );
+}
+
+function KeybindingRow({ action, chord, label, hint, copy, onRecord, onReset }: {
+  action: KeybindingAction;
+  chord: string;
+  label: string;
+  hint?: string;
+  copy: ReturnType<typeof getSettingsCopy>;
+  onRecord(action: KeybindingAction, chord: string): void;
+  onReset(action: KeybindingAction): void;
+}) {
+  const [recording, setRecording] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const begin = () => { setRecording(true); buttonRef.current?.focus(); };
+  const cancel = () => setRecording(false);
+  return (
+    <div className="keybinding-row">
+      <span className="keybinding-label"><strong>{label}</strong>{hint && <small>{hint}</small>}</span>
+      <span className="keybinding-controls">
+        <button
+          ref={buttonRef}
+          className={`keybinding-record${recording ? " recording" : ""}`}
+          onClick={begin}
+          onBlur={cancel}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" || (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey)) {
+              event.preventDefault();
+              event.stopPropagation();
+              cancel();
+              return;
+            }
+            if (isModifierOnly(event.nativeEvent)) { event.preventDefault(); return; }
+            event.preventDefault();
+            event.stopPropagation();
+            setRecording(false);
+            onRecord(action, chordFromEvent(event.nativeEvent));
+          }}
+        >
+          {recording ? copy.recordingKeybinding : <kbd>{chord}</kbd>}
+        </button>
+        <button className="keybinding-reset-one" title={copy.resetAllKeybindings} onClick={() => onReset(action)}><RotateCcw size={12} /></button>
+      </span>
+    </div>
   );
 }
 

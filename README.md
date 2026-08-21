@@ -19,6 +19,7 @@
 - SSH 主机管理、`~/.ssh/config` 导入、四阶段连接测试、交互式 SSH 标签和 SFTP 文件抽屉
 - Files 抽屉、Markdown/GFM/JSON/文本预览、KaTeX 数学公式，以及 Git stage/unstage/commit/pull/push
 - 七套明暗主题、背景图片/透明度/模糊、可拖拽侧栏与抽屉、设置持久化
+- 自定义快捷键（命令面板、新终端、分屏、全局快速终端、打开设置）、紧凑/适中/舒适三档界面密度，以及窗口位置与尺寸自动恢复
 - 跟随系统、简体中文和 English 三种界面语言
 - Codex notify 与 Claude hooks 统一管理，保留已有钩子链并在配置被覆盖后自动修复
 - PowerShell 中运行 `codex` 自动打开 UI；`codex-raw` 保留原始终端 CLI
@@ -40,6 +41,7 @@
 - `Ctrl+Shift+P` 打开命令面板；`Ctrl+Shift+T` 新建终端；`Ctrl+Shift+D` 向右分屏
 - 终端内 `Ctrl+F` 搜索，`Ctrl+Shift+C/V` 复制粘贴，`Ctrl++/-/0` 缩放
 - 全局 Ctrl + 反引号键显示或隐藏快速终端
+- 以上快捷键均可在 设置 → 快捷键 中录制修改，一键恢复默认
 - SFTP 使用系统 OpenSSH 的 `ssh.exe` / `sftp.exe`，支持 SSH agent、IdentityFile、known_hosts 和交互式 SSH 认证；批量文件操作要求密钥或 agent 可无交互认证
 - 应用完全退出时 PTY 会终止；冷启动恢复标签、工作目录、Shell 和 SSH profile，不会伪装成恢复已结束的进程
 - 设置 `CODEX_UI_BOOT_TRACE=1` 可将启动阶段写入用户数据目录的 `boot-trace.log`

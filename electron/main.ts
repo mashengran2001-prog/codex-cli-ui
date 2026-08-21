@@ -9,6 +9,7 @@ import {
   nativeImage,
   Notification,
   safeStorage,
+  screen,
   shell,
   Tray,
   webContents,
@@ -50,6 +51,7 @@ import type {
   TerminalEvent,
   TerminalInfo,
 } from "../src/types";
+import { DEFAULT_KEYBINDINGS, normalizeKeybindings } from "../src/types";
 import { DeepSeekProvider } from "./deepseek-provider";
 import { CliLifecycleBridge, type CliLifecycleEvent } from "./cli-lifecycle";
 import { ProviderRegistry, type AgentProvider, type ProviderRunContext } from "./provider-registry";
@@ -139,6 +141,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   notifyOnCompletion: true,
   language: "system",
   theme: "nebula",
+  density: "normal",
   backgroundBlur: false,
   backgroundOpacity: 0.92,
   restoreTerminalTabs: true,
@@ -154,6 +157,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   bellSound: true,
   loadShellProfile: false,
   cliProfiles: [],
+  keybindings: { ...DEFAULT_KEYBINDINGS },
 };
 const BUILTIN_CLI_TOOLS: Array<CliProfile & { description: string; installCommand: string }> = [
   { id: "builtin:codex", name: "Codex", command: "codex", args: [], icon: "code", description: "OpenAI Codex CLI", installCommand: "npm install -g @openai/codex" },
@@ -253,9 +257,12 @@ function sendLauncherRequest(window: BrowserWindow, request: LauncherRequest) {
 
 function createWindow() {
   bootTrace("create-window:start");
+  const savedWindowState = loadWindowState();
   const window = new BrowserWindow({
-    width: 1380,
-    height: 880,
+    width: savedWindowState.width ?? 1380,
+    height: savedWindowState.height ?? 880,
+    x: savedWindowState.x,
+    y: savedWindowState.y,
     minWidth: 760,
     minHeight: 620,
     show: false,
@@ -279,6 +286,7 @@ function createWindow() {
   const devServer = process.env.VITE_DEV_SERVER_URL;
   const showWhenReady = () => {
     if (!window.isDestroyed() && !window.isVisible()) {
+      if (savedWindowState.maximized) window.maximize();
       window.show();
       window.focus();
       bootTrace("window:shown");
@@ -300,6 +308,8 @@ function createWindow() {
     const line = `${new Date().toISOString()} renderer ${details.reason} (${details.exitCode})\n`;
     void appendFile(join(app.getPath("userData"), "renderer-errors.log"), line, "utf8");
   });
+  window.on("resize", () => saveWindowState(window));
+  window.on("move", () => saveWindowState(window));
   window.on("close", (event) => {
     if (isQuitting || appSettings.closeBehavior === "quit") return;
     event.preventDefault();
@@ -359,6 +369,68 @@ function quitApplication() {
 
 function settingsPath() {
   return join(app.getPath("userData"), "settings.json");
+}
+
+interface WindowState {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  maximized?: boolean;
+}
+
+let windowStateSaveTimer: NodeJS.Timeout | null = null;
+
+function windowStatePath() {
+  return join(app.getPath("userData"), "window-state.json");
+}
+
+function loadWindowState(): WindowState {
+  try {
+    const value = JSON.parse(readFileSync(windowStatePath(), "utf8")) as WindowState;
+    if (!value || typeof value !== "object") return {};
+    const width = Math.max(760, Math.min(4096, Number(value.width) || 1380));
+    const height = Math.max(620, Math.min(4096, Number(value.height) || 880));
+    const state: WindowState = { width, height, maximized: value.maximized === true };
+    const x = Number(value.x);
+    const y = Number(value.y);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      // Only restore the position if it still lands on a visible display.
+      const onVisibleDisplay = screen.getAllDisplays().some((display) => {
+        const bounds = display.workArea;
+        return x >= bounds.x - 40 && x + width >= bounds.x + 40
+          && y >= bounds.y - 40 && y + 40 <= bounds.y + bounds.height;
+      });
+      if (onVisibleDisplay) {
+        state.x = x;
+        state.y = y;
+      }
+    }
+    return state;
+  } catch {
+    return {};
+  }
+}
+
+function saveWindowState(window: BrowserWindow) {
+  if (window.isDestroyed() || window.isMinimized() || !window.isVisible()) return;
+  const maximized = window.isMaximized();
+  const bounds = window.getBounds();
+  const state: WindowState = {
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    maximized,
+  };
+  if (windowStateSaveTimer) clearTimeout(windowStateSaveTimer);
+  windowStateSaveTimer = setTimeout(() => {
+    try {
+      writeFileSync(windowStatePath(), JSON.stringify(state), "utf8");
+    } catch {
+      // Window state persistence is best-effort.
+    }
+  }, 300);
 }
 
 function providerCredentialsPath() {
@@ -467,6 +539,7 @@ function normalizeAppSettings(value: Partial<AppSettings> | null | undefined): A
     notifyOnCompletion: value?.notifyOnCompletion !== false,
     language: value?.language === "zh-CN" || value?.language === "en-US" ? value.language : "system",
     theme: typeof value?.theme === "string" && VALID_THEMES.has(value.theme) ? value.theme as AppSettings["theme"] : "nebula",
+    density: value?.density === "compact" || value?.density === "comfortable" ? value.density : "normal",
     backgroundBlur: value?.backgroundBlur === true,
     backgroundImage: typeof value?.backgroundImage === "string" && isImagePath(value.backgroundImage) ? value.backgroundImage : undefined,
     backgroundOpacity: opacity,
@@ -485,6 +558,7 @@ function normalizeAppSettings(value: Partial<AppSettings> | null | undefined): A
     bellSound: value?.bellSound !== false,
     loadShellProfile: value?.loadShellProfile === true,
     cliProfiles: normalizeCliProfiles(value?.cliProfiles),
+    keybindings: normalizeKeybindings(value?.keybindings),
   };
 }
 
@@ -511,10 +585,37 @@ function applyWindowAppearance(window: BrowserWindow) {
   }
 }
 
+let registeredQuickTerminalChord: string | null = null;
+
+function quickTerminalGlobalChord(): string | null {
+  const chord = appSettings.keybindings["quick-terminal"];
+  if (!chord) return null;
+  const tokens = chord.split("+").map((token) => token.trim()).filter(Boolean);
+  // Global chords need at least one modifier so a bare key never gets stolen system-wide.
+  if (tokens.length < 2) return null;
+  const key = tokens[tokens.length - 1];
+  if (!key) return null;
+  const modifiers = tokens.slice(0, -1).map((token) => {
+    const lower = token.toLowerCase();
+    if (lower === "ctrl" || lower === "control") return "CommandOrControl";
+    if (lower === "cmd" || lower === "meta") return "CommandOrControl";
+    if (lower === "shift") return "Shift";
+    if (lower === "alt") return "Alt";
+    return null;
+  });
+  if (modifiers.some((modifier) => modifier === null)) return null;
+  return [...modifiers, key].join("+");
+}
+
 function updateQuickTerminalShortcut() {
-  globalShortcut.unregister("CommandOrControl+`");
+  if (registeredQuickTerminalChord) {
+    globalShortcut.unregister(registeredQuickTerminalChord);
+    registeredQuickTerminalChord = null;
+  }
   if (!appSettings.quickTerminal) return;
-  globalShortcut.register("CommandOrControl+`", () => {
+  const chord = quickTerminalGlobalChord();
+  if (!chord) return;
+  const ok = globalShortcut.register(chord, () => {
     const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow();
     if (window.isVisible() && window.isFocused()) {
       window.hide();
@@ -525,6 +626,8 @@ function updateQuickTerminalShortcut() {
     if (window.webContents.isLoading()) window.webContents.once("did-finish-load", send);
     else send();
   });
+  if (ok) registeredQuickTerminalChord = chord;
+  else bootTrace(`quick-terminal-shortcut-register-failed:${chord}`);
 }
 
 async function loadSettings() {

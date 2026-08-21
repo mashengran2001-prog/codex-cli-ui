@@ -665,6 +665,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .terminal-workspace[data-terminal-theme="linen"] { --t-bg: #f7f4ed; --t-bg-raised: #eeeae1; --t-panel: #e6e0d5; --t-panel-2: #dcd5c8; --t-border: #cdc5b7; --t-text: #34312c; --t-muted: #817b70; --t-accent: #48735d; --t-accent-soft: #ccdcd0; --t-danger: #a95248; --t-warning: #8c6c2b; }
 .terminal-workspace[data-terminal-theme="moss"] { --t-bg: #1c211d; --t-bg-raised: #232924; --t-panel: #29302a; --t-panel-2: #313a32; --t-border: #3b463d; --t-text: #e3e7de; --t-muted: #929b91; --t-accent: #91b58d; --t-accent-soft: #344b37; --t-danger: #d78075; --t-warning: #d0b36c; }
 .terminal-workspace[data-terminal-theme="silver"], .terminal-workspace[data-terminal-theme="limestone"], .terminal-workspace[data-terminal-theme="linen"] { color-scheme: light; }
+.terminal-workspace[data-density="compact"] .terminal-header { min-height: 56px; }
+.terminal-workspace[data-density="compact"] .pane-toolbar { height: 28px; }
+.terminal-workspace[data-density="compact"] .terminal-pane-shell { inset: 28px 0 0; }
+.terminal-workspace[data-density="compact"] .terminal-side-tabs { padding: 5px 4px; }
+.terminal-workspace[data-density="compact"] .terminal-side-panel .terminal-tab { height: 38px; }
+.terminal-workspace[data-density="compact"] .settings-row, .terminal-workspace[data-density="compact"] .settings-toggle { min-height: 32px; }
+.terminal-workspace[data-density="comfortable"] .terminal-header { min-height: 84px; }
+.terminal-workspace[data-density="comfortable"] .pane-toolbar { height: 40px; }
+.terminal-workspace[data-density="comfortable"] .terminal-pane-shell { inset: 40px 0 0; }
+.terminal-workspace[data-density="comfortable"] .terminal-side-panel .terminal-tab { height: 54px; }
+.terminal-workspace[data-density="comfortable"] .settings-row, .terminal-workspace[data-density="comfortable"] .settings-toggle { min-height: 44px; }
 .terminal-header {
   z-index: 3;
   min-height: 70px;
@@ -886,6 +897,22 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-toggle i::after { position: absolute; top: 3px; left: 3px; width: 11px; height: 11px; border-radius: 50%; background: var(--t-muted); content: ""; transition: transform .14s ease; }
 .settings-toggle input:checked ~ i { background: var(--t-accent-soft); }
 .settings-toggle input:checked ~ i::after { background: var(--t-accent); transform: translateX(13px); }
+.settings-hint { margin: 0 0 10px; color: var(--t-muted); font-size: 9px; line-height: 1.5; }
+.keybinding-list { display: grid; gap: 5px; }
+.keybinding-row { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 10px; color: var(--t-text); font-size: 10.5px; }
+.keybinding-label { display: grid; min-width: 0; gap: 2px; }
+.keybinding-label strong { font-size: 10.5px; font-weight: 600; }
+.keybinding-label small { color: var(--t-muted); font-size: 8px; line-height: 1.35; }
+.keybinding-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
+.keybinding-record { display: inline-flex; height: 29px; min-width: 136px; align-items: center; justify-content: center; padding: 0 10px; border: 1px solid var(--t-border); border-radius: 4px; outline: 0; background: var(--t-panel); color: var(--t-muted); font-size: 10px; cursor: pointer; }
+.keybinding-record:hover { border-color: var(--t-accent); color: var(--t-text); }
+.keybinding-record.recording { border-color: var(--t-accent); background: var(--t-accent-soft); color: var(--t-accent); }
+.keybinding-record kbd { color: var(--t-text); font-family: "Cascadia Code", Consolas, monospace; font-size: 9.5px; }
+.keybinding-reset-one { display: grid; width: 25px; height: 25px; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--t-muted); cursor: pointer; }
+.keybinding-reset-one:hover { background: var(--t-panel-2); color: var(--t-danger); }
+.keybinding-list-footer { display: flex; justify-content: flex-end; margin-top: 10px; }
+.keybinding-reset { display: inline-flex; height: 28px; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--t-border); border-radius: 4px; background: var(--t-panel); color: var(--t-text); font-size: 9.5px; cursor: pointer; }
+.keybinding-reset:hover { border-color: var(--t-accent); color: var(--t-accent); }
 .cli-lifecycle-setting { display: grid; gap: 8px; }
 .cli-lifecycle-heading { display: flex; min-width: 0; align-items: center; gap: 8px; color: var(--t-text); }
 .cli-lifecycle-heading > span { display: grid; min-width: 0; gap: 2px; }
