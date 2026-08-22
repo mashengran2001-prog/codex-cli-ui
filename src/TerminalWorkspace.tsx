@@ -512,7 +512,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
       setSessions((current) => current.map((item) => item.id === event.sessionId ? { ...item, updatedAt: Date.now() } : item));
       if (!containsLeaf(treeRef.current, event.sessionId)) setUnread((current) => new Set(current).add(event.sessionId));
     } else if (event.type === "exit") {
-      setSessions((current) => current.map((item) => item.id === event.sessionId ? { ...item, status: "exited", activity: "idle", updatedAt: Date.now() } : item));
+      setSessions((current) => current.map((item) => item.id === event.sessionId ? { ...item, status: "exited", activity: "idle", exitedAt: Date.now(), updatedAt: Date.now() } : item));
       setNotice({ sessionId: event.sessionId, title: previous?.title || workbenchCopy.terminal, message: workbenchCopy.processExited(event.code) });
     } else if (event.type === "bell") {
       setNotice({ sessionId: event.sessionId, title: previous?.title || workbenchCopy.terminal, message: previous?.activity === "attention" ? workbenchCopy.inputRequested : workbenchCopy.attentionRequested });
@@ -1045,6 +1045,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
           <span className="pane-toolbar-actions">
             <button aria-label={workbenchCopy.splitPaneRight} title={workbenchCopy.splitPaneRight} onClick={() => void splitPane("columns", session.id, session.id)}><Columns2 size={11} /></button>
             <button aria-label={workbenchCopy.splitPaneDown} title={workbenchCopy.splitPaneDown} onClick={() => void splitPane("rows", session.id, session.id)}><Rows2 size={11} /></button>
+            {session.kind === "ssh" && session.exitedAt && <button className="pane-retry" aria-label={workbenchCopy.xRetryTerminal} title={workbenchCopy.xRetryTerminal} onClick={() => void restartSsh(session)}><RefreshCw size={11} /></button>}
             {leafCount(paneTree) > 1 && <button aria-label={workbenchCopy.closePane} title={workbenchCopy.closePane} onClick={() => closePane(session.id)}><X size={11} /></button>}
           </span>
         </div>
@@ -1061,6 +1062,9 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
 
   const tabMenuSession = tabMenu ? sessions.find((session) => session.id === tabMenu.sessionId) : undefined;
   const filesRoot = active && isWslPath(active.cwd) ? active.cwd : projectPath;
+  const filesSshProfile = active?.kind === "ssh"
+    ? selectedSsh || (active.sshProfileId ? sshProfiles.find((profile) => profile.id === active.sshProfileId) : undefined)
+    : undefined;
 
   return (
     <main className="terminal-workspace" data-terminal-theme={settings.theme} data-density={settings.density} data-workspace-view={view} data-window-focused={windowFocused} style={{ "--terminal-sidebar-width": `${sidebarWidth}px`, "--terminal-drawer-width": `${drawerWidth}px`, "--terminal-bg-opacity": settings.backgroundOpacity, "--terminal-bg-image": pathToCssUrl(settings.backgroundImage) } as React.CSSProperties}>
@@ -1155,10 +1159,12 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
             {active && <div className="command-dock"><Search size={13} /><div><input aria-label={workbenchCopy.commandInput} value={commandText} placeholder={workbenchCopy.runCommandPlaceholder} onChange={(event) => setCommandText(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); if (completionCandidates[suggestionIndex]) acceptCompletion(completionCandidates[suggestionIndex].value); else sendCommand(); } else if (event.key === "Tab" && completionCandidates.length) { event.preventDefault(); acceptCompletion(completionCandidates[suggestionIndex]?.value ?? completionCandidates[0].value); } else if (event.key === "Tab" && ghost) { event.preventDefault(); setCommandText(ghost); } else if (event.key === "ArrowDown" && completionCandidates.length) { event.preventDefault(); setSuggestionIndex((value) => (value + 1) % completionCandidates.length); } else if (event.key === "ArrowUp" && completionCandidates.length) { event.preventDefault(); setSuggestionIndex((value) => (value - 1 + completionCandidates.length) % completionCandidates.length); } else if (event.key === "ArrowDown" && suggestions.length) { event.preventDefault(); setSuggestionIndex((value) => (value + 1) % suggestions.length); } else if (event.key === "ArrowUp" && suggestions.length) { event.preventDefault(); setSuggestionIndex((value) => (value - 1 + suggestions.length) % suggestions.length); } else if (event.key === "Escape" && completionCandidates.length) { event.preventDefault(); setCompletionCandidates([]); setCompletionDismissed(true); } }} />{!completionCandidates.length && ghostSuffix && <span aria-hidden="true"><b>{commandText}</b>{ghostSuffix}</span>}{completionCandidates.length > 0 && <div className="completion-popup" role="listbox" aria-label={workbenchCopy.commandSuggestions}>{completionCandidates.map((candidate, index) => <button key={`${candidate.source}:${candidate.value}`} role="option" aria-selected={index === suggestionIndex} className={index === suggestionIndex ? "selected" : ""} onMouseDown={(event) => { event.preventDefault(); acceptCompletion(candidate.value); }} onMouseEnter={() => setSuggestionIndex(index)}><span>{candidate.value}</span><em>{workbenchCopy[completionSourceLabels[candidate.source]]}</em></button>)}</div>}</div><button title={workbenchCopy.runCommand} disabled={!commandText.trim()} onClick={() => sendCommand()}><ChevronRight size={14} /></button></div>}
           </div>
           {view === "settings" && <SettingsPanel settings={settings} shells={shells} cliTools={cliTools} cliLifecycleStatus={cliLifecycleStatus} cliLifecycleBusy={cliLifecycleBusy} onChange={onSettingsChange} onCliLifecycleToggle={onCliLifecycleToggle} onClose={() => setView("terminal")} />}
-          {view === "document" && document && <DocumentViewer document={document} onClose={() => setView("terminal")} />}
+          {view === "document" && document && <DocumentViewer document={document} root={filesRoot} onClose={() => setView("terminal")} onError={onError} />}
         </section>
         {terminalView && drawer && settings.resizablePanels && <div className="panel-resizer drawer-resizer" onPointerDown={(event) => resizePanel("drawer", event)} />}
-        {terminalView && drawer === "files" && project && <FilesDrawer root={filesRoot} onClose={() => setDrawer(null)} onNewTerminal={(path) => void createTerminal(path, { reuseExisting: false, shellId: settings.defaultShellId })} onDocument={(next) => { setDocument(next); setDrawer(null); setView("document"); }} onError={onError} />}
+        {terminalView && drawer === "files" && project && (filesSshProfile
+          ? <SftpDrawer profile={filesSshProfile} onClose={() => setDrawer(null)} onError={onError} />
+          : <FilesDrawer root={filesRoot} onClose={() => setDrawer(null)} onNewTerminal={(path) => void createTerminal(path, { reuseExisting: false, shellId: settings.defaultShellId })} onDocument={(next) => { setDocument(next); setDrawer(null); setView("document"); }} onError={onError} />)}
         {terminalView && drawer === "git" && project && <GitDrawer root={projectPath} onClose={() => setDrawer(null)} onError={onError} />}
         {terminalView && drawer === "sftp" && selectedSsh && <SftpDrawer profile={selectedSsh} onClose={() => setDrawer(null)} onError={onError} />}
         {terminalView && drawer === "directories" && <DirectoriesDrawer onClose={() => setDrawer(null)} onNewTerminal={(path) => void createTerminal(path, { reuseExisting: false, shellId: settings.defaultShellId })} onCd={jumpToDirectory} onError={onError} />}

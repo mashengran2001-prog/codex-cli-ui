@@ -828,6 +828,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .pane-toolbar .pane-toolbar-actions { display: flex; align-items: center; gap: 2px; }
 .pane-toolbar .pane-toolbar-actions button:hover { background: var(--t-panel-2); color: var(--t-accent); }
 .pane-toolbar .pane-toolbar-actions button:last-child:hover { color: var(--t-danger); }
+.pane-toolbar .pane-toolbar-actions .pane-retry { color: var(--t-accent); }
 .terminal-pane-shell { position: absolute; inset: 34px 0 0; min-width: 0; min-height: 0; }
 .terminal-canvas { inset: 0; padding: 13px 14px 9px; }
 .terminal-canvas .xterm-viewport { scrollbar-color: var(--t-panel-2) var(--t-bg); }
@@ -1012,6 +1013,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .document-content blockquote { margin-left: 0; padding-left: 12px; border-left: 3px solid var(--t-accent); color: var(--t-muted); }
 .document-content a { color: var(--t-accent); }
 .document-content .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+.document-content img { display: block; max-width: 100%; max-height: 68vh; margin: 10px auto; border-radius: 5px; }
+.document-content .markdown-image-loading, .document-content .markdown-image-fallback { display: inline-flex; align-items: center; gap: 6px; margin: 6px 0; padding: 5px 9px; border: 1px dashed var(--t-border); border-radius: 4px; color: var(--t-muted); font-size: 10px; }
 .ssh-overlay { z-index: 40; }
 .ssh-editor { display: flex; width: min(530px, calc(100% - 28px)); max-height: calc(100% - 32px); flex-direction: column; overflow: hidden; border: 1px solid var(--t-border); border-radius: 7px; background: var(--t-panel); color: var(--t-text); box-shadow: 0 24px 70px rgb(0 0 0 / 45%); }
 .ssh-editor header, .ssh-editor footer { display: flex; min-height: 43px; align-items: center; justify-content: space-between; padding: 0 10px 0 14px; border-bottom: 1px solid var(--t-border); }

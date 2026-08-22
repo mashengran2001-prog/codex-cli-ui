@@ -424,6 +424,7 @@ export interface CodexBridge {
   closeTerminal(id: string): Promise<boolean>;
   listDirectory(root: string, path: string): Promise<FileSystemEntry[]>;
   readDocument(root: string, path: string): Promise<DocumentFile | null>;
+  readDocumentImage(root: string, path: string): Promise<string | null>;
   getGitStatus(path: string): Promise<GitStatus>;
   runGitAction(request: GitActionRequest): Promise<OperationResult>;
   listSshProfiles(): Promise<SshProfile[]>;

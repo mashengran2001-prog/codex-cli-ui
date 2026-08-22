@@ -150,6 +150,7 @@ const MAX_TERMINAL_HISTORY = 300_000;
 const MAX_TERMINAL_INPUT = 64 * 1024;
 const MAX_TERMINALS = 16;
 const MAX_DOCUMENT_BYTES = 4 * 1024 * 1024;
+const MAX_DOCUMENT_IMAGE_BYTES = 24 * 1024 * 1024;
 const MAX_HISTORY_ENTRIES = 1_000;
 const TRAY_ICON_NORMAL = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAj0lEQVR42mNgGAWDGShpmf2nFA+o5WQ7gpqWk+wIWlhOtCNoaTlRjhh1ADYNN+69BGNSLMGnh6wQIMURhNSSHQXEOIIYNRSlAXwWEBtKFCdCbBaREkVUyQXIFpKaSKmWDWEWk5pDhocDBjQKBjQRDopsOCCVEXKCQ8fDqzYc8BbRoGgTDopW8aDoF4yCEQMAaFvXhPR1GkEAAAAASUVORK5CYII=";
 const TRAY_ICON_ATTENTION = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAkUlEQVR42mNgGAWDGShpmf2nFA+I5V+XKWPgAbWcJEfQynKiHEFpfI86gCYOuHHvJRgPaAhQyxEEywV8BhPjCJgaXJZT5ABCjiA2lChOhNgsIiWKqJILkC0kxXKqOQDZYlIsHz4OGNAoGNBEOCiyIU1bSMQkOHRMFwfQLQRo7Qi6toYpbh0PqOWDol8wCkYMAABlMijOt8suCgAAAABJRU5ErkJggg==";
@@ -1534,6 +1535,54 @@ async function readWorkspaceDocument(rootValue: string, pathValue: string): Prom
   return { path: target, name: basename(target), kind, content, size: details.size, modifiedAt: details.mtimeMs };
 }
 
+const IMAGE_MIME: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".bmp": "image/bmp",
+  ".ico": "image/x-icon",
+  ".avif": "image/avif",
+};
+
+async function readWorkspaceImage(rootValue: string, pathValue: string): Promise<string | null> {
+  const wsl = isWslPath(rootValue) || isWslPath(pathValue);
+  const lexicalRoot = wsl ? normalizeWslPath(rootValue) : resolve(rootValue);
+  const lexicalTarget = wsl ? normalizeWslPath(pathValue) : resolve(pathValue);
+  if (!isDirectory(lexicalRoot)) return null;
+  if (wsl ? !isWslPathWithin(lexicalRoot, lexicalTarget) : !isPathWithin(lexicalRoot, lexicalTarget)) return null;
+  let target = lexicalTarget;
+  if (!wsl) {
+    const realTarget = await realpath(lexicalTarget);
+    if (!isPathWithin(lexicalRoot, realTarget)) return null;
+    target = realTarget;
+  }
+  const details = wsl ? await statWithTimeout(target) : await stat(target);
+  if (!details.isFile() || details.size > MAX_DOCUMENT_IMAGE_BYTES) return null;
+  const mime = IMAGE_MIME[extname(target).toLowerCase()];
+  if (!mime) return null;
+  const buffer = wsl
+    ? await readFileWithTimeout(target)
+    : await readFile(target);
+  return `data:${mime};base64,${buffer.toString("base64")}`;
+}
+
+function readFileWithTimeout(path: string, timeoutMs = 10_000) {
+  return new Promise<Buffer>(async (resolveResult, reject) => {
+    const timer = setTimeout(() => reject(new Error("WSL 正在启动或读取超时，请稍后重试")), timeoutMs);
+    try {
+      const buffer = await readFile(path);
+      clearTimeout(timer);
+      resolveResult(buffer);
+    } catch (error) {
+      clearTimeout(timer);
+      reject(error);
+    }
+  });
+}
+
 function statWithTimeout(path: string, timeoutMs = 10_000) {
   return new Promise<Stats>(async (resolveResult, reject) => {
     const timer = setTimeout(() => reject(new Error("WSL 正在启动或读取超时，请稍后重试")), timeoutMs);
@@ -2641,7 +2690,8 @@ ipcMain.handle("terminal:completions", async (_event, prefix: unknown, cwd: unkn
   } catch { /* No shared history yet. */ }
   // 2. Files and directories under the pane's working directory.
   try {
-    const entries = await readdir(cwd, { withFileTypes: true });
+    const wslCwd = isWslPath(cwd);
+    const entries = wslCwd ? await readdirWithTimeout(cwd) : await readdir(cwd, { withFileTypes: true });
     const visible = (entry: Dirent) => entry.name.toLowerCase().startsWith(lower) && (entry.name.startsWith(".") ? token.startsWith(".") : true);
     const dirs = entries.filter((entry) => entry.isDirectory() && visible(entry));
     const files = entries.filter((entry) => !entry.isDirectory() && visible(entry));
@@ -2821,6 +2871,12 @@ ipcMain.handle("terminal:document", async (event, root: unknown, path: unknown) 
     ? readWorkspaceDocument(root, path)
     : null
 ));
+
+ipcMain.handle("terminal:document-image", async (event, root: unknown, path: unknown) => {
+  return typeof root === "string" && typeof path === "string" && isAuthorizedTerminalRoot(event.sender.id, root)
+    ? readWorkspaceImage(root, path)
+    : null;
+});
 
 ipcMain.handle("terminal:git", async (event, path: unknown): Promise<GitStatus> => (
   isDirectory(path) && isAuthorizedTerminalRoot(event.sender.id, path)

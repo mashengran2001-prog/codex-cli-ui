@@ -145,7 +145,7 @@ export async function installMockBridge(page) {
       window.setTimeout(() => emit({ providerId: request.providerId, runId: request.runId, type: "exit", code: 0, stopped: false }), 115);
     };
 
-    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null, lastPasteProfileId: null, lastResumeId: null, lastFork: null, svnMode: false, lastGitAction: null };
+    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null, lastPasteProfileId: null, lastResumeId: null, lastFork: null, svnMode: false, lastGitAction: null, $$callLog: { readDocument: [], readDocumentImage: [] } };
     window.codex = {
       getInfo: async () => codexProvider,
       listProviders: async () => [codexProvider, deepseekProvider],
@@ -246,7 +246,14 @@ export async function installMockBridge(page) {
         { name: "src", path: `${path}\\src`, type: "directory" },
         { name: "README.md", path: `${path}\\README.md`, type: "file", size: 2113 },
       ],
-      readDocument: async (_root, path) => path.endsWith("README.md") ? { path, name: "README.md", kind: "markdown", content: "# Atlas\n\nInline math $x^2$.", size: 2113, modifiedAt: Date.now() } : null,
+      readDocument: async (_root, path) => {
+        window.__mock.$$callLog.readDocument.push({ args: [_root, path] });
+        return path.endsWith("README.md") ? { path, name: "README.md", kind: "markdown", content: "# Atlas\n\n![logo](logo.png)\n\n![remote](https://example.com/banner.png)\n\nInline math $x^2$.", size: 2113, modifiedAt: Date.now() } : null;
+      },
+      readDocumentImage: async (_root, path) => {
+        window.__mock.$$callLog.readDocumentImage.push({ args: [_root, path] });
+        return path.endsWith("logo.png") ? "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==" : null;
+      },
       getGitStatus: async () => window.__mock.svnMode
         ? { available: true, branch: "r124", revision: "124", vcs: "svn", entries: [{ status: "M", path: "src/App.tsx" }, { status: "A", path: "README.md" }] }
         : { available: true, branch: "main", vcs: "git", entries: [{ status: "M", path: "src/App.tsx" }] },

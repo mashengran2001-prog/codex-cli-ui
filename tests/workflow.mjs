@@ -260,8 +260,24 @@ try {
   await readmeRow.dragTo(page.locator(".terminal-pane-leaf .terminal-canvas"));
   await page.waitForFunction(() => window.__mock.terminalWrites.some((write) => write.data === "'F:\\demo\\atlas-workspace\\README.md'"));
   await readmeRow.click();
-  await page.getByRole("heading", { name: "Atlas" }).waitFor();
-  await page.getByRole("button", { name: "关闭文档" }).click();
+ await page.getByRole("heading", { name: "Atlas" }).waitFor();
+  // DocumentViewer 本地与远程图片渲染
+  const localImg = page.locator('.document-content img[src^="data:image/png"]');
+  await localImg.waitFor();
+  assert.ok(await localImg.evaluate((img) => img.complete && img.naturalWidth > 0));
+  const remoteImg = page.locator('.document-content img[src="https://example.com/banner.png"]');
+  await remoteImg.waitFor();
+  assert.equal(await remoteImg.getAttribute("src"), "https://example.com/banner.png");
+  // 验证 readDocumentImage 被调用且 root 参数正确
+  assert.equal(await page.evaluate(() => {
+    const logs = window.__mock.$$callLog?.readDocumentImage || [];
+    return logs.length > 0;
+  }), true);
+  const callLog = await page.evaluate(() => (window.__mock.$$callLog?.readDocumentImage || [])[0]);
+  assert.ok(callLog?.args?.[0]?.endsWith("atlas-workspace"), `root should end with atlas-workspace, got ${callLog?.args?.[0]}`);
+  const readDocLog = await page.evaluate(() => (window.__mock.$$callLog?.readDocument || [])[0]);
+  assert.ok(readDocLog?.args?.[0]?.endsWith("atlas-workspace"), `readDocument root should end with atlas-workspace, got ${readDocLog?.args?.[0]}`);
+ await page.getByRole("button", { name: "关闭文档" }).click();
   await page.getByRole("button", { name: "Git 状态" }).click();
   await page.getByText("src/App.tsx").waitFor();
   // 常用目录面板：frecency 历史 + 收藏 + 跳转 / 新建终端 / 移除历史
@@ -298,6 +314,31 @@ try {
   await page.keyboard.press("Control+v");
   await page.waitForFunction(() => window.__mock.terminalWrites.some((write) => String(write.data).includes("codex-ui-paste-123.png")));
   assert.equal(await page.evaluate(() => window.__mock.lastPasteProfileId), "ssh-mock");
+  // SSH pane 退出后出现重试按钮，点击后旧会话关闭并重建 SSH 会话
+  const sshSessionId = await page.evaluate(() => {
+    const session = window.__mock.terminalSessions.find((item) => item.kind === "ssh");
+    const sessionId = session.id;
+    window.__mock.terminalListeners.forEach((listener) => listener({ sessionId, type: "exit", code: 1 }));
+    return sessionId;
+  });
+  const sshRetry = page.locator(`.terminal-pane-leaf[data-session-id="${sshSessionId}"] .pane-retry`);
+  await sshRetry.waitFor();
+  assert.equal(await sshRetry.getAttribute("aria-label"), "重试 SSH 连接");
+  await sshRetry.click();
+  // restartSsh 会删除旧会话再创建新会话，总量不变，等旧会话被移除且新 SSH 会话出现
+  await page.waitForFunction((oldId) => {
+    const sessions = window.__mock.terminalSessions;
+    const oldGone = !sessions.some((item) => item.id === oldId);
+    const newSsh = sessions.some((item) => item.kind === "ssh" && item.id !== oldId);
+    return oldGone && newSsh;
+  }, sshSessionId);
+  assert.ok(!(await page.evaluate((id) => window.__mock.terminalSessions.some((item) => item.id === id), sshSessionId)), "old SSH session should be closed");
+  assert.equal(await page.evaluate(() => window.__mock.terminalSessions.at(-1).kind), "ssh");
+  // 活动 SSH pane 时文件面板跟随为 SFTP
+  await page.getByRole("button", { name: "文件", exact: true }).click();
+  await page.locator(".sftp-drawer").waitFor();
+  await page.getByText("remote.txt").waitFor();
+  await page.getByRole("button", { name: "关闭 SFTP 面板" }).click();
   // AI 会话恢复与分叉：meta 事件写入 aiSource/aiSessionId 后，标签右键菜单出现两个入口
   const aiSessionId = await page.evaluate(() => {
     const sessionId = window.__mock.terminalSessions[0].id;

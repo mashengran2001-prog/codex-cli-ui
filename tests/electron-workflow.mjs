@@ -63,7 +63,20 @@ try {
   await window.keyboard.type('Write-Output ("NEBULA" + "_PTY_OK")', { delay: 12 });
   await window.keyboard.press("Enter");
   await window.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent?.includes("NEBULA_PTY_OK"), undefined, { timeout: 15_000 });
-  assert.equal(await window.evaluate(async () => (await window.codex.listTerminals()).length), 1);
+ assert.equal(await window.evaluate(async () => (await window.codex.listTerminals()).length), 1);
+  // 真实 readDocumentImage IPC 验证
+  const probeImg = join(root, "probe-img-test.png");
+  const { writeFile, rm: rmFile } = await import("node:fs/promises");
+  await writeFile(probeImg, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"));
+  try {
+    const result = await window.evaluate(async ([r, p]) => await window.codex.readDocumentImage(r, p), [root, probeImg]);
+    assert.match(result, /^data:image\/png;base64,/);
+    const resultNull = await window.evaluate(async ([r, p]) => await window.codex.readDocumentImage(r, p), [root, "C:\\Windows\\win.ini"]);
+    assert.equal(resultNull, null);
+    console.log("electron-image: readDocumentImage IPC verified");
+  } finally {
+    await rmFile(probeImg).catch(() => {});
+  }
   await window.getByRole("button", { name: "设置", exact: true }).click();
   await window.getByLabel("打开 PowerShell/CMD 时唤起工作台").check();
   await window.waitForFunction(async () => (await window.codex.getAppSettings()).shellStartupIntegration === true, undefined, { timeout: 15_000 });
