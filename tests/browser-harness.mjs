@@ -153,6 +153,31 @@ export async function installMockBridge(page) {
         { id: "builtin:claude", name: "Claude Code", command: "claude", args: [], icon: "code", description: "Anthropic Claude Code", builtIn: true, available: false, installCommand: "npm install -g @anthropic-ai/claude-code" },
       ],
       getCommandHistory: async (prefix) => prefix ? [`${prefix} --help`] : [],
+      listDirectories: async () => (window.__mock.directoryEntries || [
+        { path: "F:\\demo\\atlas-workspace", rank: 820, lastAccessed: Date.now() - 1000, pinned: true, score: 820 },
+        { path: "F:\\demo\\docs", rank: 240, lastAccessed: Date.now() - 3600_000, pinned: false, score: 210 },
+      ]),
+      pinDirectory: async (path) => {
+        window.__mock.directoryEntries = (window.__mock.directoryEntries || [
+          { path: "F:\\demo\\atlas-workspace", rank: 820, lastAccessed: Date.now() - 1000, pinned: true, score: 820 },
+          { path: "F:\\demo\\docs", rank: 240, lastAccessed: Date.now() - 3600_000, pinned: false, score: 210 },
+        ]).map((entry) => entry.path === path ? { ...entry, pinned: true } : entry);
+        return window.__mock.directoryEntries;
+      },
+      unpinDirectory: async (path) => {
+        window.__mock.directoryEntries = (window.__mock.directoryEntries || [
+          { path: "F:\\demo\\atlas-workspace", rank: 820, lastAccessed: Date.now() - 1000, pinned: true, score: 820 },
+          { path: "F:\\demo\\docs", rank: 240, lastAccessed: Date.now() - 3600_000, pinned: false, score: 210 },
+        ]).map((entry) => entry.path === path ? { ...entry, pinned: false } : entry);
+        return window.__mock.directoryEntries;
+      },
+      removeDirectory: async (path) => {
+        window.__mock.directoryEntries = (window.__mock.directoryEntries || [
+          { path: "F:\\demo\\atlas-workspace", rank: 820, lastAccessed: Date.now() - 1000, pinned: true, score: 820 },
+          { path: "F:\\demo\\docs", rank: 240, lastAccessed: Date.now() - 3600_000, pinned: false, score: 210 },
+        ]).filter((entry) => entry.path !== path);
+        return window.__mock.directoryEntries;
+      },
       getCompletions: async (prefix) => prefix ? [
         { value: `${prefix} --help`, source: "history" },
         { value: `${prefix}.ps1`, source: "command" },

@@ -13,8 +13,11 @@ import {
   FolderTree,
   GitBranch,
   GitCommitHorizontal,
+  History,
   LoaderCircle,
   Pencil,
+  Pin,
+  PinOff,
   RefreshCw,
   Search,
   Send,
@@ -24,7 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { useUiCopy } from "../i18n";
-import type { DocumentFile, FileSystemEntry, GitStatus, SftpEntry, SshProfile } from "../types";
+import type { DirectoryEntry, DocumentFile, FileSystemEntry, GitStatus, SftpEntry, SshProfile } from "../types";
 
 function samePath(left: string, right: string) {
   return left.replace(/[\\/]+$/, "").toLowerCase() === right.replace(/[\\/]+$/, "").toLowerCase();
@@ -124,6 +127,55 @@ export function GitDrawer({ root, onClose, onError }: { root: string; onClose():
         {status && !status.available && <div className="drawer-empty error">{status.error || copy.unavailable}</div>}
       </div>
       {status?.available && <div className="git-actions"><div><button disabled={loading} onClick={() => void act("stage")}><ArrowDownToLine size={13} />{copy.stage}</button><button disabled={loading} onClick={() => void act("unstage")}><ArrowUpFromLine size={13} />{copy.unstage}</button></div><label><input value={message} placeholder={copy.commitMessage} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && message.trim()) void act("commit"); }} /><button title={copy.commit} disabled={!message.trim() || loading} onClick={() => void act("commit")}><GitCommitHorizontal size={14} /></button></label></div>}
+    </aside>
+  );
+}
+
+export function DirectoriesDrawer({ onClose, onNewTerminal, onCd, onError }: {
+  onClose(): void;
+  onNewTerminal(path: string): void;
+  onCd(path: string): void;
+  onError(message: string): void;
+}) {
+  const copy = useUiCopy().directories;
+  const [entries, setEntries] = useState<DirectoryEntry[]>([]);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try { setEntries(await window.codex.listDirectories()); }
+    catch (reason) { onError(reason instanceof Error ? reason.message : copy.loadFailed); }
+    finally { setLoading(false); }
+  }, [copy, onError]);
+  useEffect(() => { void refresh(); }, [refresh]);
+  const visibleEntries = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    const filtered = normalized
+      ? entries.filter((entry) => entry.path.toLowerCase().includes(normalized) || (entry.path.split(/[\\/]/).at(-1) || "").toLowerCase().includes(normalized))
+      : entries;
+    return [...filtered].sort((left, right) => (left.pinned ? 0 : 1) - (right.pinned ? 0 : 1) || right.score - left.score);
+  }, [entries, query]);
+  const update = async (action: () => Promise<DirectoryEntry[]>) => {
+    try { setEntries(await action()); }
+    catch (reason) { onError(reason instanceof Error ? reason.message : copy.loadFailed); }
+  };
+  const baseName = (path: string) => path.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || path;
+  return (
+    <aside className="terminal-drawer directories-drawer" aria-label={copy.title}>
+      <div className="drawer-heading"><div><History size={15} /><strong>{copy.title}</strong><span>{visibleEntries.length}</span></div><button title={copy.close} onClick={onClose}><X size={14} /></button></div>
+      <label className="drawer-search"><Search size={13} /><input value={query} placeholder={copy.search} onChange={(event) => setQuery(event.target.value)} /></label>
+      <div className="file-list">
+        {visibleEntries.map((entry) => <div className="file-row directories-row" key={entry.path} title={entry.path}>
+          <span className={`file-kind ${entry.pinned ? "pinned" : "directory"}`}>{entry.pinned ? <Pin size={13} /> : <Folder size={14} />}</span>
+          <button className="directories-jump" title={copy.jump} onClick={() => onCd(entry.path)}><strong>{baseName(entry.path)}</strong><small>{entry.path}</small></button>
+          <span className="drawer-row-actions">
+            <button title={copy.terminalHere} onClick={() => onNewTerminal(entry.path)}><TerminalSquare size={12} /></button>
+            <button title={entry.pinned ? copy.unpin : copy.pin} onClick={() => void update(() => entry.pinned ? window.codex.unpinDirectory(entry.path) : window.codex.pinDirectory(entry.path))}>{entry.pinned ? <PinOff size={12} /> : <Pin size={12} />}</button>
+            <button title={copy.remove} onClick={() => void update(() => window.codex.removeDirectory(entry.path))}><Trash2 size={12} /></button>
+          </span>
+        </div>)}
+        {!loading && visibleEntries.length === 0 && <div className="drawer-empty">{copy.empty}</div>}
+      </div>
     </aside>
   );
 }

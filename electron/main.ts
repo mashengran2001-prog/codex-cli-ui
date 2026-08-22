@@ -32,6 +32,7 @@ import type {
   CliToolInfo,
   CodexInfo,
   CompletionCandidate,
+  DirectoryEntry,
   DocumentFile,
   FileSystemEntry,
   GitActionRequest,
@@ -741,6 +742,121 @@ function terminalRuntimeStatePath() {
   return join(app.getPath("userData"), "terminal-runtime.json");
 }
 
+const DIRECTORY_HISTORY_LIMIT = 2_048;
+const DIRECTORY_HISTORY_TOTAL_RANK = 10_000;
+const HOUR_MS = 60 * 60 * 1_000;
+const DAY_MS = 24 * HOUR_MS;
+const WEEK_MS = 7 * DAY_MS;
+
+function directoryHistoryPath() {
+  return join(app.getPath("userData"), "directory-history.json");
+}
+
+function directoryScore(entry: { rank: number; lastAccessed: number }, now: number) {
+  const age = Math.max(0, now - entry.lastAccessed);
+  const recency = age < HOUR_MS ? 4.0 : age < DAY_MS ? 2.0 : age < WEEK_MS ? 0.5 : 0.25;
+  return entry.rank * recency;
+}
+
+function loadDirectoryHistory(): DirectoryEntry[] {
+  try {
+    const value = JSON.parse(readFileSync(directoryHistoryPath(), "utf8")) as { entries?: unknown };
+    if (!Array.isArray(value.entries)) return [];
+    const now = Date.now();
+    const entries: DirectoryEntry[] = [];
+    for (const item of value.entries) {
+      if (!item || typeof item !== "object") continue;
+      const path = (item as { path?: unknown }).path;
+      const rank = (item as { rank?: unknown }).rank;
+      const lastAccessed = (item as { lastAccessed?: unknown }).lastAccessed;
+      const pinned = (item as { pinned?: unknown }).pinned === true;
+      if (typeof path !== "string" || !path || path.length > 4096 || !isDirectory(path)) continue;
+      if (typeof rank !== "number" || !Number.isFinite(rank) || rank <= 0) continue;
+      if (typeof lastAccessed !== "number" || !Number.isFinite(lastAccessed)) continue;
+      entries.push({ path, rank, lastAccessed, pinned, score: directoryScore({ rank, lastAccessed }, now) });
+    }
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+let directoryHistory: DirectoryEntry[] = loadDirectoryHistory();
+const lastDirectoryRecord = new Map<string, { path: string; at: number }>();
+
+function recordSessionDirectory(session: TerminalSession) {
+  const now = Date.now();
+  const previous = lastDirectoryRecord.get(session.id);
+  const key = normalizePath(session.cwd);
+  if (previous && previous.path === key && now - previous.at < 5 * 60_000) return;
+  lastDirectoryRecord.set(session.id, { path: key, at: now });
+  recordDirectoryPath(session.cwd);
+}
+
+function saveDirectoryHistory() {
+  try {
+    writeFileSync(directoryHistoryPath(), JSON.stringify({ entries: directoryHistory.map(({ path, rank, lastAccessed, pinned }) => ({ path, rank, lastAccessed, pinned })) }, null, 2), "utf8");
+  } catch {
+    // Directory history is best-effort on read-only profiles.
+  }
+}
+
+function pruneDirectoryHistory() {
+  const now = Date.now();
+  directoryHistory.forEach((entry) => { entry.score = directoryScore(entry, now); });
+  const total = directoryHistory.reduce((sum, entry) => sum + entry.rank, 0);
+  if (total > DIRECTORY_HISTORY_TOTAL_RANK) {
+    const factor = (0.9 * DIRECTORY_HISTORY_TOTAL_RANK) / total;
+    for (const entry of directoryHistory) entry.rank *= factor;
+  }
+  directoryHistory = directoryHistory
+    .filter((entry) => entry.pinned || entry.rank >= 1.0)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, DIRECTORY_HISTORY_LIMIT);
+  directoryHistory.forEach((entry) => { entry.score = directoryScore(entry, Date.now()); });
+}
+
+function recordDirectoryPath(path: string) {
+  if (!isDirectory(path)) return;
+  const normalized = resolve(path);
+  const now = Date.now();
+  const existing = directoryHistory.find((entry) => normalizePath(entry.path) === normalizePath(normalized));
+  if (existing) {
+    existing.rank += 1;
+    existing.lastAccessed = Math.max(existing.lastAccessed, now);
+    existing.path = normalized;
+  } else {
+    directoryHistory.push({ path: normalized, rank: 1, lastAccessed: now, pinned: false, score: 0 });
+  }
+  pruneDirectoryHistory();
+  saveDirectoryHistory();
+}
+
+function listDirectories(): DirectoryEntry[] {
+  const now = Date.now();
+  return directoryHistory
+    .filter((entry) => isDirectory(entry.path))
+    .map((entry) => ({ ...entry, score: directoryScore(entry, now) }))
+    .sort((left, right) => (Number(right.pinned) - Number(left.pinned)) || (right.score - left.score) || left.path.localeCompare(right.path));
+}
+
+function updateDirectoryPin(path: string, pinned: boolean) {
+  const entry = directoryHistory.find((candidate) => normalizePath(candidate.path) === normalizePath(path));
+  if (entry) entry.pinned = pinned;
+  else if (pinned && isDirectory(path)) {
+    const now = Date.now();
+    directoryHistory.push({ path: resolve(path), rank: 1, lastAccessed: now, pinned: true, score: 0 });
+  }
+  saveDirectoryHistory();
+  return listDirectories();
+}
+
+function removeDirectoryEntry(path: string) {
+  directoryHistory = directoryHistory.filter((entry) => normalizePath(entry.path) !== normalizePath(path));
+  saveDirectoryHistory();
+  return listDirectories();
+}
+
 function initializeTerminalCrashGuard() {
   let failures = 0;
   try {
@@ -926,6 +1042,7 @@ function updateTerminalCwd(session: TerminalSession, data: string) {
       // Invalid OSC 7 paths are ignored.
     }
   }
+  if (isDirectory(session.cwd)) recordSessionDirectory(session);
 }
 
 function appendTerminalOutput(session: TerminalSession, data: string) {
@@ -1250,6 +1367,7 @@ function createTerminalSession(
     lastBellAt: 0,
   };
   terminalSessions.set(session.id, session);
+  recordSessionDirectory(session);
   terminal.onData((data) => appendTerminalOutput(session, data));
   terminal.onExit(({ exitCode }) => {
     flushTerminalOutput(session);
@@ -2319,6 +2437,20 @@ ipcMain.handle("terminal:list", async (event) => {
 
 ipcMain.handle("terminal:shells", () => detectedShells.map(({ args: _args, ...profile }) => profile));
 ipcMain.handle("terminal:cli-tools", () => cliToolsInfo());
+
+ipcMain.handle("directories:list", () => listDirectories());
+ipcMain.handle("directories:pin", (_event, value: unknown) => {
+  if (typeof value !== "string" || value.length === 0 || value.length > 4096) throw new Error("无效的目录");
+  return updateDirectoryPin(value, true);
+});
+ipcMain.handle("directories:unpin", (_event, value: unknown) => {
+  if (typeof value !== "string" || value.length === 0 || value.length > 4096) throw new Error("无效的目录");
+  return updateDirectoryPin(value, false);
+});
+ipcMain.handle("directories:remove", (_event, value: unknown) => {
+  if (typeof value !== "string" || value.length === 0 || value.length > 4096) throw new Error("无效的目录");
+  return removeDirectoryEntry(value);
+});
 
 ipcMain.handle("terminal:history", async (_event, prefix: unknown, cwd: unknown) => {
   if (typeof prefix !== "string" || prefix.length > 4096 || typeof cwd !== "string" || cwd.length > 4096) return [];

@@ -3,15 +3,15 @@ import {
   Bell, Bot, ChevronDown, ChevronLeft, ChevronRight, CircleX, Columns2, Command, Copy,
   FolderOpen, FolderTree, GitBranch, GitFork, Globe2, GripVertical, LoaderCircle, PanelLeftClose,
   PanelLeftOpen, Pencil, Plus, RefreshCw, Rows2, Search, Server, Settings2, SquareTerminal, TerminalSquare, TriangleAlert, Upload, X,
-  RotateCcw,
+  RotateCcw, History,
 } from "lucide-react";
 import BrandIcon from "./BrandIcon";
 import type { AppSettings, CliLifecycleStatus, CliToolInfo, CompletionCandidate, DocumentFile, ProjectRecord, ShellProfile, SshProfile, TerminalEvent, TerminalInfo } from "./types";
-import { getWorkbenchCopy } from "./i18n";
+import { getUiCopy, getWorkbenchCopy } from "./i18n";
 import { keybindingMatches } from "./keybindings";
 import CommandPalette, { type PaletteAction } from "./terminal/CommandPalette";
 import DocumentViewer from "./terminal/DocumentViewer";
-import { FilesDrawer, GitDrawer, SftpDrawer } from "./terminal/Drawers";
+import { DirectoriesDrawer, FilesDrawer, GitDrawer, SftpDrawer } from "./terminal/Drawers";
 import SettingsPanel from "./terminal/SettingsPanel";
 import SshEditor from "./terminal/SshEditor";
 import TerminalPane from "./terminal/TerminalPane";
@@ -34,7 +34,7 @@ interface TerminalWorkspaceProps {
   onError(message: string): void;
 }
 
-type Drawer = "files" | "git" | "sftp" | null;
+type Drawer = "files" | "git" | "sftp" | "directories" | null;
 type WorkspaceView = "terminal" | "settings" | "document";
 type SplitDirection = "columns" | "rows";
 type DockEdge = "center" | "left" | "right" | "top" | "bottom";
@@ -266,6 +266,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const initialLayout = useMemo(loadLayout, []);
   const initialPaneState = useMemo(() => migrateLayout(initialLayout), [initialLayout]);
   const workbenchCopy = getWorkbenchCopy(settings.language);
+  const directoriesCopy = getUiCopy(settings.language).directories;
   const [sessions, setSessions] = useState<TerminalInfo[]>([]);
   const [paneTree, setPaneTree] = useState<PaneNode | null>(initialPaneState.tree);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(initialPaneState.activeSessionId);
@@ -848,6 +849,18 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   };
 
   const openSftp = (profile: SshProfile) => { setSelectedSsh(profile); setDrawer("sftp"); };
+  const jumpToDirectory = (path: string) => {
+    if (!path) return;
+    if (active) {
+      const quote = path.replaceAll("'", "''");
+      const command = /powershell/i.test(active.shell) ? `Set-Location -LiteralPath '${quote}'`
+        : /cmd/i.test(active.shell) ? `cd /d "${path.replaceAll('"', '""')}"`
+          : `cd '${path.replaceAll("'", "'\\''")}'`;
+      void window.codex.writeTerminal(active.id, `${command}\r`);
+    } else {
+      void createTerminal(path, { reuseExisting: false, shellId: settings.defaultShellId });
+    }
+  };
   const connectSsh = async (profile: SshProfile) => {
     setSelectedSsh(profile);
     await createTerminal(active?.cwd || projectPath, { reuseExisting: false, sshProfileId: profile.id, title: profile.name });
@@ -895,6 +908,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     { id: "resize", group: workbenchCopy.layout, label: workbenchCopy.resizePanels, icon: <GripVertical size={14} />, checked: settings.resizablePanels, run: () => onSettingsChange({ ...settings, resizablePanels: !settings.resizablePanels }) },
     { id: "files", group: workbenchCopy.workspace, label: workbenchCopy.files, icon: <FolderTree size={14} />, checked: drawer === "files", run: () => setDrawer((value) => value === "files" ? null : "files") },
     { id: "git", group: workbenchCopy.workspace, label: "Git", icon: <GitBranch size={14} />, checked: drawer === "git", run: () => setDrawer((value) => value === "git" ? null : "git") },
+    { id: "directories", group: workbenchCopy.workspace, label: directoriesCopy.title, icon: <History size={14} />, checked: drawer === "directories", run: () => setDrawer((value) => value === "directories" ? null : "directories") },
     { id: "settings", group: workbenchCopy.workspace, label: workbenchCopy.settings, icon: <Settings2 size={14} />, run: () => setView("settings") },
     { id: "new-ssh-host", group: workbenchCopy.sshHosts, label: workbenchCopy.newSshHost, icon: <Plus size={14} />, run: () => setSshEditor("new") },
     { id: "quick-terminal", group: workbenchCopy.workspace, label: workbenchCopy.quickTerminalAction, icon: <TerminalSquare size={14} />, checked: settings.quickTerminal, run: () => onSettingsChange({ ...settings, quickTerminal: !settings.quickTerminal }) },
@@ -994,6 +1008,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
           {terminalView && <>
             <button className={drawer === "files" ? "active" : ""} aria-label={workbenchCopy.files} title={workbenchCopy.files} onClick={() => setDrawer((value) => value === "files" ? null : "files")}><FolderTree size={14} /></button>
             <button className={drawer === "git" ? "active" : ""} aria-label={workbenchCopy.gitStatus} title={workbenchCopy.gitStatus} onClick={() => setDrawer((value) => value === "git" ? null : "git")}><GitBranch size={14} /></button>
+            <button className={drawer === "directories" ? "active" : ""} aria-label={directoriesCopy.title} title={directoriesCopy.title} onClick={() => setDrawer((value) => value === "directories" ? null : "directories")}><History size={14} /></button>
             {active?.kind === "ssh" && selectedSsh && <button className={drawer === "sftp" ? "active" : ""} title="SFTP" onClick={() => openSftp(selectedSsh)}><Upload size={14} /></button>}
             <button title={workbenchCopy.splitRight} onClick={() => void splitPane("columns")}><Columns2 size={14} /></button>
             <button title={workbenchCopy.commandPalette} onClick={() => setPaletteOpen(true)}><Command size={14} /></button>
@@ -1073,6 +1088,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
         {terminalView && drawer === "files" && project && <FilesDrawer root={projectPath} onClose={() => setDrawer(null)} onNewTerminal={(path) => void createTerminal(path, { reuseExisting: false, shellId: settings.defaultShellId })} onDocument={(next) => { setDocument(next); setDrawer(null); setView("document"); }} onError={onError} />}
         {terminalView && drawer === "git" && project && <GitDrawer root={projectPath} onClose={() => setDrawer(null)} onError={onError} />}
         {terminalView && drawer === "sftp" && selectedSsh && <SftpDrawer profile={selectedSsh} onClose={() => setDrawer(null)} onError={onError} />}
+        {terminalView && drawer === "directories" && <DirectoriesDrawer onClose={() => setDrawer(null)} onNewTerminal={(path) => void createTerminal(path, { reuseExisting: false, shellId: settings.defaultShellId })} onCd={jumpToDirectory} onError={onError} />}
       </div>
       {notice && <button className="terminal-notice" onClick={() => { assignSession(notice.sessionId); setNotice(undefined); }}><Bell size={15} /><span><strong>{notice.title}</strong><small>{notice.message}</small></span><ChevronLeft size={13} /></button>}
       {paletteOpen && <CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} />}

@@ -264,6 +264,26 @@ try {
   await page.getByRole("button", { name: "关闭文档" }).click();
   await page.getByRole("button", { name: "Git 状态" }).click();
   await page.getByText("src/App.tsx").waitFor();
+  // 常用目录面板：frecency 历史 + 收藏 + 跳转 / 新建终端 / 移除历史
+  await page.getByRole("button", { name: "常用目录", exact: true }).click();
+  await page.locator(".directories-row", { hasText: "docs" }).waitFor();
+  assert.equal(await page.locator(".directories-row").count(), 2);
+  assert.match(await page.locator(".directories-row").first().textContent() ?? "", /atlas-workspace/);
+  const docsRow = page.locator(".directories-row", { hasText: "docs" });
+  await docsRow.locator(".directories-jump").click();
+  await page.waitForFunction(() => window.__mock.terminalWrites.some((write) => String(write.data).startsWith("Set-Location -LiteralPath 'F:\\demo\\docs'")));
+  await docsRow.locator(".drawer-row-actions button").nth(1).click();
+  await page.waitForFunction(() => window.__mock.directoryEntries.find((entry) => entry.path === "F:\\demo\\docs")?.pinned === true);
+  await docsRow.locator(".drawer-row-actions button").nth(1).click();
+  await page.waitForFunction(() => window.__mock.directoryEntries.find((entry) => entry.path === "F:\\demo\\docs")?.pinned === false);
+  const terminalCountBefore = await page.evaluate(() => window.__mock.terminalSessions.length);
+  await docsRow.locator(".drawer-row-actions button").first().click();
+  await page.waitForFunction((count) => window.__mock.terminalSessions.length === count + 1, terminalCountBefore);
+  assert.equal(await page.evaluate(() => window.__mock.terminalSessions.at(-1).cwd), "F:\\demo\\docs");
+  await docsRow.locator(".drawer-row-actions button").nth(2).click();
+  await page.waitForFunction(() => !window.__mock.directoryEntries.some((entry) => entry.path === "F:\\demo\\docs"));
+  assert.equal(await page.locator(".directories-row").count(), 1);
+  await page.getByRole("button", { name: "关闭常用目录面板" }).click();
   // 剪贴板截图粘贴：剪贴板无文本但有图片时，粘贴本地 PNG 的引号路径
   await page.evaluate(() => { window.__mock.clipboardImage = "F:\\demo\\clipboard.png"; });
   await page.locator(".terminal-pane-leaf").first().locator(".xterm-screen").click();

@@ -351,6 +351,14 @@ export interface FileSystemEntry {
   modifiedAt?: number;
 }
 
+export interface DirectoryEntry {
+  path: string;
+  rank: number;
+  lastAccessed: number;
+  pinned: boolean;
+  score: number;
+}
+
 export interface GitStatusEntry {
   path: string;
   status: string;
@@ -395,6 +403,10 @@ export interface CodexBridge {
   listCliTools(): Promise<CliToolInfo[]>;
   getCommandHistory(prefix: string, cwd: string): Promise<string[]>;
   getCompletions(prefix: string, cwd: string): Promise<CompletionCandidate[]>;
+  listDirectories(): Promise<DirectoryEntry[]>;
+  pinDirectory(path: string): Promise<DirectoryEntry[]>;
+  unpinDirectory(path: string): Promise<DirectoryEntry[]>;
+  removeDirectory(path: string): Promise<DirectoryEntry[]>;
   listTerminals(): Promise<TerminalInfo[]>;
   createTerminal(request: TerminalCreateRequest): Promise<TerminalInfo>;
   resumeAiSession(id: string): Promise<boolean>;
