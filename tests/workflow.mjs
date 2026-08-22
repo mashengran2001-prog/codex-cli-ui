@@ -73,7 +73,7 @@ try {
   const slotStyle = await page.locator(".terminal-pane-split.rows > .pane-slot").first().getAttribute("style");
   assert.match(slotStyle ?? "", /0 1 \d+(?:\.\d+)?%/);
   await page.waitForFunction(() => {
-    const layout = JSON.parse(localStorage.getItem("codex-cli-ui:terminal-layout-v4") || "{}");
+    const layout = JSON.parse(localStorage.getItem("codex-cli-ui:terminal-layout-v5") || "{}");
     const sizes = layout.tree?.sizes;
     return Array.isArray(sizes) && sizes.length === 2 && Math.abs(sizes[0] + sizes[1] - 100) < 0.6;
   });
@@ -222,7 +222,7 @@ try {
   await cdp.send("Input.dispatchDragEvent", { type: "drop", x: dockDropX, y: dockDropY, data: dockDragData });
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: dockDropX, y: dockDropY, button: "left", clickCount: 1 });
   await page.waitForFunction((count) => document.querySelectorAll(".terminal-pane-leaf").length === count + 1, dockLeafCountBefore);
-  const dockedTree = await page.evaluate(() => JSON.parse(localStorage.getItem("codex-cli-ui:terminal-layout-v4") || "{}").tree ?? null);
+  const dockedTree = await page.evaluate(() => JSON.parse(localStorage.getItem("codex-cli-ui:terminal-layout-v5") || "{}").tree ?? null);
   assert.equal(dockedTree?.type === "split" && dockedTree.direction === "columns" ? dockedTree.children[0].sessionId : null, dockSourceId);
   // 收回分屏，后续用例保持单 pane 布局假设
   await page.locator(".terminal-pane-leaf").nth(1).getByRole("button", { name: "关闭分屏" }).click();
@@ -329,8 +329,80 @@ try {
   }));
   assert.ok(overflow.document <= 1, `document overflowed by ${overflow.document}px`);
   assert.ok(overflow.app <= 1, `app overflowed by ${overflow.app}px`);
+
+  // SVN 抽屉：标题/版本、更新按钮替代拉取/推送、revert 需先选择文件
+  await page.getByRole("tab", { name: "终端" }).click();
+  await page.locator(".xterm-screen").first().waitFor();
+  await page.evaluate(() => { window.__mock.svnMode = true; });
+  await page.getByRole("button", { name: "Git 状态" }).click();
+  const svnDrawer = page.locator(".git-drawer");
+  await svnDrawer.waitFor();
+  assert.equal(await svnDrawer.locator(".drawer-heading strong").textContent(), "SVN");
+  assert.match(await svnDrawer.locator(".drawer-heading").textContent() ?? "", /r124/);
+  assert.match(await svnDrawer.locator(".git-summary").textContent() ?? "", /版本 124/);
+  assert.equal(await svnDrawer.locator(".git-summary button[title='更新']").count(), 1);
+  assert.equal(await svnDrawer.locator(".git-summary button[title='拉取（仅快进）']").count(), 0);
+  assert.equal(await svnDrawer.locator(".git-summary button[title='推送']").count(), 0);
+  const svnUnstage = svnDrawer.locator(".git-actions button", { hasText: "取消暂存" });
+  assert.equal(await svnUnstage.isDisabled(), true);
+  await svnDrawer.locator(".git-row", { hasText: "src/App.tsx" }).click();
+  assert.equal(await svnUnstage.isDisabled(), false);
+  await svnUnstage.click();
+  await page.waitForFunction(() => window.__mock.lastGitAction?.action === "unstage");
+  assert.deepEqual(await page.evaluate(() => window.__mock.lastGitAction.paths), ["src/App.tsx"]);
+  await svnDrawer.locator(".git-summary button[title='更新']").click();
+  await page.waitForFunction(() => window.__mock.lastGitAction?.action === "update");
+  assert.deepEqual(await page.evaluate(() => window.__mock.lastGitAction.paths), []);
+  await svnDrawer.getByTitle("关闭 Git 面板").click();
+  await page.evaluate(() => { window.__mock.svnMode = false; });
+
+  // 分屏树身份恢复：预置 v5 布局（leaves 携带 cwd/shell 身份），重载后按身份重建分屏
+  await page.evaluate(() => {
+    localStorage.setItem("codex-cli-ui:terminal-layout-v5", JSON.stringify({
+      tree: { type: "split", direction: "columns", children: [{ type: "leaf", sessionId: "old-a" }, { type: "leaf", sessionId: "old-b" }] },
+      activeSessionId: "old-a",
+      sidebarWidth: 260, drawerWidth: 280, sidebarCollapsed: false, tabsCollapsed: false, toolsCollapsed: false, sshCollapsed: true,
+      leaves: {
+        "old-a": { cwd: "F:\\demo\\atlas-workspace", shellId: "powershell" },
+        "old-b": { cwd: "F:\\demo\\docs", shellId: "powershell" },
+      },
+    }));
+  });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByRole("tab", { name: "终端" }).click();
+  await page.waitForFunction(() => document.querySelectorAll(".terminal-pane-leaf").length === 2);
+  const restoredCwds = await page.evaluate(() => window.__mock.terminalSessions.map((session) => session.cwd));
+  assert.ok(restoredCwds.includes("F:\\demo\\atlas-workspace"), "restored atlas pane");
+  assert.ok(restoredCwds.includes("F:\\demo\\docs"), "restored docs pane");
+  await page.waitForFunction(() => {
+    const leaves = JSON.parse(localStorage.getItem("codex-cli-ui:terminal-layout-v5") || "{}").leaves ?? {};
+    return Object.keys(leaves).length === 2;
+  });
+  const savedLeafCwds = await page.evaluate(() => Object.values(JSON.parse(localStorage.getItem("codex-cli-ui:terminal-layout-v5")).leaves).map((identity) => identity.cwd));
+  assert.ok(savedLeafCwds.includes("F:\\demo\\atlas-workspace"));
+  assert.ok(savedLeafCwds.includes("F:\\demo\\docs"));
+  const restoredLeafIds = await page.evaluate(() => [...document.querySelectorAll(".terminal-pane-leaf")].map((leaf) => leaf.getAttribute("data-session-id")));
+  assert.equal(restoredLeafIds.length, 2);
+  assert.ok(!restoredLeafIds.includes("old-a") && !restoredLeafIds.includes("old-b"), "leaf ids replaced by rebuilt sessions");
+
+  // WSL 文件面板：活动终端为 WSL 目录时，文件列表根目录跟随 WSL 路径
+  await page.evaluate(() => {
+    localStorage.removeItem("codex-cli-ui:terminal-layout-v5");
+    localStorage.setItem("codex-cli-ui:test-wsl-terminal", "1");
+  });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByRole("tab", { name: "终端" }).click();
+  await page.waitForFunction(() => window.__mock.terminalSessions.some((session) => String(session.cwd).startsWith("\\\\wsl")));
+  await page.locator(".terminal-top-tab", { hasText: "dev" }).locator(".terminal-tab-main").click();
+  await page.waitForFunction(() => document.querySelector(".terminal-pane-leaf")?.dataset.sessionId === "33333333-3333-4333-8333-333333333333");
+  await page.getByRole("button", { name: "文件", exact: true }).click();
+  await page.locator(".file-row", { hasText: "README.md" }).waitFor();
+  const wslReadmePath = await page.locator(".file-row", { hasText: "README.md" }).getAttribute("title");
+  assert.equal(wslReadmePath, "\\\\wsl.localhost\\Ubuntu\\home\\dev\\README.md");
+  await page.evaluate(() => localStorage.removeItem("codex-cli-ui:test-wsl-terminal"));
+
   await context.close();
-  console.log("workflow: chat, Nebula terminal, drawers, launcher, and overflow checks passed");
+  console.log("workflow: chat, Nebula terminal, drawers, launcher, overflow, SVN, split restore, and WSL checks passed");
 } finally {
   await browser.close();
   server.stop();

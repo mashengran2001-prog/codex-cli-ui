@@ -104,6 +104,23 @@ export async function installMockBridge(page) {
         aiSessionId: request.aiSessionId,
       };
     };
+    // WSL 测试种子：测试先写 localStorage 标志再 reload，init 脚本在此重建该会话
+    if (localStorage.getItem("codex-cli-ui:test-wsl-terminal")) {
+      terminalSessions.push({
+        id: "33333333-3333-4333-8333-333333333333",
+        title: "dev",
+        cwd: "\\\\wsl.localhost\\Ubuntu\\home\\dev",
+        shell: "wsl.exe",
+        shellId: "wsl:Ubuntu",
+        kind: "local",
+        activity: "idle",
+        status: "running",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        cols: 100,
+        rows: 30,
+      });
+    }
     const completeRun = (request) => {
       const threadId = "11111111-1111-4111-8111-111111111111";
       window.setTimeout(() => emit({ providerId: request.providerId, runId: request.runId, type: "message", data: { type: "thread.started", thread_id: threadId } }), 20);
@@ -128,7 +145,7 @@ export async function installMockBridge(page) {
       window.setTimeout(() => emit({ providerId: request.providerId, runId: request.runId, type: "exit", code: 0, stopped: false }), 115);
     };
 
-    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null, lastPasteProfileId: null, lastResumeId: null, lastFork: null };
+    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null, lastPasteProfileId: null, lastResumeId: null, lastFork: null, svnMode: false, lastGitAction: null };
     window.codex = {
       getInfo: async () => codexProvider,
       listProviders: async () => [codexProvider, deepseekProvider],
@@ -206,7 +223,11 @@ export async function installMockBridge(page) {
       },
       attachTerminal: async (id) => {
         const terminal = terminalSessions.find((item) => item.id === id);
-        return terminal ? { terminal, snapshot: "Mock PowerShell\r\nPS F:\\demo\\atlas-workspace> " } : null;
+        if (!terminal) return null;
+        const wsl = String(terminal.cwd).toLowerCase().startsWith("\\\\wsl");
+        return terminal
+          ? { terminal, snapshot: wsl ? "Mock WSL\r\ncodex@ubuntu:~/dev$ " : "Mock PowerShell\r\nPS F:\\demo\\atlas-workspace> " }
+          : null;
       },
       detachTerminal: async () => true,
       writeTerminal: async (id, data) => { terminalWrites.push({ id, data }); emitTerminal({ sessionId: id, type: "data", data }); return true; },
@@ -226,8 +247,10 @@ export async function installMockBridge(page) {
         { name: "README.md", path: `${path}\\README.md`, type: "file", size: 2113 },
       ],
       readDocument: async (_root, path) => path.endsWith("README.md") ? { path, name: "README.md", kind: "markdown", content: "# Atlas\n\nInline math $x^2$.", size: 2113, modifiedAt: Date.now() } : null,
-      getGitStatus: async () => ({ available: true, branch: "main", entries: [{ status: "M", path: "src/App.tsx" }] }),
-      runGitAction: async (request) => ({ ok: true, message: `${request.action} completed` }),
+      getGitStatus: async () => window.__mock.svnMode
+        ? { available: true, branch: "r124", revision: "124", vcs: "svn", entries: [{ status: "M", path: "src/App.tsx" }, { status: "A", path: "README.md" }] }
+        : { available: true, branch: "main", vcs: "git", entries: [{ status: "M", path: "src/App.tsx" }] },
+      runGitAction: async (request) => { window.__mock.lastGitAction = request; return { ok: true, message: `${request.action} completed` }; },
       listSshProfiles: async () => [{ id: "ssh-mock", name: "Dev server", host: "example.com", port: 22, username: "dev", remotePath: "/home/dev", createdAt: Date.now(), updatedAt: Date.now(), source: "saved" }],
       saveSshProfile: async (profile) => profile,
       deleteSshProfile: async () => true,

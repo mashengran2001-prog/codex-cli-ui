@@ -16,8 +16,8 @@ import {
 } from "electron";
 import { spawn, execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, renameSync, statSync, writeFileSync, type Dirent } from "node:fs";
-import { appendFile, lstat, mkdir, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync, renameSync, statSync, writeFileSync, type Dirent, type Stats } from "node:fs";
+import { access, appendFile, lstat, mkdir, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
@@ -59,6 +59,14 @@ import { DeepSeekProvider } from "./deepseek-provider";
 import { CliLifecycleBridge, type CliLifecycleEvent } from "./cli-lifecycle";
 import { ProviderRegistry, type AgentProvider, type ProviderRunContext } from "./provider-registry";
 import { terminalShellArguments, terminalTitleFromPath } from "./terminal-utils";
+import {
+  parseSvnRevision,
+  parseSvnStatus,
+  parseSvnWorkingCopyRoot,
+  scopeSvnEntries,
+  svnActionArgs,
+  type VcsKind,
+} from "./vcs";
 
 interface ActiveRun {
   child: ReturnType<typeof spawn>;
@@ -706,8 +714,22 @@ function normalizePath(value: string) {
   return process.platform === "win32" ? result.toLowerCase() : result;
 }
 
+function isWslPath(value: string) {
+  const lower = value.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  return lower.startsWith("\\\\wsl$\\") || lower.startsWith("\\\\wsl.localhost\\");
+}
+
+function normalizeWslPath(value: string) {
+  return value.replace(/\//g, "\\").replace(/\\+$/, "");
+}
+
 function isDirectory(value: unknown): value is string {
   if (typeof value !== "string" || value.length === 0 || value.length > 4096) return false;
+  // Accessing \\wsl.localhost\… performs a synchronous stat against a
+  // possibly cold WSL distro and can block the main process for seconds.
+  // Treat the UNC prefix as lexically valid here and let the async handlers
+  // (readdir with a timeout, PTY spawn, git/svn probes) report reality.
+  if (isWslPath(value)) return true;
   try {
     return existsSync(value) && statSync(value).isDirectory();
   } catch {
@@ -1426,13 +1448,43 @@ function isPathWithin(root: string, target: string) {
   return difference === "" || (difference !== ".." && !difference.startsWith(`..${sep}`) && !isAbsolute(difference));
 }
 
+function isWslPathWithin(root: string, target: string) {
+  const normalizedRoot = normalizeWslPath(root).toLowerCase();
+  const normalizedTarget = normalizeWslPath(target).toLowerCase();
+  return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}\\`);
+}
+
+function readdirWithTimeout(path: string, timeoutMs = 10_000) {
+  return new Promise<Dirent[]>(async (resolveResult, reject) => {
+    const timer = setTimeout(() => reject(new Error("WSL 正在启动或读取超时，请稍后重试")), timeoutMs);
+    try {
+      const entries = await readdir(path, { withFileTypes: true, encoding: "utf8" });
+      clearTimeout(timer);
+      resolveResult(entries);
+    } catch (error) {
+      clearTimeout(timer);
+      reject(error);
+    }
+  });
+}
+
 async function listDirectoryEntries(rootValue: string, pathValue: string): Promise<FileSystemEntry[]> {
-  const lexicalRoot = resolve(rootValue);
-  const lexicalTarget = resolve(pathValue);
-  if (!isDirectory(lexicalRoot) || !isDirectory(lexicalTarget) || !isPathWithin(lexicalRoot, lexicalTarget)) return [];
-  const [root, target] = await Promise.all([realpath(lexicalRoot), realpath(lexicalTarget)]);
-  if (!isPathWithin(root, target)) return [];
-  const entries = (await readdir(target, { withFileTypes: true, encoding: "utf8" })).slice(0, 500);
+  const wsl = isWslPath(rootValue) || isWslPath(pathValue);
+  const lexicalRoot = wsl ? normalizeWslPath(rootValue) : resolve(rootValue);
+  const lexicalTarget = wsl ? normalizeWslPath(pathValue) : resolve(pathValue);
+  if (!isDirectory(lexicalRoot) || !isDirectory(lexicalTarget)) return [];
+  if (wsl ? !isWslPathWithin(lexicalRoot, lexicalTarget) : !isPathWithin(lexicalRoot, lexicalTarget)) return [];
+  let root = lexicalRoot;
+  let target = lexicalTarget;
+  if (!wsl) {
+    const [realRoot, realTarget] = await Promise.all([realpath(lexicalRoot), realpath(lexicalTarget)]);
+    if (!isPathWithin(realRoot, realTarget)) return [];
+    root = realRoot;
+    target = realTarget;
+  }
+  // WSL UNC reads go through a timed async probe so a cold distro shows an
+  // error toast instead of silently reporting an empty folder.
+  const entries = (wsl ? await readdirWithTimeout(target) : await readdir(target, { withFileTypes: true, encoding: "utf8" })).slice(0, 500);
   const results = await Promise.all(entries.map(async (entry) => {
     const path = join(target, entry.name);
     let details: Awaited<ReturnType<typeof lstat>> | null = null;
@@ -1453,12 +1505,20 @@ async function listDirectoryEntries(rootValue: string, pathValue: string): Promi
 }
 
 async function readWorkspaceDocument(rootValue: string, pathValue: string): Promise<DocumentFile | null> {
-  const lexicalRoot = resolve(rootValue);
-  const lexicalTarget = resolve(pathValue);
-  if (!isDirectory(lexicalRoot) || !isPathWithin(lexicalRoot, lexicalTarget)) return null;
-  const [root, target] = await Promise.all([realpath(lexicalRoot), realpath(lexicalTarget)]);
-  if (!isPathWithin(root, target)) return null;
-  const details = await stat(target);
+  const wsl = isWslPath(rootValue) || isWslPath(pathValue);
+  const lexicalRoot = wsl ? normalizeWslPath(rootValue) : resolve(rootValue);
+  const lexicalTarget = wsl ? normalizeWslPath(pathValue) : resolve(pathValue);
+  if (!isDirectory(lexicalRoot)) return null;
+  if (wsl ? !isWslPathWithin(lexicalRoot, lexicalTarget) : !isPathWithin(lexicalRoot, lexicalTarget)) return null;
+  let root = lexicalRoot;
+  let target = lexicalTarget;
+  if (!wsl) {
+    const [realRoot, realTarget] = await Promise.all([realpath(lexicalRoot), realpath(lexicalTarget)]);
+    if (!isPathWithin(realRoot, realTarget)) return null;
+    root = realRoot;
+    target = realTarget;
+  }
+  const details = wsl ? await statWithTimeout(target) : await stat(target);
   if (!details.isFile() || details.size > MAX_DOCUMENT_BYTES) return null;
   const extension = extname(target).toLowerCase();
   const kind: DocumentFile["kind"] = extension === ".md" || extension === ".markdown"
@@ -1472,6 +1532,20 @@ async function readWorkspaceDocument(rootValue: string, pathValue: string): Prom
     try { content = JSON.stringify(JSON.parse(content), null, 2); } catch { /* Invalid JSON remains readable as text. */ }
   }
   return { path: target, name: basename(target), kind, content, size: details.size, modifiedAt: details.mtimeMs };
+}
+
+function statWithTimeout(path: string, timeoutMs = 10_000) {
+  return new Promise<Stats>(async (resolveResult, reject) => {
+    const timer = setTimeout(() => reject(new Error("WSL 正在启动或读取超时，请稍后重试")), timeoutMs);
+    try {
+      const details = await stat(path);
+      clearTimeout(timer);
+      resolveResult(details);
+    } catch (error) {
+      clearTimeout(timer);
+      reject(error);
+    }
+  });
 }
 
 function sshProfilesPath() {
@@ -1597,7 +1671,54 @@ function isAuthorizedTerminalRoot(senderId: number, root: string) {
   ));
 }
 
-function gitStatus(path: string) {
+/** Walk up from `path` to find the nearest repository root. */
+async function detectRepositoryVcs(path: string): Promise<VcsKind | null> {
+  let current = resolve(path);
+  for (let depth = 0; depth < 64; depth++) {
+    try {
+      // Async probes: on \\wsl.localhost\… a sync stat would block the main
+      // process while the distro boots, but an async probe only delays the IPC.
+      if (await access(join(current, ".git")).then(() => true).catch(() => false)) return "git";
+      if (await access(join(current, ".svn", "wc.db")).then(() => true).catch(() => false)) return "svn";
+    } catch {
+      // Transient permission error — continue walking up.
+    }
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return null;
+}
+
+async function svnStatus(path: string): Promise<GitStatus> {
+  try {
+    const info = await execFileText("svn", ["info", path], { timeout: 15_000 });
+    const revision = parseSvnRevision(info.stdout);
+    const wcRoot = parseSvnWorkingCopyRoot(info.stdout);
+    if (!wcRoot) return { available: false, branch: "", entries: [], error: "无法确定 SVN 工作拷贝根目录" };
+    const statusResult = await execFileText("svn", ["status", "--non-interactive", wcRoot], { timeout: 15_000 });
+    const entries = parseSvnStatus(statusResult.stdout);
+    // If the drawer root is a subdirectory of the WC, scope entries to it.
+    const drawerRoot = path;
+    const scopePrefix = relative(resolve(wcRoot), resolve(drawerRoot)).replace(/\\/g, "/");
+    const scoped = scopeSvnEntries(entries, scopePrefix);
+    return {
+      available: true,
+      branch: `r${revision || "?"}`,
+      entries: scoped,
+      vcs: "svn",
+      revision: revision ? `r${revision}` : undefined,
+    };
+  } catch (reason) {
+    const error = reason as Error & { stderr?: string; code?: string };
+    if (error.code === "ENOENT") return { available: false, branch: "", entries: [], error: "未检测到 svn 命令行客户端，请安装 SVN CLI" };
+    return { available: false, branch: "", entries: [], error: String(error.stderr || error.message).trim() };
+  }
+}
+
+async function gitStatus(path: string): Promise<GitStatus> {
+  const detected = await detectRepositoryVcs(path);
+  if (detected === "svn") return svnStatus(path);
   return new Promise<GitStatus>((resolveStatus) => {
     execFile("git", ["-c", "safe.directory=*", "-C", path, "status", "--short", "--branch"], { windowsHide: true, timeout: 7_000, maxBuffer: 512 * 1024 }, (error, stdout, stderr) => {
       if (error) {
@@ -1610,6 +1731,7 @@ function gitStatus(path: string) {
         available: true,
         branch,
         entries: lines.map((line) => ({ status: line.slice(0, 2).trim() || "?", path: line.slice(3) })).filter((entry) => entry.path),
+        vcs: "git",
       });
     });
   });
@@ -1617,6 +1739,18 @@ function gitStatus(path: string) {
 
 async function runGitOperation(request: GitActionRequest): Promise<OperationResult> {
   const paths = (request.paths || []).slice(0, 500).filter((path) => typeof path === "string" && path.length > 0 && path.length < 4096 && !/[\r\n\0]/.test(path));
+  const vcs = request.vcs || (await detectRepositoryVcs(request.root)) || "git";
+  if (vcs === "svn") {
+    const plan = svnActionArgs({ action: request.action, paths, message: request.message });
+    if (plan.error) return { ok: false, message: plan.error };
+    try {
+      const { stdout, stderr } = await execFileText("svn", ["--non-interactive", ...plan.args!], { cwd: request.root, timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
+      return { ok: true, message: (stdout || stderr || `${request.action} completed`).trim() };
+    } catch (reason) {
+      const error = reason as Error & { stdout?: string; stderr?: string };
+      return { ok: false, message: String(error.stderr || error.stdout || error.message).trim() };
+    }
+  }
   let args: string[];
   switch (request.action) {
     case "stage":

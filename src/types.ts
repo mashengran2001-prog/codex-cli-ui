@@ -329,9 +329,11 @@ export interface OperationResult {
 
 export interface GitActionRequest {
   root: string;
-  action: "stage" | "unstage" | "commit" | "pull" | "push";
+  action: "stage" | "unstage" | "commit" | "pull" | "push" | "update";
   paths?: string[];
   message?: string;
+  /** Explicit repository kind; detected automatically when omitted. */
+  vcs?: "git" | "svn";
 }
 
 export interface DocumentFile {
@@ -369,6 +371,10 @@ export interface GitStatus {
   branch: string;
   entries: GitStatusEntry[];
   error?: string;
+  /** "git" or "svn"; absent means legacy response (treated as git). */
+  vcs?: "git" | "svn";
+  /** SVN working-copy revision, e.g. "r1234". */
+  revision?: string;
 }
 
 export interface PersistedState {

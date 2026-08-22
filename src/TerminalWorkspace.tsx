@@ -44,6 +44,15 @@ interface PaneLeaf {
   sessionId: string;
 }
 
+/** Launch identity for a pane, used to rebuild leaves that lost their PTY. */
+interface PaneLeafIdentity {
+  cwd: string;
+  shellId?: string;
+  profileId?: string;
+  sshProfileId?: string;
+  title?: string;
+}
+
 interface PaneSplit {
   type: "split";
   direction: SplitDirection;
@@ -66,9 +75,12 @@ interface SavedLayout {
   tabsCollapsed?: boolean;
   toolsCollapsed?: boolean;
   sshCollapsed?: boolean;
+  /** Per-pane launch identity for restoring the split tree without snapshots. */
+  leaves?: Record<string, PaneLeafIdentity>;
 }
 
-const layoutKey = "codex-cli-ui:terminal-layout-v4";
+const layoutKey = "codex-cli-ui:terminal-layout-v5";
+const layoutV4Key = "codex-cli-ui:terminal-layout-v4";
 const renameKey = "codex-cli-ui:terminal-renames-v1";
 const colorKey = "codex-cli-ui:terminal-colors-v1";
 const stageDockId = "_stage";
@@ -83,8 +95,26 @@ const completionSourceLabels = {
 } as const;
 
 function loadLayout(): SavedLayout {
-  try { return JSON.parse(localStorage.getItem(layoutKey) || "{}") as SavedLayout; }
+  try {
+    const raw = localStorage.getItem(layoutKey) || localStorage.getItem(layoutV4Key) || "{}";
+    return JSON.parse(raw) as SavedLayout;
+  }
   catch { return {}; }
+}
+
+function isWslPath(value: string) {
+  const lower = value.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  return lower.startsWith("\\\\wsl$\\") || lower.startsWith("\\\\wsl.localhost\\");
+}
+
+function leafIdentity(session: TerminalInfo): PaneLeafIdentity {
+  return {
+    cwd: session.cwd,
+    shellId: session.shellId,
+    profileId: session.profileId,
+    sshProfileId: session.sshProfileId,
+    title: session.title,
+  };
 }
 
 function samePath(left: string, right: string) {
@@ -344,8 +374,14 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     };
   }, []);
   useEffect(() => {
-    localStorage.setItem(layoutKey, JSON.stringify({ tree: paneTree, activeSessionId, sidebarWidth, drawerWidth, sidebarCollapsed, tabsCollapsed, toolsCollapsed, sshCollapsed } satisfies SavedLayout));
-  }, [activeSessionId, drawerWidth, paneTree, sidebarCollapsed, sidebarWidth, sshCollapsed, tabsCollapsed, toolsCollapsed]);
+    if (!terminalStateLoaded) return;
+    const leaves: Record<string, PaneLeafIdentity> = {};
+    for (const id of collectLeafIds(paneTree)) {
+      const session = sessionsRef.current.find((item) => item.id === id);
+      if (session) leaves[id] = leafIdentity(session);
+    }
+    localStorage.setItem(layoutKey, JSON.stringify({ tree: paneTree, activeSessionId, sidebarWidth, drawerWidth, sidebarCollapsed, tabsCollapsed, toolsCollapsed, sshCollapsed, leaves } satisfies SavedLayout));
+  }, [activeSessionId, drawerWidth, paneTree, sidebarCollapsed, sidebarWidth, sshCollapsed, tabsCollapsed, terminalStateLoaded, toolsCollapsed]);
 
   const assignSession = useCallback((id: string, targetId?: string) => {
     setView("terminal");
@@ -386,18 +422,54 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([window.codex.listShells(), window.codex.listCliTools(), window.codex.listSshProfiles(), window.codex.listTerminals()]).then(([shellItems, toolItems, sshItems, terminalItems]) => {
+    void Promise.all([window.codex.listShells(), window.codex.listCliTools(), window.codex.listSshProfiles(), window.codex.listTerminals()]).then(async ([shellItems, toolItems, sshItems, terminalItems]) => {
       if (cancelled) return;
       setShells(shellItems);
       setCliTools(toolItems);
       setSshProfiles(sshItems);
-      setSessions(terminalItems);
       const validIds = new Set(terminalItems.map((item) => item.id));
-      setPaneTree((current) => {
-        const pruned = pruneTree(current, validIds);
-        if (leafCount(pruned) <= 4) return pruned;
-        return pruneTree(pruned, new Set(collectLeafIds(pruned).slice(0, 4)));
-      });
+      const saved = loadLayout();
+      const restorable = saved.leaves
+        ? new Set(Object.entries(saved.leaves).filter(([id, identity]) => !validIds.has(id) && Boolean(identity?.cwd)).map(([id]) => id))
+        : new Set<string>();
+      let restored = pruneTree(saved.tree ?? null, new Set([...validIds, ...restorable]));
+      if (leafCount(restored) > 4) restored = pruneTree(restored, new Set(collectLeafIds(restored).slice(0, 4)));
+      const rebuilt: TerminalInfo[] = [...terminalItems];
+      const restoredIds = new Set(collectLeafIds(restored));
+      let missing = saved.leaves
+        ? Object.entries(saved.leaves).filter(([id, identity]) => !validIds.has(id) && Boolean(identity?.cwd) && restoredIds.has(id))
+        : [];
+      if (!restored && saved.leaves) {
+        missing = Object.entries(saved.leaves)
+          .filter(([, identity]) => Boolean(identity?.cwd))
+          .slice(0, 4);
+      }
+      if (missing.length > 0) {
+        const created = await Promise.all(missing.map(([, identity]) => window.codex.createTerminal({
+          cwd: identity!.cwd,
+          cols: 100,
+          rows: 30,
+          reuseExisting: false,
+          shellId: identity!.shellId,
+          profileId: identity!.profileId,
+          sshProfileId: identity!.sshProfileId,
+          title: identity!.title,
+        })));
+        if (cancelled) return;
+        for (let index = 0; index < missing.length; index++) {
+          const session = created[index];
+          if (!session) continue;
+          rebuilt.push(session);
+          restored = replaceLeaf(restored, missing[index][0], session.id);
+          if (!restored || !containsLeaf(restored, session.id)) {
+            const anchor = restored ? activeLeafId(restored, null) ?? collectLeafIds(restored)[0] ?? "" : "";
+            restored = restored && anchor ? splitLeaf(restored, anchor, "columns", session.id) : { type: "leaf", sessionId: session.id };
+          }
+        }
+      }
+      if (cancelled) return;
+      setSessions(rebuilt);
+      setPaneTree(restored);
       setTerminalStateLoaded(true);
     }).catch((reason) => onError(reason instanceof Error ? reason.message : workbenchCopy.restoreTerminalFailed));
     return () => { cancelled = true; };
@@ -988,6 +1060,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   };
 
   const tabMenuSession = tabMenu ? sessions.find((session) => session.id === tabMenu.sessionId) : undefined;
+  const filesRoot = active && isWslPath(active.cwd) ? active.cwd : projectPath;
 
   return (
     <main className="terminal-workspace" data-terminal-theme={settings.theme} data-density={settings.density} data-workspace-view={view} data-window-focused={windowFocused} style={{ "--terminal-sidebar-width": `${sidebarWidth}px`, "--terminal-drawer-width": `${drawerWidth}px`, "--terminal-bg-opacity": settings.backgroundOpacity, "--terminal-bg-image": pathToCssUrl(settings.backgroundImage) } as React.CSSProperties}>
@@ -1085,7 +1158,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
           {view === "document" && document && <DocumentViewer document={document} onClose={() => setView("terminal")} />}
         </section>
         {terminalView && drawer && settings.resizablePanels && <div className="panel-resizer drawer-resizer" onPointerDown={(event) => resizePanel("drawer", event)} />}
-        {terminalView && drawer === "files" && project && <FilesDrawer root={projectPath} onClose={() => setDrawer(null)} onNewTerminal={(path) => void createTerminal(path, { reuseExisting: false, shellId: settings.defaultShellId })} onDocument={(next) => { setDocument(next); setDrawer(null); setView("document"); }} onError={onError} />}
+        {terminalView && drawer === "files" && project && <FilesDrawer root={filesRoot} onClose={() => setDrawer(null)} onNewTerminal={(path) => void createTerminal(path, { reuseExisting: false, shellId: settings.defaultShellId })} onDocument={(next) => { setDocument(next); setDrawer(null); setView("document"); }} onError={onError} />}
         {terminalView && drawer === "git" && project && <GitDrawer root={projectPath} onClose={() => setDrawer(null)} onError={onError} />}
         {terminalView && drawer === "sftp" && selectedSsh && <SftpDrawer profile={selectedSsh} onClose={() => setDrawer(null)} onError={onError} />}
         {terminalView && drawer === "directories" && <DirectoriesDrawer onClose={() => setDrawer(null)} onNewTerminal={(path) => void createTerminal(path, { reuseExisting: false, shellId: settings.defaultShellId })} onCd={jumpToDirectory} onError={onError} />}

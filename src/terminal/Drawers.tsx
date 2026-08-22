@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -19,6 +19,7 @@ import {
   Pin,
   PinOff,
   RefreshCw,
+  RotateCcw,
   Search,
   Send,
   TerminalSquare,
@@ -106,18 +107,25 @@ export function GitDrawer({ root, onClose, onError }: { root: string; onClose():
     finally { setLoading(false); }
   }, [copy, onError, root]);
   useEffect(() => { void refresh(); }, [refresh]);
-  const act = async (action: "stage" | "unstage" | "commit" | "pull" | "push") => {
+  const act = async (action: "stage" | "unstage" | "commit" | "pull" | "push" | "update") => {
     setLoading(true);
     try {
       const result = await window.codex.runGitAction({ root, action, paths: [...selected], message });
       if (!result.ok) onError(result.message);
       else { if (action === "commit") setMessage(""); setSelected(new Set()); await refresh(); }
+    } catch (reason) {
+      onError(reason instanceof Error ? reason.message : copy.readFailed);
     } finally { setLoading(false); }
   };
+  const isSvn = status?.vcs === "svn";
   return (
-    <aside className="terminal-drawer git-drawer" aria-label="Git">
-      <div className="drawer-heading"><div><GitBranch size={15} /><strong>Git</strong>{status?.branch && <span>{status.branch}</span>}</div><button title={copy.close} onClick={onClose}><X size={14} /></button></div>
-      <div className="git-summary"><span>{status?.available ? copy.changes(status.entries.length) : copy.notRepository}</span><button title={copy.pull} disabled={loading || !status?.available} onClick={() => void act("pull")}><Download size={13} /></button><button title={copy.push} disabled={loading || !status?.available} onClick={() => void act("push")}><Send size={13} /></button><button title={copy.refresh} onClick={() => void refresh()}>{loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}</button></div>
+    <aside className="terminal-drawer git-drawer" aria-label={isSvn ? "SVN" : "Git"}>
+      <div className="drawer-heading"><div><GitBranch size={15} /><strong>{isSvn ? "SVN" : "Git"}</strong>{status?.branch && <span>{status.branch}</span>}</div><button title={copy.close} onClick={onClose}><X size={14} /></button></div>
+      <div className="git-summary"><span>{status?.available ? `${copy.changes(status.entries.length)}${status.revision ? ` · ${copy.revision(status.revision)}` : ""}` : copy.notRepository}</span>
+        {isSvn
+          ? <button title={copy.update} disabled={loading || !status?.available} onClick={() => void act("update")}><RotateCcw size={13} /></button>
+          : <Fragment><button title={copy.pull} disabled={loading || !status?.available} onClick={() => void act("pull")}><Download size={13} /></button><button title={copy.push} disabled={loading || !status?.available} onClick={() => void act("push")}><Send size={13} /></button></Fragment>}
+        <button title={copy.refresh} onClick={() => void refresh()}>{loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}</button></div>
       <div className="git-list">
         {status?.entries.map((entry, index) => {
           const checked = selected.has(entry.path);
@@ -126,7 +134,7 @@ export function GitDrawer({ root, onClose, onError }: { root: string; onClose():
         {status?.available && status.entries.length === 0 && <div className="drawer-empty">{copy.clean}</div>}
         {status && !status.available && <div className="drawer-empty error">{status.error || copy.unavailable}</div>}
       </div>
-      {status?.available && <div className="git-actions"><div><button disabled={loading} onClick={() => void act("stage")}><ArrowDownToLine size={13} />{copy.stage}</button><button disabled={loading} onClick={() => void act("unstage")}><ArrowUpFromLine size={13} />{copy.unstage}</button></div><label><input value={message} placeholder={copy.commitMessage} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && message.trim()) void act("commit"); }} /><button title={copy.commit} disabled={!message.trim() || loading} onClick={() => void act("commit")}><GitCommitHorizontal size={14} /></button></label></div>}
+      {status?.available && <div className="git-actions"><div><button disabled={loading} onClick={() => void act("stage")}><ArrowDownToLine size={13} />{copy.stage}</button><button disabled={loading || (isSvn && selected.size === 0)} onClick={() => void act("unstage")}><ArrowUpFromLine size={13} />{copy.unstage}</button></div><label><input value={message} placeholder={copy.commitMessage} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && message.trim()) void act("commit"); }} /><button title={copy.commit} disabled={!message.trim() || loading} onClick={() => void act("commit")}><GitCommitHorizontal size={14} /></button></label></div>}
     </aside>
   );
 }
