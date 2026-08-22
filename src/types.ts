@@ -106,9 +106,14 @@ export interface AppSettings {
   fontFamily: string;
   cellWidth: "compact" | "relaxed";
   completionStyle: "inline" | "popup";
-  bellSound: boolean;
+  bellMode: "off" | "flash" | "sound" | "both";
+  tabPosition: "top" | "side" | "both";
+  backgroundColor?: string;
+  accentColor?: string;
   resumeAiSessions: boolean;
   loadShellProfile: boolean;
+  proxyUrl: string;
+  proxyBypass: string;
   cliProfiles: CliProfile[];
   keybindings: Record<KeybindingAction, string>;
 }
@@ -237,6 +242,7 @@ export interface TerminalInfo {
   activeCommand?: string;
   lastCommandDuration?: number;
   status: TerminalStatus;
+  exitCode?: number;
   exitedAt?: number;
   createdAt: number;
   updatedAt: number;
@@ -425,6 +431,7 @@ export interface CodexBridge {
   listDirectory(root: string, path: string): Promise<FileSystemEntry[]>;
   readDocument(root: string, path: string): Promise<DocumentFile | null>;
   readDocumentImage(root: string, path: string): Promise<string | null>;
+  exportTerminalSession(sessionId: string, content: string): Promise<string | null>;
   getGitStatus(path: string): Promise<GitStatus>;
   runGitAction(request: GitActionRequest): Promise<OperationResult>;
   listSshProfiles(): Promise<SshProfile[]>;

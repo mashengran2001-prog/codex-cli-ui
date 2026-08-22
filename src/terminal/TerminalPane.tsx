@@ -16,10 +16,12 @@ interface TerminalPaneProps {
   cursorBlink: boolean;
   fontFamily: string;
   cellWidth: "compact" | "relaxed";
+  backgroundOverride?: string;
   bellFlash: boolean;
   copyOnSelect: boolean;
   active: boolean;
   onFocus(): void;
+  onTerminalReady?(id: string, terminal: XTerm | null): void;
 }
 
 const draggedPathType = "application/x-codex-ui-path";
@@ -48,7 +50,7 @@ function quotePath(path: string, session: TerminalInfo) {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
-export default function TerminalPane({ session, theme, cursorStyle, cursorBlink, fontFamily, cellWidth, bellFlash, copyOnSelect, active, onFocus }: TerminalPaneProps) {
+export default function TerminalPane({ session, theme, cursorStyle, cursorBlink, fontFamily, cellWidth, backgroundOverride, bellFlash, copyOnSelect, active, onFocus, onTerminalReady }: TerminalPaneProps) {
   const copy = useUiCopy().workbench;
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTerm | undefined>(undefined);
@@ -88,6 +90,7 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
     try { terminal.loadAddon(new ImageAddon()); } catch { /* Canvas-less test browsers can skip image decoding. */ }
     terminal.open(container);
     terminalRef.current = terminal;
+    onTerminalReady?.(session.id, terminal);
     fitRef.current = fit;
     searchRef.current = search;
 
@@ -224,13 +227,21 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
     const removeEvents = window.codex.onTerminalEvent((event) => {
       if (event.sessionId !== session.id) return;
       if (event.type === "data" && event.data) terminal.write(event.data);
-      else if (event.type === "exit") terminal.write(`\r\n\x1b[90m[process exited ${event.code ?? ""}]\x1b[0m\r\n`);
+      else if (event.type === "exit") {
+        const code = event.code;
+        const color = code != null && code !== 0 ? "31" : "90";
+        terminal.write(`\r\n\x1b[${color}m[process exited${code === undefined ? "" : ` (code ${code})`}]\x1b[0m\r\n`);
+      }
       else if (event.type === "error" && event.message) terminal.write(`\r\n\x1b[31m${event.message}\x1b[0m\r\n`);
     });
     void window.codex.attachTerminal(session.id).then((attached) => {
       if (cancelled || !attached) return;
       if (attached.snapshot) terminal.write(attached.snapshot);
-      if (attached.terminal.status === "exited") terminal.write("\r\n\x1b[90m[process exited]\x1b[0m\r\n");
+      if (attached.terminal.status === "exited") {
+        const code = attached.terminal.exitCode ?? session.exitCode;
+        const color = code != null && code !== 0 ? "31" : "90";
+        terminal.write(`\r\n\x1b[${color}m[process exited${code === undefined ? "" : ` (code ${code})`}]\x1b[0m\r\n`);
+      }
       window.requestAnimationFrame(() => { resize(); if (active) terminal.focus(); });
     });
     return () => {
@@ -246,6 +257,7 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
       input.dispose();
       terminal.dispose();
       terminalRef.current = undefined;
+      onTerminalReady?.(session.id, null);
       fitRef.current = undefined;
       searchRef.current = undefined;
     };
@@ -254,8 +266,10 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!terminal) return;
-    terminal.options.theme = terminalThemes[theme].terminal;
-  }, [theme]);
+    terminal.options.theme = backgroundOverride
+      ? { ...terminalThemes[theme].terminal, background: backgroundOverride }
+      : terminalThemes[theme].terminal;
+  }, [backgroundOverride, theme]);
 
   useEffect(() => {
     const terminal = terminalRef.current;

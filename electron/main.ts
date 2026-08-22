@@ -97,6 +97,7 @@ interface TerminalSession {
   inputBuffer: string;
   pty: IPty;
   status: "running" | "exited";
+  lastExitCode?: number;
   exitedAt?: number;
   createdAt: number;
   updatedAt: number;
@@ -177,9 +178,14 @@ const DEFAULT_SETTINGS: AppSettings = {
   fontFamily: "",
   cellWidth: "compact",
   completionStyle: "inline",
-  bellSound: true,
+  bellMode: "both",
+  tabPosition: "both",
+  backgroundColor: undefined,
+  accentColor: undefined,
   resumeAiSessions: true,
   loadShellProfile: false,
+  proxyUrl: "",
+  proxyBypass: "",
   cliProfiles: [],
   keybindings: { ...DEFAULT_KEYBINDINGS },
 };
@@ -387,8 +393,9 @@ function rebuildTrayMenu() {
     for (const session of sessions) {
       const stateLabel = session.activity === "attention" ? "等待输入"
         : session.activity === "running" ? "运行中"
-        : session.status === "exited" ? "已退出"
-        : "空闲";
+        : session.status === "exited"
+          ? (session.lastExitCode != null && session.lastExitCode !== 0 ? `失败 (code ${session.lastExitCode})` : "已退出")
+          : "空闲";
       const label = `${session.title || session.cwd} — ${stateLabel}`;
       template.push({
         label,
@@ -620,9 +627,20 @@ function normalizeAppSettings(value: Partial<AppSettings> | null | undefined): A
       : "",
     cellWidth: value?.cellWidth === "relaxed" ? "relaxed" : "compact",
     completionStyle: value?.completionStyle === "popup" ? "popup" : "inline",
-    bellSound: value?.bellSound !== false,
+    bellMode: value?.bellMode === "off" || value?.bellMode === "flash" || value?.bellMode === "sound" || value?.bellMode === "both"
+      ? value.bellMode
+      : ((value as { bellSound?: boolean } | null | undefined)?.bellSound === false ? "flash" : "both"),
+    tabPosition: value?.tabPosition === "top" || value?.tabPosition === "side" ? value.tabPosition : "both",
+    backgroundColor: typeof value?.backgroundColor === "string" && /^#[0-9a-fA-F]{6}$/.test(value.backgroundColor) ? value.backgroundColor.toLowerCase() : undefined,
+    accentColor: typeof value?.accentColor === "string" && /^#[0-9a-fA-F]{6}$/.test(value.accentColor) ? value.accentColor.toLowerCase() : undefined,
     resumeAiSessions: value?.resumeAiSessions !== false,
     loadShellProfile: value?.loadShellProfile === true,
+    proxyUrl: typeof value?.proxyUrl === "string"
+      ? value.proxyUrl.trim().replace(/[^\x20-\x7E]/g, "").slice(0, 240)
+      : "",
+    proxyBypass: typeof value?.proxyBypass === "string"
+      ? value.proxyBypass.replace(/[^\x20-\x7E]/g, "").slice(0, 480)
+      : "",
     cliProfiles: normalizeCliProfiles(value?.cliProfiles),
     keybindings: normalizeKeybindings(value?.keybindings),
   };
@@ -965,7 +983,7 @@ function flushTerminalOutput(session: TerminalSession) {
 
 function notifyTerminalAttention(session: TerminalSession, message = "Attention requested", completion = false) {
   sendTerminalEvent(session, { type: "bell" });
-  if (appSettings.bellSound) {
+  if (appSettings.bellMode === "sound" || appSettings.bellMode === "both") {
     try { shell.beep(); } catch { /* Some Linux desktop environments do not expose a system bell. */ }
   }
   if (!appSettings.notifyOnCompletion || !Notification.isSupported()) return;
@@ -1135,6 +1153,23 @@ function terminalEnvironment(sessionId: string) {
   environment.CODEX_UI_SESSION_ID = sessionId;
   if (cliLifecycleBridge) environment.CODEX_UI_NOTIFY_PIPE = cliLifecycleBridge.getPipeName();
   environment.CODEX_UI_POWERLINE = appSettings.powerlinePrompt ? "1" : "0";
+  const proxyUrl = appSettings.proxyUrl.trim();
+  if (proxyUrl && /^(?:https?|socks4|socks5|socks5h):\/\/[^\s]+$/i.test(proxyUrl)) {
+    environment.HTTP_PROXY = proxyUrl;
+    environment.HTTPS_PROXY = proxyUrl;
+    environment.ALL_PROXY = proxyUrl;
+    environment.http_proxy = proxyUrl;
+    environment.https_proxy = proxyUrl;
+    environment.all_proxy = proxyUrl;
+    const bypass = appSettings.proxyBypass.trim();
+    if (bypass) {
+      environment.NO_PROXY = bypass;
+      environment.no_proxy = bypass;
+    }
+  } else {
+    // 留空时代理设置明确不生效，避免继承系统/外壳中的意外代理变量。
+    for (const key of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] as const) delete environment[key];
+  }
   return environment;
 }
 
@@ -1395,6 +1430,7 @@ function createTerminalSession(
   terminal.onExit(({ exitCode }) => {
     flushTerminalOutput(session);
     session.status = "exited";
+    session.lastExitCode = exitCode;
     session.exitedAt = Date.now();
     session.updatedAt = Date.now();
     sendTerminalEvent(session, { type: "exit", code: exitCode });
@@ -2894,6 +2930,28 @@ ipcMain.handle("terminal:git-action", async (event, value: unknown): Promise<Ope
     return { ok: false, message: "Unsupported Git action" };
   }
   return runGitOperation(request as GitActionRequest);
+});
+
+ipcMain.handle("terminal:export-session", async (_event, sessionId: unknown, content: unknown) => {
+  const id = typeof sessionId === "string" ? sessionId : "";
+  const text = typeof content === "string" ? content.slice(0, 10 * 1024 * 1024) : "";
+  const session = terminalSessions.get(id);
+  const base = (session?.title || "terminal").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").trim().slice(0, 80) || "terminal";
+  const forcedPath = process.env.CODEX_UI_EXPORT_PATH;
+  if (forcedPath) {
+    await writeFile(forcedPath, text, "utf8");
+    return forcedPath;
+  }
+  const defaultPath = join(app.getPath("documents"), `${base}-${new Date().toISOString().slice(0, 10)}.txt`);
+  const options: Electron.SaveDialogOptions = {
+    title: "导出终端会话",
+    defaultPath,
+    filters: [{ name: "Text", extensions: ["txt"] }, { name: "All files", extensions: ["*"] }],
+  };
+  const chosen = mainWindow && !mainWindow.isDestroyed() ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options);
+  if (chosen.canceled || !chosen.filePath) return null;
+  await writeFile(chosen.filePath, text, "utf8");
+  return chosen.filePath;
 });
 
 ipcMain.handle("terminal:ssh-profiles", async () => {

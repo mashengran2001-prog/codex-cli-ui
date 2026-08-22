@@ -36,7 +36,7 @@ try {
   assert.match(await page.locator(".terminal-tab").textContent(), /atlas-workspace/);
   assert.match(await page.locator(".cli-tool-list").textContent(), /Claude Code/);
   await page.evaluate(() => {
-    const sessionId = window.__mock.terminalSessions[0].id;
+    const sessionId = document.querySelector(".terminal-pane-leaf")?.getAttribute("data-session-id") ?? window.__mock.terminalSessions[0].id;
     window.__mock.terminalListeners.forEach((listener) => listener({ sessionId, type: "bell" }));
   });
   // 响铃时分屏工具栏闪烁（bell flash 指示）
@@ -115,7 +115,7 @@ try {
   await page.getByText("Appearance", { exact: true }).waitFor();
   await page.getByLabel("Interface language").selectOption("zh-CN");
   await page.getByRole("heading", { name: "CLI 工作台设置" }).waitFor();
-  assert.equal(await page.getByLabel("终端响铃").isChecked(), true);
+  assert.equal(await page.getByLabel("终端铃声模式").inputValue(), "both");
   assert.equal(await page.getByLabel("加载 PowerShell 配置").isChecked(), false);
   assert.equal(await page.getByLabel("CLI 活动同步").isChecked(), false);
   await page.getByLabel("CLI 活动同步").check();
@@ -441,6 +441,94 @@ try {
   const wslReadmePath = await page.locator(".file-row", { hasText: "README.md" }).getAttribute("title");
   assert.equal(wslReadmePath, "\\\\wsl.localhost\\Ubuntu\\home\\dev\\README.md");
   await page.evaluate(() => localStorage.removeItem("codex-cli-ui:test-wsl-terminal"));
+
+  // 会话导出：右键标签出现“导出会话”，点击后桥接收到 sessionId 与缓冲区内容
+  await page.locator(".terminal-top-tab").first().click({ button: "right" });
+  await page.getByRole("button", { name: "导出会话" }).waitFor();
+  await page.getByRole("button", { name: "导出会话" }).click();
+  await page.waitForFunction(() => window.__mock.$$callLog.exportTerminalSession.length === 1);
+  const exportCall = await page.evaluate(() => window.__mock.$$callLog.exportTerminalSession[0]);
+  assert.equal(typeof exportCall.sessionId, "string");
+  assert.equal(typeof exportCall.content, "string");
+  await page.getByText("F:\\demo\\export\\session.txt").waitFor();
+
+  // 退出码与失败状态：新建终端后模拟非零退出，标签出现 failed 状态与退出码文案
+  const tabCountBefore = await page.locator(".terminal-tab").count();
+  await page.getByTitle("新建终端").first().click();
+  await page.waitForFunction((count) => window.__mock.terminalSessions.length === count + 1, tabCountBefore);
+  const failedSessionId = await page.evaluate(() => window.__mock.terminalSessions.at(-1).id);
+  await page.evaluate((id) => window.__mock.terminalListeners.forEach((listener) => listener({ sessionId: id, type: "exit", code: 3 })), failedSessionId);
+  const failedTab = page.locator(`.terminal-tab[data-session-id="${failedSessionId}"]`);
+  await failedTab.locator(".terminal-state.failed").waitFor();
+  assert.match(await failedTab.textContent() ?? "", /进程已退出，代码 3/);
+
+  // 标签栏位置切换：顶部-only 隐藏侧边标签，侧边-only 隐藏顶部标签
+  await page.locator(".terminal-actions").getByTitle("设置").click();
+  await page.locator(".terminal-settings").waitFor();
+  await page.getByLabel("标签栏位置").selectOption("top");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).tabPosition, "top");
+  await page.getByRole("button", { name: "返回工作台" }).click();
+  await page.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 1 && document.querySelectorAll(".terminal-side-tabs").length === 0);
+  await page.locator(".terminal-actions").getByTitle("设置").click();
+  await page.locator(".terminal-settings").waitFor();
+  await page.getByLabel("标签栏位置").selectOption("side");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).tabPosition, "side");
+  await page.getByRole("button", { name: "返回工作台" }).click();
+  await page.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 0 && document.querySelectorAll(".terminal-side-tabs").length === 1);
+  await page.locator(".terminal-actions").getByTitle("设置").click();
+  await page.locator(".terminal-settings").waitFor();
+  await page.getByLabel("标签栏位置").selectOption("both");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).tabPosition, "both");
+
+  // 代理设置：仅影响工作台内 CLI，输入地址与绕过列表后持久化，然后清空恢复
+  await page.getByLabel("代理地址").fill("http://127.0.0.1:7890");
+  await page.getByLabel("不走代理的地址").fill("localhost,127.0.0.1");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).proxyUrl, "http://127.0.0.1:7890");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).proxyBypass, "localhost,127.0.0.1");
+  await page.getByLabel("代理地址").fill("");
+  await page.getByLabel("不走代理的地址").fill("");
+
+  // 铃声四模式：声音-only 时 bell 事件不闪烁；闪烁-only 时闪烁；最后恢复 both
+  // 设置页打开时会隐藏终端面板，因此先返回工作台再触发 bell，避免工具栏不可见。
+  await page.getByLabel("终端铃声模式").selectOption("sound");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).bellMode, "sound");
+  await page.getByRole("button", { name: "返回工作台" }).click();
+  await page.locator(".terminal-pane-leaf").waitFor();
+  await page.waitForTimeout(150);
+  await page.evaluate(() => {
+    const sessionId = document.querySelector(".terminal-pane-leaf")?.getAttribute("data-session-id") ?? window.__mock.terminalSessions.find((session) => session.kind !== "ssh").id;
+    window.__mock.terminalListeners.forEach((listener) => listener({ sessionId, type: "bell" }));
+  });
+  await page.waitForTimeout(150);
+  assert.equal(await page.locator(".pane-toolbar.bell-flash").count(), 0);
+  // 闪烁-only：bell 事件令 pane 工具栏闪烁
+  await page.locator(".terminal-actions").getByTitle("设置").click();
+  await page.locator(".terminal-settings").waitFor();
+  await page.getByLabel("终端铃声模式").selectOption("flash");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).bellMode, "flash");
+  await page.getByRole("button", { name: "返回工作台" }).click();
+  await page.locator(".terminal-pane-leaf").waitFor();
+  await page.waitForTimeout(150);
+  await page.evaluate(() => {
+    const sessionId = document.querySelector(".terminal-pane-leaf")?.getAttribute("data-session-id") ?? window.__mock.terminalSessions.find((session) => session.kind !== "ssh").id;
+    window.__mock.terminalListeners.forEach((listener) => listener({ sessionId, type: "bell" }));
+  });
+  await page.locator(".pane-toolbar.bell-flash").waitFor();
+  // 恢复 both，HSV 取色断言需要重新打开设置页
+  await page.locator(".terminal-actions").getByTitle("设置").click();
+  await page.locator(".terminal-settings").waitFor();
+  await page.getByLabel("终端铃声模式").selectOption("both");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).bellMode, "both");
+
+  // HSV 连续取色：设置页出现两个取色器，填入 HEX 实时持久化，重置后清除
+  assert.equal(await page.locator(".hsv-picker").count(), 2);
+  await page.locator(".hsv-picker").first().locator("input").fill("#ff0000");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).backgroundColor, "#ff0000");
+  await page.locator(".hsv-picker").first().locator("button").click();
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).backgroundColor, undefined);
+  await page.locator(".hsv-picker").nth(1).locator("input").fill("#336699");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).accentColor, "#336699");
+  await page.getByRole("button", { name: "返回工作台" }).click();
 
   await context.close();
   console.log("workflow: chat, Nebula terminal, drawers, launcher, overflow, SVN, split restore, and WSL checks passed");

@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Bell, Bot, ChevronDown, ChevronLeft, ChevronRight, CircleX, Columns2, Command, Copy,
-  FolderOpen, FolderTree, GitBranch, GitFork, Globe2, GripVertical, LoaderCircle, PanelLeftClose,
+  Download, FolderOpen, FolderTree, GitBranch, GitFork, Globe2, GripVertical, LoaderCircle, PanelLeftClose,
   PanelLeftOpen, Pencil, Plus, RefreshCw, Rows2, Search, Server, Settings2, SquareTerminal, TerminalSquare, TriangleAlert, Upload, X,
   RotateCcw, History,
 } from "lucide-react";
@@ -15,6 +15,7 @@ import { DirectoriesDrawer, FilesDrawer, GitDrawer, SftpDrawer } from "./termina
 import SettingsPanel from "./terminal/SettingsPanel";
 import SshEditor from "./terminal/SshEditor";
 import TerminalPane from "./terminal/TerminalPane";
+import type { Terminal as XTerm } from "@xterm/xterm";
 
 interface TerminalWorkspaceProps {
   project?: ProjectRecord;
@@ -343,6 +344,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const sessionsRef = useRef(sessions);
   const treeRef = useRef(paneTree);
   const activeSessionIdRef = useRef(activeSessionId);
+  const terminalInstancesRef = useRef<Map<string, XTerm>>(new Map());
   const mountedRef = useRef(true);
   const paneResizeRef = useRef<{ splitKey: string; index: number; startX: number; startY: number; startSizes: number[]; direction: SplitDirection; containerSize: number } | null>(null);
   const paneResizeCleanupRef = useRef<(() => void) | null>(null);
@@ -512,19 +514,21 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
       setSessions((current) => current.map((item) => item.id === event.sessionId ? { ...item, updatedAt: Date.now() } : item));
       if (!containsLeaf(treeRef.current, event.sessionId)) setUnread((current) => new Set(current).add(event.sessionId));
     } else if (event.type === "exit") {
-      setSessions((current) => current.map((item) => item.id === event.sessionId ? { ...item, status: "exited", activity: "idle", exitedAt: Date.now(), updatedAt: Date.now() } : item));
+      setSessions((current) => current.map((item) => item.id === event.sessionId ? { ...item, status: "exited", activity: "idle", exitCode: event.code ?? item.exitCode, exitedAt: Date.now(), updatedAt: Date.now() } : item));
       setNotice({ sessionId: event.sessionId, title: previous?.title || workbenchCopy.terminal, message: workbenchCopy.processExited(event.code) });
     } else if (event.type === "bell") {
       setNotice({ sessionId: event.sessionId, title: previous?.title || workbenchCopy.terminal, message: previous?.activity === "attention" ? workbenchCopy.inputRequested : workbenchCopy.attentionRequested });
-      setBellFlash((current) => new Set(current).add(event.sessionId));
-      window.setTimeout(() => setBellFlash((current) => {
-        const next = new Set(current);
-        next.delete(event.sessionId);
-        return next;
-      }), 700);
+      if (settings.bellMode === "flash" || settings.bellMode === "both") {
+        setBellFlash((current) => new Set(current).add(event.sessionId));
+        window.setTimeout(() => setBellFlash((current) => {
+          const next = new Set(current);
+          next.delete(event.sessionId);
+          return next;
+        }), 700);
+      }
     } else if (event.type === "focus") assignSession(event.sessionId);
     else if (event.type === "error" && event.message) onError(event.message);
-  }), [assignSession, onError, workbenchCopy]);
+  }), [assignSession, onError, settings.bellMode, workbenchCopy]);
 
   useEffect(() => {
     if (!notice) return;
@@ -748,6 +752,28 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
       assignSession(session.id);
     } catch (reason) {
       onError(reason instanceof Error ? reason.message : workbenchCopy.createTerminalFailed);
+    }
+  };
+
+  const exportSession = async (id: string) => {
+    const session = sessionsRef.current.find((item) => item.id === id);
+    if (!session) return;
+    const terminal = terminalInstancesRef.current.get(id);
+    let content = "";
+    if (terminal) {
+      const buffer = terminal.buffer.active;
+      const lines: string[] = [];
+      for (let y = 0; y < buffer.length; y += 1) {
+        const line = buffer.getLine(y);
+        lines.push(line ? line.translateToString(true) : "");
+      }
+      content = lines.join("\n");
+    }
+    try {
+      const path = await window.codex.exportTerminalSession(id, content);
+      if (path) setNotice({ sessionId: id, title: workbenchCopy.exportSession, message: path });
+    } catch (reason) {
+      onError(reason instanceof Error ? reason.message : workbenchCopy.exportFailed);
     }
   };
 
@@ -1049,7 +1075,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
             {leafCount(paneTree) > 1 && <button aria-label={workbenchCopy.closePane} title={workbenchCopy.closePane} onClick={() => closePane(session.id)}><X size={11} /></button>}
           </span>
         </div>
-        <TerminalPane session={session} theme={settings.theme} cursorStyle={settings.cursorStyle} cursorBlink={settings.cursorBlink} fontFamily={settings.fontFamily} cellWidth={settings.cellWidth} bellFlash={bellFlash.has(session.id)} copyOnSelect={settings.copyOnSelect} active={isActive && terminalView && windowFocused} onFocus={() => { setActiveSessionId(session.id); setUnread((current) => { const next = new Set(current); next.delete(session.id); return next; }); }} />
+        <TerminalPane session={session} theme={settings.theme} cursorStyle={settings.cursorStyle} cursorBlink={settings.cursorBlink} fontFamily={settings.fontFamily} cellWidth={settings.cellWidth} backgroundOverride={settings.backgroundColor} bellFlash={bellFlash.has(session.id)} copyOnSelect={settings.copyOnSelect} active={isActive && terminalView && windowFocused} onFocus={() => { setActiveSessionId(session.id); setUnread((current) => { const next = new Set(current); next.delete(session.id); return next; }); }} onTerminalReady={(id, terminal) => { if (terminal) terminalInstancesRef.current.set(id, terminal); else terminalInstancesRef.current.delete(id); }} />
         {draggingSession && draggingSession !== session.id && <div className="dock-overlay">
           <button className={`dock-top${hoverEdge === "top" ? " active" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); dockSession(draggingSession, session.id, "top"); }} />
           <button className={`dock-right${hoverEdge === "right" ? " active" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); dockSession(draggingSession, session.id, "right"); }} />
@@ -1067,7 +1093,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     : undefined;
 
   return (
-    <main className="terminal-workspace" data-terminal-theme={settings.theme} data-density={settings.density} data-workspace-view={view} data-window-focused={windowFocused} style={{ "--terminal-sidebar-width": `${sidebarWidth}px`, "--terminal-drawer-width": `${drawerWidth}px`, "--terminal-bg-opacity": settings.backgroundOpacity, "--terminal-bg-image": pathToCssUrl(settings.backgroundImage) } as React.CSSProperties}>
+    <main className="terminal-workspace" data-terminal-theme={settings.theme} data-density={settings.density} data-workspace-view={view} data-window-focused={windowFocused} style={{ "--terminal-sidebar-width": `${sidebarWidth}px`, "--terminal-drawer-width": `${drawerWidth}px`, "--terminal-bg-opacity": settings.backgroundOpacity, "--terminal-bg-image": pathToCssUrl(settings.backgroundImage), ...(settings.accentColor ? { "--t-accent": settings.accentColor } : {}) } as React.CSSProperties}>
       <header className="terminal-header">
         <div className="terminal-heading">
           <span className="terminal-brand">{view === "settings" ? <Settings2 size={17} /> : chatView ? <Bot size={17} /> : <TerminalSquare size={17} />}</span>
@@ -1094,7 +1120,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
           <button className={view === "settings" ? "active" : ""} title={view === "settings" ? workbenchCopy.back : workbenchCopy.settings} onClick={() => view === "settings" ? setView("terminal") : openSettings()}>{view === "settings" ? (workspaceMode === "chat" ? <Bot size={14} /> : <TerminalSquare size={14} />) : <Settings2 size={14} />}</button>
         </div>
       </header>
-      {primaryView && terminalView && sessions.length > 0 && (
+      {primaryView && terminalView && sessions.length > 0 && (settings.tabPosition === "top" || settings.tabPosition === "both") && (
         <div className="terminal-top-tabs" role="tablist" aria-label={workbenchCopy.topTabs} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; tabDragXRef.current = event.clientX; }}>
           {sessions.map((session) => (
             <div
@@ -1113,12 +1139,13 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
             >
               {tabColors[session.id] && <i className="terminal-tab-color" style={{ background: tabColors[session.id] }} />}
               <button className="terminal-tab-main" title={session.cwd} onClick={() => assignSession(session.id)}>
-                <span className={`terminal-state ${session.status} ${session.activity} ${unread.has(session.id) ? "unread" : ""}`}>{session.activity === "running" ? <LoaderCircle className="spin" size={11} /> : session.activity === "attention" ? <TriangleAlert size={11} /> : session.status === "exited" ? <CircleX size={11} /> : undefined}</span>
+                <span className={`terminal-state ${session.status} ${session.activity}${session.exitCode != null && session.exitCode !== 0 ? " failed" : ""} ${unread.has(session.id) ? "unread" : ""}`} title={session.exitCode != null && session.exitCode !== 0 ? workbenchCopy.processExited(session.exitCode) : undefined}>{session.activity === "running" ? <LoaderCircle className="spin" size={11} /> : session.activity === "attention" ? <TriangleAlert size={11} /> : session.status === "exited" ? <CircleX size={11} /> : undefined}</span>
                 {terminalIcon(session)}
                 {renamingSession === session.id
                   ? <input className="terminal-rename-input" autoFocus value={renameDraft} aria-label={workbenchCopy.renameTerminal} placeholder={workbenchCopy.renameTabPlaceholder} onClick={(event) => event.stopPropagation()} onChange={(event) => setRenameDraft(event.target.value)} onBlur={commitRename} onKeyDown={(event) => { if (event.key === "Enter") commitRename(); else if (event.key === "Escape") setRenamingSession(undefined); }} />
                   : <span className="terminal-tab-title">{tabDisplayTitle(session)}</span>}
                 {session.activity === "idle" && <em>{shellTag(session)}</em>}
+                {session.status === "exited" && session.exitCode != null && session.exitCode !== 0 && <em className="terminal-exit-code failed">{workbenchCopy.processExited(session.exitCode)}</em>}
               </button>
               {session.kind === "ssh" && session.exitedAt && <button className="terminal-tab-retry" title={workbenchCopy.xRetryTerminal} onClick={() => void restartSsh(session)}><RefreshCw size={11} /></button>}
               <button className="terminal-tab-close" title={workbenchCopy.closeTerminal} onClick={() => void closeTerminal(session.id)}><X size={11} /></button>
@@ -1135,14 +1162,15 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
           </div>
           {tabMenuSession?.aiSource && tabMenuSession.status === "running" && (tabMenuSession.aiSessionId || tabMenuSession.aiSource === "claude") && <button onClick={() => void resumeAiSession(tabMenu.sessionId)}><RotateCcw size={12} />{workbenchCopy.resumeAiSession}</button>}
           {tabMenuSession?.aiSource && tabMenuSession.aiSessionId && tabMenuSession.status === "running" && <button onClick={() => void forkAiSession(tabMenu.sessionId)}><GitFork size={12} />{workbenchCopy.forkAiSession}</button>}
+          <button onClick={() => { const id = tabMenu.sessionId; setTabMenu(undefined); void exportSession(id); }}><Download size={12} />{workbenchCopy.exportSession}</button>
           <button className="danger" onClick={() => { const id = tabMenu.sessionId; setTabMenu(undefined); void closeTerminal(id); }}><X size={12} />{workbenchCopy.closeTerminal}</button>
         </div>
       )}
       <div className="terminal-main">
         {showSidePanel && chatView && <aside className="terminal-side-panel chat-side-panel">{chatSidebar}</aside>}
         {showSidePanel && terminalView && <aside className="terminal-side-panel">
-          <div className="side-section-heading"><button title={workbenchCopy.toggleTabs} onClick={() => setTabsCollapsed((value) => !value)}>{tabsCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}<strong>{workbenchCopy.tabs}</strong></button><span>{sessions.length}</span><button title={workbenchCopy.newTerminal} onClick={() => void createTerminal(active?.cwd || projectPath, { reuseExisting: false, shellId: settings.defaultShellId })}><Plus size={13} /></button></div>
-          {!tabsCollapsed && <div className="terminal-side-tabs">{sessions.map((session) => <div className={`terminal-tab ${containsLeaf(paneTree, session.id) ? "active" : ""}`} data-session-id={session.id} data-tab-color={tabColors[session.id] || ""} key={session.id} draggable onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }} onAuxClick={(event) => { if (event.button !== 1) return; event.preventDefault(); event.stopPropagation(); void closeTerminal(session.id); }} onContextMenu={(event) => { event.preventDefault(); setTabMenu({ sessionId: session.id, x: event.clientX, y: event.clientY }); }} onDragStart={(event) => { setDraggingSession(session.id); event.dataTransfer.setData("text/terminal-session", session.id); }} onDragEnd={() => { setDraggingSession(undefined); setDockTarget(null); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const source = event.dataTransfer.getData("text/terminal-session"); if (source) reorderSession(source, session.id); }}>{tabColors[session.id] && <i className="terminal-tab-color" style={{ background: tabColors[session.id] }} />}<button className="terminal-tab-main" title={session.cwd} onClick={() => assignSession(session.id)}><span className={`terminal-state ${session.status} ${session.activity} ${unread.has(session.id) ? "unread" : ""}`}>{session.activity === "running" ? <LoaderCircle className="spin" size={11} /> : session.activity === "attention" ? <TriangleAlert size={11} /> : session.status === "exited" ? <CircleX size={11} /> : undefined}</span>{terminalIcon(session)}<span><strong>{tabDisplayTitle(session)}</strong><small>{session.activity === "running" ? session.activeCommand : session.remoteHost || session.cwd}</small></span>{session.activity === "idle" && <em>{shellTag(session)}</em>}</button>{session.kind === "ssh" && session.exitedAt && <button className="terminal-tab-retry" title={workbenchCopy.xRetryTerminal} onClick={() => void restartSsh(session)}><RefreshCw size={11} /></button>}<button className="terminal-tab-close" title={workbenchCopy.closeTerminal} onClick={() => void closeTerminal(session.id)}><X size={11} /></button></div>)}</div>}
+          {(settings.tabPosition === "side" || settings.tabPosition === "both") && <div className="side-section-heading"><button title={workbenchCopy.toggleTabs} onClick={() => setTabsCollapsed((value) => !value)}>{tabsCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}<strong>{workbenchCopy.tabs}</strong></button><span>{sessions.length}</span><button title={workbenchCopy.newTerminal} onClick={() => void createTerminal(active?.cwd || projectPath, { reuseExisting: false, shellId: settings.defaultShellId })}><Plus size={13} /></button></div>}
+          {!tabsCollapsed && (settings.tabPosition === "side" || settings.tabPosition === "both") && <div className="terminal-side-tabs">{sessions.map((session) => <div className={`terminal-tab ${containsLeaf(paneTree, session.id) ? "active" : ""}`} data-session-id={session.id} data-tab-color={tabColors[session.id] || ""} key={session.id} draggable onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }} onAuxClick={(event) => { if (event.button !== 1) return; event.preventDefault(); event.stopPropagation(); void closeTerminal(session.id); }} onContextMenu={(event) => { event.preventDefault(); setTabMenu({ sessionId: session.id, x: event.clientX, y: event.clientY }); }} onDragStart={(event) => { setDraggingSession(session.id); event.dataTransfer.setData("text/terminal-session", session.id); }} onDragEnd={() => { setDraggingSession(undefined); setDockTarget(null); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const source = event.dataTransfer.getData("text/terminal-session"); if (source) reorderSession(source, session.id); }}>{tabColors[session.id] && <i className="terminal-tab-color" style={{ background: tabColors[session.id] }} />}<button className="terminal-tab-main" title={session.cwd} onClick={() => assignSession(session.id)}><span className={`terminal-state ${session.status} ${session.activity}${session.exitCode != null && session.exitCode !== 0 ? " failed" : ""} ${unread.has(session.id) ? "unread" : ""}`} title={session.exitCode != null && session.exitCode !== 0 ? workbenchCopy.processExited(session.exitCode) : undefined}>{session.activity === "running" ? <LoaderCircle className="spin" size={11} /> : session.activity === "attention" ? <TriangleAlert size={11} /> : session.status === "exited" ? <CircleX size={11} /> : undefined}</span>{terminalIcon(session)}<span><strong>{tabDisplayTitle(session)}</strong><small>{session.status === "exited" && session.exitCode != null && session.exitCode !== 0 ? workbenchCopy.processExited(session.exitCode) : session.activity === "running" ? session.activeCommand : session.remoteHost || session.cwd}</small></span>{session.activity === "idle" && <em>{shellTag(session)}</em>}</button>{session.kind === "ssh" && session.exitedAt && <button className="terminal-tab-retry" title={workbenchCopy.xRetryTerminal} onClick={() => void restartSsh(session)}><RefreshCw size={11} /></button>}<button className="terminal-tab-close" title={workbenchCopy.closeTerminal} onClick={() => void closeTerminal(session.id)}><X size={11} /></button></div>)}</div>}
           <div className="side-section-heading cli-tools-heading"><button title={workbenchCopy.toggleCliTools} onClick={() => setToolsCollapsed((value) => !value)}>{toolsCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}<strong>{workbenchCopy.cliTools}</strong></button><span>{cliTools.length}</span><button title={workbenchCopy.cliToolSettings} onClick={openSettings}><Settings2 size={12} /></button></div>
           {!toolsCollapsed && <div className="cli-tool-list">{cliTools.map((tool) => <button className={tool.available ? "available" : "unavailable"} title={tool.available ? workbenchCopy.launchTool(tool.name) : tool.installCommand || workbenchCopy.toolNotDetected(tool.name)} onClick={() => void launchCliTool(tool)} key={tool.id}>{cliToolIcon(tool)}<span className="cli-tool-copy"><strong>{tool.name}</strong><small>{tool.available ? tool.description : workbenchCopy.toolNotInstalled}</small></span><i className={tool.available ? "online" : "offline"} /></button>)}</div>}
           <div className="side-section-heading ssh-heading"><button title={workbenchCopy.toggleSshHosts} onClick={() => setSshCollapsed((value) => !value)}>{sshCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}<strong>{workbenchCopy.sshHosts}</strong></button><span>{sshProfiles.length}</span><button title={workbenchCopy.newSshHost} onClick={() => setSshEditor("new")}><Plus size={13} /></button></div>

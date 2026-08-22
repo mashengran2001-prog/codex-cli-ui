@@ -36,6 +36,7 @@ const bridge: CodexBridge = {
   listDirectory: (root: string, path: string) => ipcRenderer.invoke("terminal:files", root, path),
   readDocument: (root: string, path: string) => ipcRenderer.invoke("terminal:document", root, path),
   readDocumentImage: (root: string, path: string) => ipcRenderer.invoke("terminal:document-image", root, path),
+  exportTerminalSession: (sessionId: string, content: string) => ipcRenderer.invoke("terminal:export-session", sessionId, content),
   getGitStatus: (path: string) => ipcRenderer.invoke("terminal:git", path),
   runGitAction: (request: GitActionRequest) => ipcRenderer.invoke("terminal:git-action", request),
   listSshProfiles: () => ipcRenderer.invoke("terminal:ssh-profiles"),

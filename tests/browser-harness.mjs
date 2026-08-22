@@ -58,7 +58,7 @@ export async function installMockBridge(page) {
       backgroundBlur: false, backgroundOpacity: 0.92, restoreTerminalTabs: true,
       resizablePanels: false, completionEnabled: true, copyOnSelect: true, powerlinePrompt: true,
       quickTerminal: true, shellStartupIntegration: false, defaultShellId: "powershell", cursorStyle: "bar", cursorBlink: true, fontFamily: "",
-      bellSound: true, resumeAiSessions: true, loadShellProfile: false, newTabPlacement: "after-active", cliProfiles: [],
+      bellMode: "both", tabPosition: "both", resumeAiSessions: true, loadShellProfile: false, proxyUrl: "", proxyBypass: "", newTabPlacement: "after-active", cliProfiles: [],
       keybindings: {
         "command-palette": "Ctrl+Shift+P", "new-terminal": "Ctrl+Shift+T", "split-right": "Ctrl+Shift+D",
         "split-down": "Ctrl+Shift+E", "pane-next": "Ctrl+Alt+ArrowRight", "pane-prev": "Ctrl+Alt+ArrowLeft",
@@ -145,7 +145,7 @@ export async function installMockBridge(page) {
       window.setTimeout(() => emit({ providerId: request.providerId, runId: request.runId, type: "exit", code: 0, stopped: false }), 115);
     };
 
-    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null, lastPasteProfileId: null, lastResumeId: null, lastFork: null, svnMode: false, lastGitAction: null, $$callLog: { readDocument: [], readDocumentImage: [] } };
+    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null, lastPasteProfileId: null, lastResumeId: null, lastFork: null, svnMode: false, lastGitAction: null, $$callLog: { readDocument: [], readDocumentImage: [], exportTerminalSession: [] } };
     window.codex = {
       getInfo: async () => codexProvider,
       listProviders: async () => [codexProvider, deepseekProvider],
@@ -253,6 +253,10 @@ export async function installMockBridge(page) {
       readDocumentImage: async (_root, path) => {
         window.__mock.$$callLog.readDocumentImage.push({ args: [_root, path] });
         return path.endsWith("logo.png") ? "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==" : null;
+      },
+      exportTerminalSession: async (sessionId, content) => {
+        window.__mock.$$callLog.exportTerminalSession.push({ sessionId, content });
+        return "F:\\demo\\export\\session.txt";
       },
       getGitStatus: async () => window.__mock.svnMode
         ? { available: true, branch: "r124", revision: "124", vcs: "svn", entries: [{ status: "M", path: "src/App.tsx" }, { status: "A", path: "README.md" }] }

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { BellRing, Check, Image, LoaderCircle, Plus, RotateCcw, Settings2, Trash2, X } from "lucide-react";
 import BrandIcon, { type BrandIconName } from "../BrandIcon";
 import { chordFromEvent, isModifierOnly, KEYBINDING_ACTIONS } from "../keybindings";
@@ -52,6 +52,8 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
               );
             })}
           </div>
+          <div className="settings-row color-picker-row"><label>{copy.backgroundCustomColor}</label><HsvPicker copy={copy} value={settings.backgroundColor} onChange={(color) => update("backgroundColor", color)} onReset={() => update("backgroundColor", undefined)} /></div>
+          <div className="settings-row color-picker-row"><label>{copy.accentColor}</label><HsvPicker copy={copy} value={settings.accentColor} onChange={(color) => update("accentColor", color)} onReset={() => update("accentColor", undefined)} /></div>
           <div className="settings-row">
             <label>{copy.language}</label>
             <select aria-label={copy.language} value={settings.language} onChange={(event) => update("language", event.target.value as AppSettings["language"])}><option value="system">{copy.followSystem}</option><option value="zh-CN">简体中文</option><option value="en-US">English</option></select>
@@ -74,10 +76,11 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <h2>{copy.terminal}</h2>
           <div className="settings-row"><label>{copy.defaultShell}</label><select value={settings.defaultShellId} onChange={(event) => update("defaultShellId", event.target.value)}>{shells.map((shell) => <option value={shell.id} key={shell.id}>{shell.label}</option>)}</select></div>
           <div className="settings-row"><label>{copy.newTabPlacement}</label><select aria-label={copy.newTabPlacement} value={settings.newTabPlacement} onChange={(event) => update("newTabPlacement", event.target.value as AppSettings["newTabPlacement"])}><option value="after-active">{copy.afterActiveTab}</option><option value="end">{copy.appendToEnd}</option></select></div>
+          <div className="settings-row"><label>{copy.tabPosition}</label><select aria-label={copy.tabPosition} value={settings.tabPosition} onChange={(event) => update("tabPosition", event.target.value as AppSettings["tabPosition"])}><option value="side">{copy.tabPositionSide}</option><option value="top">{copy.tabPositionTop}</option><option value="both">{copy.tabPositionBoth}</option></select></div>
           <div className="settings-row"><label>{copy.cursorShape}</label><select aria-label={copy.cursorShape} value={settings.cursorStyle} onChange={(event) => update("cursorStyle", event.target.value as AppSettings["cursorStyle"])}><option value="bar">{copy.cursorBar}</option><option value="block">{copy.cursorBlock}</option><option value="underline">{copy.cursorUnderline}</option></select></div>
           <Toggle label={copy.cursorBlink} checked={settings.cursorBlink} onChange={(value) => update("cursorBlink", value)} />
           <div className="settings-row"><label>{copy.fontFamily}</label><input aria-label={copy.fontFamily} value={settings.fontFamily} placeholder={copy.fontFamilyPlaceholder} onChange={(event) => update("fontFamily", event.target.value)} /></div>
-          <Toggle label={copy.terminalBell} checked={settings.bellSound} onChange={(value) => update("bellSound", value)} />
+          <div className="settings-row"><label>{copy.bellMode}</label><select aria-label={copy.bellMode} value={settings.bellMode} onChange={(event) => update("bellMode", event.target.value as AppSettings["bellMode"])}><option value="off">{copy.bellModeOff}</option><option value="flash">{copy.bellModeFlash}</option><option value="sound">{copy.bellModeSound}</option><option value="both">{copy.bellModeBoth}</option></select></div>
           <Toggle label={copy.loadPowerShellProfile} checked={settings.loadShellProfile} onChange={(value) => update("loadShellProfile", value)} />
           <Toggle label={copy.completions} checked={settings.completionEnabled} onChange={(value) => update("completionEnabled", value)} />
           <div className="settings-row"><label>{copy.completionStyle}</label><select aria-label={copy.completionStyle} value={settings.completionStyle} onChange={(event) => update("completionStyle", event.target.value as AppSettings["completionStyle"])}><option value="inline">{copy.completionInline}</option><option value="popup">{copy.completionPopup}</option></select></div>
@@ -121,6 +124,12 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <Toggle label={copy.shellStartupIntegration} checked={settings.shellStartupIntegration} onChange={(value) => update("shellStartupIntegration", value)} />
           <Toggle label={copy.completionNotifications} checked={settings.notifyOnCompletion} onChange={(value) => update("notifyOnCompletion", value)} />
           <div className="settings-row"><label>{copy.closeWindow}</label><select value={settings.closeBehavior} onChange={(event) => update("closeBehavior", event.target.value as AppSettings["closeBehavior"])}><option value="tray">{copy.keepRunning}</option><option value="quit">{copy.quitApplication}</option></select></div>
+        </section>
+        <section>
+          <h2>{copy.proxy}</h2>
+          <div className="settings-row"><label>{copy.proxyUrl}</label><input aria-label={copy.proxyUrl} type="text" value={settings.proxyUrl} placeholder={copy.proxyUrlPlaceholder} onChange={(event) => update("proxyUrl", event.target.value)} /></div>
+          <div className="settings-row"><label>{copy.proxyBypass}</label><input aria-label={copy.proxyBypass} type="text" value={settings.proxyBypass} placeholder={copy.proxyBypassPlaceholder} onChange={(event) => update("proxyBypass", event.target.value)} /></div>
+          <p className="settings-hint">{copy.proxyHint}</p>
         </section>
         <section>
           <h2>{copy.keybindings}</h2>
@@ -188,6 +197,121 @@ function KeybindingRow({ action, chord, label, hint, copy, onRecord, onReset }: 
         </button>
         <button className="keybinding-reset-one" title={copy.resetAllKeybindings} onClick={() => onReset(action)}><RotateCcw size={12} /></button>
       </span>
+    </div>
+  );
+}
+
+function hexToHsv(hex: string): { h: number; s: number; v: number } {
+  const match = /^#([0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!match) return { h: 220, s: 0.3, v: 0.18 };
+  const value = parseInt(match[1], 16);
+  const r = ((value >> 16) & 255) / 255;
+  const g = ((value >> 8) & 255) / 255;
+  const b = (value & 255) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  let h = 0;
+  if (delta !== 0) {
+    if (max === r) h = ((g - b) / delta) % 6;
+    else if (max === g) h = (b - r) / delta + 2;
+    else h = (r - g) / delta + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return { h, s: max === 0 ? 0 : delta / max, v: max };
+}
+
+function hsvToHex(h: number, s: number, v: number): string {
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (h < 60) { r = c; g = x; }
+  else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; }
+  else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; }
+  else { r = c; b = x; }
+  const toHex = (channel: number) => Math.round((channel + m) * 255).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function HsvPicker({ copy, value, onChange, onReset }: {
+  copy: ReturnType<typeof getSettingsCopy>;
+  value?: string;
+  onChange(color: string): void;
+  onReset(): void;
+}) {
+  const initial = hexToHsv(value || "#78aee8");
+  const [hue, setHue] = useState(initial.h);
+  const [sat, setSat] = useState(initial.s);
+  const [val, setVal] = useState(initial.v);
+  const [draft, setDraft] = useState(value || "");
+  const squareRef = useRef<HTMLDivElement>(null);
+  const hueRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const next = hexToHsv(value || "#78aee8");
+    setHue(next.h);
+    setSat(next.s);
+    setVal(next.v);
+    setDraft(value || "");
+  }, [value]);
+  const color = value || hsvToHex(hue, sat, val);
+  const pickSquare = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const rect = squareRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const s = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    const v = Math.min(1, Math.max(0, 1 - (event.clientY - rect.top) / rect.height));
+    setSat(s);
+    setVal(v);
+    onChange(hsvToHex(hue, s, v));
+  };
+  const pickHue = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const rect = hueRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const h = Math.min(360, Math.max(0, ((event.clientX - rect.left) / rect.width) * 360));
+    setHue(h);
+    onChange(hsvToHex(h, sat, val));
+  };
+  return (
+    <div className="hsv-picker">
+      <div
+        className="hsv-square"
+        ref={squareRef}
+        style={{ background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(${hue} 100% 50%))` }}
+        onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); pickSquare(event); }}
+        onPointerMove={(event) => { if (event.buttons === 1) pickSquare(event); }}
+      >
+        <i style={{ left: `${sat * 100}%`, top: `${(1 - val) * 100}%`, background: color }} />
+      </div>
+      <div
+        className="hsv-hue"
+        ref={hueRef}
+        style={{ background: "linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)" }}
+        onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); pickHue(event); }}
+        onPointerMove={(event) => { if (event.buttons === 1) pickHue(event); }}
+      >
+        <i style={{ left: `${(hue / 360) * 100}%` }} />
+      </div>
+      <div className="hsv-footer">
+        <span className="hsv-swatch" style={{ background: color }} />
+        <input
+          value={draft}
+          aria-label={copy.hexColor}
+          placeholder="#RRGGBB"
+          spellCheck={false}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            const next = event.target.value.trim();
+            if (/^#[0-9a-fA-F]{6}$/.test(next)) onChange(next.toLowerCase());
+          }}
+          onBlur={() => setDraft(value || "")}
+        />
+        {value && <button title={copy.resetColor} onClick={onReset}><RotateCcw size={12} /></button>}
+      </div>
     </div>
   );
 }
