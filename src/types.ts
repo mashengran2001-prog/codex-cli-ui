@@ -408,6 +408,8 @@ export interface CodexBridge {
   chooseImages(): Promise<string[]>;
   chooseBackgroundImage(): Promise<string | null>;
   revealPath(path: string): Promise<boolean>;
+  probePath(path: string): Promise<{ kind: "file" | "directory"; name: string; path: string; size?: number } | null>;
+  openPath(path: string): Promise<boolean>;
   copyText(text: string): Promise<boolean>;
   pasteClipboardImage(sshProfileId?: string): Promise<string | null>;
   openTerminal(path: string): Promise<boolean>;

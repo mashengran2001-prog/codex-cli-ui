@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
+import type { ILink } from "@xterm/xterm";
 import { ImageAddon } from "@xterm/addon-image";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -22,9 +23,19 @@ interface TerminalPaneProps {
   active: boolean;
   onFocus(): void;
   onTerminalReady?(id: string, terminal: XTerm | null): void;
+  onError?(message: string): void;
 }
 
 const draggedPathType = "application/x-codex-ui-path";
+const LINK_PATTERN = /(?:https?:\/\/[^\s<>"']+|\b[a-zA-Z]:[\\/][^\s<>"']*|\\\\[^\s<>"']+|\.[\\/][^\s<>"']+|\.{2}[\\/][^\s<>"']+)/;
+
+interface LinkPreviewState {
+  path: string;
+  resolved: string;
+  info: { kind: "file" | "directory"; name: string; size?: number } | null;
+  x: number;
+  y: number;
+}
 const DEFAULT_FONT_STACK = '"Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, "Noto Sans Mono CJK SC", "Microsoft YaHei UI", monospace';
 
 function pathForShell(path: string, session: TerminalInfo) {
@@ -50,19 +61,39 @@ function quotePath(path: string, session: TerminalInfo) {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
-export default function TerminalPane({ session, theme, cursorStyle, cursorBlink, fontFamily, cellWidth, backgroundOverride, bellFlash, copyOnSelect, active, onFocus, onTerminalReady }: TerminalPaneProps) {
+/** Windows-friendly path resolution for Ctrl+click link targets. */
+function resolveTerminalPath(base: string, candidate: string) {
+  if (/^[a-zA-Z]:[\\/]/.test(candidate) || candidate.startsWith("\\\\")) return candidate.replace(/[\\/]+$/, "");
+  const segments = candidate.split(/[\\/]+/).filter(Boolean);
+  const baseSegments = base.split(/[\\/]+/).filter(Boolean);
+  const stack = baseSegments.slice(0, -1);
+  for (const segment of segments) {
+    if (segment === ".") continue;
+    if (segment === "..") stack.pop();
+    else stack.push(segment);
+  }
+  const drive = base.match(/^[a-zA-Z]:/)?.[0];
+  return `${drive ? drive + "\\" : ""}${stack.join("\\")}`;
+}
+
+export default function TerminalPane({ session, theme, cursorStyle, cursorBlink, fontFamily, cellWidth, backgroundOverride, bellFlash, copyOnSelect, active, onFocus, onTerminalReady, onError }: TerminalPaneProps) {
   const copy = useUiCopy().workbench;
+  const copyRef = useRef(copy);
+  useEffect(() => { copyRef.current = copy; }, [copy]);
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTerm | undefined>(undefined);
   const fitRef = useRef<FitAddon | undefined>(undefined);
   const searchRef = useRef<SearchAddon | undefined>(undefined);
   const copyOnSelectRef = useRef(copyOnSelect);
   const onFocusRef = useRef(onFocus);
+  const onErrorRef = useRef(onError);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [linkPreview, setLinkPreview] = useState<LinkPreviewState | null>(null);
   const [query, setQuery] = useState("");
 
   useEffect(() => { copyOnSelectRef.current = copyOnSelect; }, [copyOnSelect]);
   useEffect(() => { onFocusRef.current = onFocus; }, [onFocus]);
+  useEffect(() => { onErrorRef.current = onError; }, [onError]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -90,6 +121,8 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
     try { terminal.loadAddon(new ImageAddon()); } catch { /* Canvas-less test browsers can skip image decoding. */ }
     terminal.open(container);
     terminalRef.current = terminal;
+    container.dataset.cols = String(terminal.cols);
+    container.dataset.rows = String(terminal.rows);
     onTerminalReady?.(session.id, terminal);
     fitRef.current = fit;
     searchRef.current = search;
@@ -106,6 +139,8 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
           if (terminal.cols !== lastCols || terminal.rows !== lastRows) {
             lastCols = terminal.cols;
             lastRows = terminal.rows;
+            container.dataset.cols = String(terminal.cols);
+            container.dataset.rows = String(terminal.rows);
             void window.codex.resizeTerminal(session.id, terminal.cols, terminal.rows);
           }
         } catch {
@@ -274,6 +309,115 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!terminal) return;
+    const cwd = session.cwd;
+    const container = containerRef.current;
+    if (!container) return;
+    const resolvePointerTarget = (clientX: number, clientY: number) => {
+      const rowsEl = container.querySelector<HTMLElement>(".xterm-rows");
+      const rowsRect = rowsEl?.getBoundingClientRect();
+      if (!rowsRect || rowsRect.height <= 0) return null;
+      const buffer = terminal.buffer.active;
+      const rowEls = Array.from(rowsEl?.children ?? []) as HTMLElement[];
+      let rowIndex: number;
+      if (rowEls.length > 0) {
+        const hit = rowEls.findIndex((el) => {
+          const r = el.getBoundingClientRect();
+          return clientY >= r.top && clientY < r.bottom;
+        });
+        if (hit < 0) return null;
+        rowIndex = hit;
+      } else {
+        const measure = container.querySelector(".xterm-char-measure-element");
+        const lineHeight = measure ? measure.getBoundingClientRect().height : 14;
+        rowIndex = Math.floor((clientY - rowsRect.top) / lineHeight);
+        const visibleRows = Math.max(1, Math.floor(rowsRect.height / lineHeight));
+        if (rowIndex < 0 || rowIndex >= visibleRows) return null;
+      }
+      const charWidth = rowsRect.width / Math.max(1, terminal.cols);
+      const column = Math.max(0, Math.floor((clientX - rowsRect.left) / charWidth));
+      const line = buffer.getLine(rowIndex + buffer.viewportY);
+      if (!line) return null;
+      const text = line.translateToString(false);
+      const start = text.slice(0, column).search(/[^\s]+$/);
+      if (start < 0) return null;
+      const token = text.slice(start).match(/^[^\s]+/)?.[0] ?? "";
+      if (!token || token.length > 1_000) return null;
+      if (!token.match(LINK_PATTERN)) return null;
+      const candidate = token.trim().replace(/[;,)\]}>]+$/, "");
+      return { token, resolved: resolveTerminalPath(cwd, candidate) };
+    };
+    const onMove = (event: MouseEvent) => {
+      if (!event.ctrlKey) { setLinkPreview(null); return; }
+      const target = resolvePointerTarget(event.clientX, event.clientY);
+      if (target) { void window.codex.probePath(target.resolved).then((info) => { const rect = container.getBoundingClientRect(); setLinkPreview({ path: target.token, resolved: target.resolved, info, x: Math.min(rect.width - 240, Math.max(8, event.clientX - rect.left)), y: Math.min(rect.height - 70, Math.max(8, event.clientY - rect.top + 16)) }); }).catch(() => setLinkPreview(null)); }
+    };
+    const onClick = (event: MouseEvent) => {
+      if (!event.ctrlKey) return;
+      const target = resolvePointerTarget(event.clientX, event.clientY);
+      if (!target) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void window.codex.openPath(target.resolved).catch(() => false).then((opened) => {
+        if (!opened) onErrorRef.current?.(copyRef.current.linkOpenFailed);
+      });
+    };
+    container.addEventListener("mousemove", onMove, true);
+    container.addEventListener("click", onClick, true);
+    const provider = terminal.registerLinkProvider({
+      provideLinks(bufferLineNumber: number, callback: (links: ILink[]) => void): void {
+        const buffer = terminal.buffer.active;
+        const line = buffer.getLine(bufferLineNumber);
+        if (!line) { callback([]); return; }
+        const lineText = line.translateToString(true);
+        const found: ILink[] = [];
+        for (const match of lineText.matchAll(LINK_PATTERN)) {
+          const index = match.index ?? 0;
+          const text = match[0];
+          if (text.length > 1_000) continue;
+          found.push({
+            text,
+            range: { start: { x: index + 1, y: bufferLineNumber + 1 }, end: { x: index + text.length + 1, y: bufferLineNumber + 1 } },
+            activate: (_event, textToActivate) => {
+              if (!_event.ctrlKey) return;
+              const candidate = textToActivate.trim().replace(/[;,)\]}>]+$/, "");
+              const resolved = resolveTerminalPath(cwd, candidate);
+              void window.codex.openPath(resolved).catch(() => false).then((opened) => {
+                if (!opened) onErrorRef.current?.(copyRef.current.linkOpenFailed);
+              });
+            },
+            hover: (event, textToHover) => {
+              if (!event.ctrlKey) { setLinkPreview(null); return; }
+              const candidate = textToHover.trim().replace(/[;,)\]}>]+$/, "");
+              const resolved = resolveTerminalPath(cwd, candidate);
+              void window.codex.probePath(resolved).then((info) => {
+                const containerRect = containerRef.current?.getBoundingClientRect();
+                if (!containerRect) return;
+                setLinkPreview({
+                  path: textToHover,
+                  resolved,
+                  info,
+                  x: Math.min(containerRect.width - 240, Math.max(8, event.clientX - containerRect.left)),
+                  y: Math.min(containerRect.height - 70, Math.max(8, event.clientY - containerRect.top + 16)),
+                });
+              }).catch(() => setLinkPreview(null));
+            },
+            leave: () => setLinkPreview(null),
+          });
+        }
+        callback(found);
+      },
+    });
+    return () => {
+      container.removeEventListener("mousemove", onMove, true);
+      container.removeEventListener("click", onClick, true);
+      provider.dispose();
+      setLinkPreview(null);
+    };
+  }, [session.cwd, session.id]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
     terminal.options.cursorStyle = cursorStyle;
     terminal.options.cursorInactiveStyle = "outline";
     terminal.options.cursorBlink = cursorBlink;
@@ -322,6 +466,13 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
   return (
     <div className={`terminal-pane-shell ${active ? "active" : ""}`} data-active={active} onMouseDown={onFocus}>
       <div className="terminal-canvas" ref={containerRef} />
+      {linkPreview && (
+        <div className="terminal-link-preview" style={{ left: linkPreview.x, top: linkPreview.y }}>
+          <strong>{linkPreview.info ? linkPreview.info.name : linkPreview.path}</strong>
+          <small>{linkPreview.info ? (linkPreview.info.kind === "directory" ? copyRef.current.linkDir : `${Math.max(1, Math.round((linkPreview.info.size || 0) / 1024))} KB`) : copyRef.current.linkNotFound}</small>
+          <em>{copyRef.current.linkHint}</em>
+        </div>
+      )}
       {searchOpen && (
         <div className="terminal-search-popover">
           <Search size={13} />

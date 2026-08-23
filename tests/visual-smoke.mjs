@@ -47,7 +47,7 @@ try {
   assert.ok(terminalMetrics.brandIcons.every((icon) => icon.width <= 16 && icon.height <= 16));
   assert.ok(terminalMetrics.overflow <= 1);
   await desktop.page.getByRole("button", { name: "关闭文件面板" }).click();
-  await desktop.page.getByRole("button", { name: "设置", exact: true }).click();
+  await desktop.page.locator(".terminal-actions").getByTitle("更多操作").click(); await desktop.page.getByRole("menuitem", { name: "打开设置" }).click();
   await desktop.page.locator(".terminal-settings").waitFor();
   await desktop.page.getByLabel("界面语言").selectOption("en-US");
   await desktop.page.getByText("Appearance", { exact: true }).waitFor();

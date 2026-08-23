@@ -2607,6 +2607,31 @@ ipcMain.handle("path:reveal", async (_event, value: unknown) => {
   return true;
 });
 
+ipcMain.handle("path:probe", async (_event, value: unknown) => {
+  if (!isExistingPath(value)) return null;
+  try {
+    const details = statSync(value);
+    return details.isDirectory()
+      ? { kind: "directory" as const, name: basename(value), path: value }
+      : { kind: "file" as const, name: basename(value), path: value, size: details.size };
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle("path:open", async (_event, value: unknown) => {
+  if (typeof value !== "string" || value.length === 0 || value.length > 4096) return false;
+  const lower = value.trim().toLowerCase();
+  if (lower.startsWith("https://") || lower.startsWith("http://")) {
+    await shell.openExternal(value.trim());
+    return true;
+  }
+  if (!isExistingPath(value)) return false;
+  const error = await shell.openPath(value);
+  if (error) return false;
+  return true;
+});
+
 ipcMain.handle("clipboard:write", (_event, value: unknown) => {
   if (typeof value !== "string" || value.length > 1_000_000) return false;
   clipboard.writeText(value);

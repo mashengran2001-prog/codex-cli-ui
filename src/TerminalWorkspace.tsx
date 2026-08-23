@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Bell, Bot, ChevronDown, ChevronLeft, ChevronRight, CircleX, Columns2, Command, Copy,
-  Download, FolderOpen, FolderTree, GitBranch, GitFork, Globe2, GripVertical, LoaderCircle, PanelLeftClose,
+  Download, FolderOpen, FolderTree, GitBranch, GitFork, Globe2, GripVertical, LoaderCircle, MoreHorizontal, PanelLeftClose,
   PanelLeftOpen, Pencil, Plus, RefreshCw, Rows2, Search, Server, Settings2, SquareTerminal, TerminalSquare, TriangleAlert, Upload, X,
   RotateCcw, History,
 } from "lucide-react";
@@ -310,6 +310,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const [selectedSsh, setSelectedSsh] = useState<SshProfile>();
   const [sshEditor, setSshEditor] = useState<SshProfile | "new">();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [unread, setUnread] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<{ sessionId: string; title: string; message: string }>();
   const [sidebarWidth, setSidebarWidth] = useState(initialLayout.sidebarWidth || 250);
@@ -1075,7 +1076,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
             {leafCount(paneTree) > 1 && <button aria-label={workbenchCopy.closePane} title={workbenchCopy.closePane} onClick={() => closePane(session.id)}><X size={11} /></button>}
           </span>
         </div>
-        <TerminalPane session={session} theme={settings.theme} cursorStyle={settings.cursorStyle} cursorBlink={settings.cursorBlink} fontFamily={settings.fontFamily} cellWidth={settings.cellWidth} backgroundOverride={settings.backgroundColor} bellFlash={bellFlash.has(session.id)} copyOnSelect={settings.copyOnSelect} active={isActive && terminalView && windowFocused} onFocus={() => { setActiveSessionId(session.id); setUnread((current) => { const next = new Set(current); next.delete(session.id); return next; }); }} onTerminalReady={(id, terminal) => { if (terminal) terminalInstancesRef.current.set(id, terminal); else terminalInstancesRef.current.delete(id); }} />
+        <TerminalPane session={session} theme={settings.theme} cursorStyle={settings.cursorStyle} cursorBlink={settings.cursorBlink} fontFamily={settings.fontFamily} cellWidth={settings.cellWidth} backgroundOverride={settings.backgroundColor} bellFlash={bellFlash.has(session.id)} copyOnSelect={settings.copyOnSelect} active={isActive && terminalView && windowFocused} onFocus={() => { setActiveSessionId(session.id); setUnread((current) => { const next = new Set(current); next.delete(session.id); return next; }); }} onTerminalReady={(id, terminal) => { if (terminal) terminalInstancesRef.current.set(id, terminal); else terminalInstancesRef.current.delete(id); }} onError={onError} />
         {draggingSession && draggingSession !== session.id && <div className="dock-overlay">
           <button className={`dock-top${hoverEdge === "top" ? " active" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); dockSession(draggingSession, session.id, "top"); }} />
           <button className={`dock-right${hoverEdge === "right" ? " active" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); dockSession(draggingSession, session.id, "right"); }} />
@@ -1117,9 +1118,23 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
             <button title={workbenchCopy.commandPalette} onClick={() => setPaletteOpen(true)}><Command size={14} /></button>
           </>}
           {primaryView && <button title={sidebarCollapsed ? workbenchCopy.showSidebar : workbenchCopy.hideSidebar} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}</button>}
-          <button className={view === "settings" ? "active" : ""} title={view === "settings" ? workbenchCopy.back : workbenchCopy.settings} onClick={() => view === "settings" ? setView("terminal") : openSettings()}>{view === "settings" ? (workspaceMode === "chat" ? <Bot size={14} /> : <TerminalSquare size={14} />) : <Settings2 size={14} />}</button>
+          {view === "settings"
+            ? <button className="active" title={workbenchCopy.back} onClick={() => setView("terminal")}>{workspaceMode === "chat" ? <Bot size={14} /> : <TerminalSquare size={14} />}</button>
+            : <button className={moreMenuOpen ? "active" : ""} title={workbenchCopy.moreActions} onClick={() => setMoreMenuOpen((value) => !value)}><MoreHorizontal size={15} /></button>}
         </div>
       </header>
+      {moreMenuOpen && (
+        <div className="more-menu-overlay" onClick={() => setMoreMenuOpen(false)}>
+          <div className="more-menu" role="menu" onClick={(event) => event.stopPropagation()}>
+            <button role="menuitem" onClick={() => { setMoreMenuOpen(false); openSettings(); }}><Settings2 size={13} />{workbenchCopy.openSettingsAction}</button>
+            <button role="menuitem" onClick={() => { setMoreMenuOpen(false); setPaletteOpen(true); }}><Command size={13} />{workbenchCopy.commandPalette}</button>
+            <button role="menuitem" onClick={() => { setMoreMenuOpen(false); void createTerminal(active?.cwd || projectPath, { reuseExisting: false, shellId: settings.defaultShellId }); }}><SquareTerminal size={13} />{workbenchCopy.newTerminalAction}</button>
+            <button role="menuitem" onClick={() => { setMoreMenuOpen(false); void splitPane("columns"); }}><Columns2 size={13} />{workbenchCopy.splitRight}</button>
+            <button role="menuitem" onClick={() => { setMoreMenuOpen(false); void splitPane("rows"); }}><Rows2 size={13} />{workbenchCopy.splitDown}</button>
+            <button role="menuitem" aria-checked={settings.resizablePanels} onClick={() => { setMoreMenuOpen(false); onSettingsChange({ ...settings, resizablePanels: !settings.resizablePanels }); }}><GripVertical size={13} />{workbenchCopy.resizePanels}</button>
+          </div>
+        </div>
+      )}
       {primaryView && terminalView && sessions.length > 0 && (settings.tabPosition === "top" || settings.tabPosition === "both") && (
         <div className="terminal-top-tabs" role="tablist" aria-label={workbenchCopy.topTabs} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; tabDragXRef.current = event.clientX; }}>
           {sessions.map((session) => (

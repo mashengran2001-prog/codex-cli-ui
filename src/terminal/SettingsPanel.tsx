@@ -35,6 +35,8 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
     setNewName("");
     setNewCommand("");
   };
+  const fontFamilies = settings.fontFamily.split(",").map((item) => item.trim()).filter(Boolean);
+  const removeFontFamily = (index: number) => update("fontFamily", fontFamilies.filter((_, item) => item !== index).join(", "));
   return (
     <section className="terminal-settings">
       <header><span><Settings2 size={16} /><strong>{copy.title}</strong></span><button title={copy.close} onClick={onClose}><X size={14} /></button></header>
@@ -79,7 +81,24 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <div className="settings-row"><label>{copy.tabPosition}</label><select aria-label={copy.tabPosition} value={settings.tabPosition} onChange={(event) => update("tabPosition", event.target.value as AppSettings["tabPosition"])}><option value="side">{copy.tabPositionSide}</option><option value="top">{copy.tabPositionTop}</option><option value="both">{copy.tabPositionBoth}</option></select></div>
           <div className="settings-row"><label>{copy.cursorShape}</label><select aria-label={copy.cursorShape} value={settings.cursorStyle} onChange={(event) => update("cursorStyle", event.target.value as AppSettings["cursorStyle"])}><option value="bar">{copy.cursorBar}</option><option value="block">{copy.cursorBlock}</option><option value="underline">{copy.cursorUnderline}</option></select></div>
           <Toggle label={copy.cursorBlink} checked={settings.cursorBlink} onChange={(value) => update("cursorBlink", value)} />
-          <div className="settings-row"><label>{copy.fontFamily}</label><input aria-label={copy.fontFamily} value={settings.fontFamily} placeholder={copy.fontFamilyPlaceholder} onChange={(event) => update("fontFamily", event.target.value)} /></div>
+          <div className="settings-row font-family-row">
+            <label>{copy.fontFamily}</label>
+            <div className="font-family-editor">
+              <input aria-label={copy.fontFamily} value={settings.fontFamily} placeholder={copy.fontFamilyPlaceholder} onChange={(event) => update("fontFamily", event.target.value)} />
+              {fontFamilies.length > 0 && (
+                <div className="font-chips" role="list">
+                  {fontFamilies.map((family, index) => (
+                    <span className="font-chip" role="listitem" key={`${index}-${family}`}>
+                      <span className="font-chip-sample" style={{ fontFamily: family }}>Ag 永 0123</span>
+                      <span className="font-chip-name" style={{ fontFamily: family }}>{family}</span>
+                      <button type="button" className="font-chip-remove" title={`${copy.removeFont} ${family}`} aria-label={`${copy.removeFont} ${family}`} onClick={() => removeFontFamily(index)}><X size={10} /></button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {fontFamilies.length > 1 && <small className="font-fallback-hint">{copy.fontFallbackHint}</small>}
+            </div>
+          </div>
           <div className="settings-row"><label>{copy.bellMode}</label><select aria-label={copy.bellMode} value={settings.bellMode} onChange={(event) => update("bellMode", event.target.value as AppSettings["bellMode"])}><option value="off">{copy.bellModeOff}</option><option value="flash">{copy.bellModeFlash}</option><option value="sound">{copy.bellModeSound}</option><option value="both">{copy.bellModeBoth}</option></select></div>
           <Toggle label={copy.loadPowerShellProfile} checked={settings.loadShellProfile} onChange={(value) => update("loadShellProfile", value)} />
           <Toggle label={copy.completions} checked={settings.completionEnabled} onChange={(value) => update("completionEnabled", value)} />

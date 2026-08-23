@@ -145,7 +145,7 @@ export async function installMockBridge(page) {
       window.setTimeout(() => emit({ providerId: request.providerId, runId: request.runId, type: "exit", code: 0, stopped: false }), 115);
     };
 
-    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null, lastPasteProfileId: null, lastResumeId: null, lastFork: null, svnMode: false, lastGitAction: null, $$callLog: { readDocument: [], readDocumentImage: [], exportTerminalSession: [] } };
+    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null, lastPasteProfileId: null, lastResumeId: null, lastFork: null, svnMode: false, lastGitAction: null, lastOpenedPath: null, $$callLog: { readDocument: [], readDocumentImage: [], exportTerminalSession: [] } };
     window.codex = {
       getInfo: async () => codexProvider,
       listProviders: async () => [codexProvider, deepseekProvider],
@@ -158,6 +158,8 @@ export async function installMockBridge(page) {
       chooseImages: async () => ["F:\\demo\\ui-reference.png"],
       chooseBackgroundImage: async () => "F:\\demo\\background.png",
       revealPath: async () => true,
+      probePath: async (path) => { const normalized = String(path || "").replace(/[\\/]+$/, "").toLowerCase(); if (normalized.endsWith("readme.md")) return { kind: "file", name: "README.md", path: String(path), size: 2113 }; if (normalized.endsWith("atlas-workspace")) return { kind: "directory", name: "atlas-workspace", path: String(path), size: 0 }; return null; },
+      openPath: async (path) => { window.__mock.lastOpenedPath = path ?? null; return !!path; },
       copyText: async () => true,
       pasteClipboardImage: async (sshProfileId) => { window.__mock.lastPasteProfileId = sshProfileId ?? null; return window.__mock.clipboardImage; },
       openTerminal: async () => true,

@@ -43,6 +43,38 @@ try {
   await page.locator(".pane-toolbar.bell-flash").waitFor();
   await page.getByText("需要处理").waitFor();
   await page.locator(".terminal-notice").click();
+
+  // 可点击链接：终端内输出项目路径，Ctrl+悬停出现预览，Ctrl+点击触发 openPath
+  const linkSessionId = await page.evaluate(() => document.querySelector(".terminal-pane-leaf")?.getAttribute("data-session-id") ?? window.__mock.terminalSessions[0].id);
+  await page.evaluate((id) => window.__mock.terminalListeners.forEach((listener) => listener({ sessionId: id, type: "data", data: "\r\nF:\\demo\\atlas-workspace\\README.md" })), linkSessionId);
+  await page.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent?.includes("README.md"));
+  const linkBox = await page.locator(".terminal-canvas").boundingBox();
+  assert.ok(linkBox, "terminal canvas should be measurable");
+  const linkMetrics = await page.evaluate(() => {
+    const canvas = document.querySelector(".terminal-canvas");
+    const rows = document.querySelectorAll(".xterm-rows > div");
+    const targetRow = [...rows].find((row) => row.textContent?.includes("README.md"));
+    const rowIndex = targetRow ? [...rows].indexOf(targetRow) : -1;
+    const rowRect = targetRow?.getBoundingClientRect();
+    const allRows = [...rows].slice(0, 5).map((row, index) => `${index}:${row.textContent}`);
+    const rowsRect = document.querySelector(".xterm-rows")?.getBoundingClientRect();
+    const cols = Number(canvas?.getAttribute("data-cols")) || 80;
+    const rowCount = Number(canvas?.getAttribute("data-rows")) || 24;
+    const charWidth = rowsRect && cols > 0 ? rowsRect.width / cols : 7.2;
+    const lineHeight = rowsRect && rowCount > 0 ? rowsRect.height / rowCount : 14;
+    // 路径在行首，取列 10 附近，确保落在 token 内部
+    const x = rowsRect ? rowsRect.left + 10 * charWidth : 0;
+    const y = rowRect ? rowRect.top + lineHeight / 2 : 0;
+    return { x, y, rowIndex, rows: allRows };
+  });
+  assert.ok(linkMetrics.rowIndex >= 0, "link row should be visible in xterm output");
+  await page.mouse.move(linkMetrics.x + 4, linkMetrics.y);
+  await page.keyboard.down("Control");
+  await page.mouse.move(linkMetrics.x + 40, linkMetrics.y);
+  await page.locator(".terminal-link-preview").waitFor({ timeout: 5000 });
+  await page.mouse.click(linkMetrics.x + 6, linkMetrics.y);
+  await page.keyboard.up("Control");
+  await page.waitForFunction(() => window.__mock.lastOpenedPath === "F:\\demo\\atlas-workspace\\README.md");
   await page.getByRole("button", { name: "命令面板" }).click();
   await page.getByText("工作目录", { exact: false }).waitFor();
   await page.locator(".command-palette").getByRole("button", { name: "复制路径", exact: true }).click();
@@ -100,7 +132,7 @@ try {
   await secondTab.locator(".terminal-tab-main").click();
   await page.waitForFunction((id) => document.querySelector(".terminal-pane-leaf")?.dataset.sessionId === id, secondSessionId);
 
-  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.locator(".terminal-actions").getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
   assert.equal(await page.locator(".terminal-side-panel").count(), 0);
   assert.equal(await page.getByRole("button", { name: "向右拆分" }).count(), 0);
@@ -156,6 +188,13 @@ try {
   // 字体族：输入自定义字体链并断言持久化，再清空恢复默认
   await page.getByLabel("字体族").fill("JetBrains Mono, Consolas");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).fontFamily, "JetBrains Mono, Consolas");
+  const fontChips = page.locator(".font-chip");
+  assert.equal(await fontChips.count(), 2);
+  assert.equal(await fontChips.nth(0).locator(".font-chip-name").textContent(), "JetBrains Mono");
+  assert.equal(await fontChips.nth(1).locator(".font-chip-name").textContent(), "Consolas");
+  assert.ok(await fontChips.nth(0).locator(".font-chip-sample").evaluate((el) => el.style.fontFamily.includes("JetBrains Mono")));
+  await fontChips.nth(0).getByRole("button").click();
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).fontFamily, "Consolas");
   await page.getByLabel("字体族").fill("");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).fontFamily, "");
   await page.getByRole("button", { name: "返回工作台" }).click();
@@ -177,7 +216,7 @@ try {
   await page.locator(".command-dock input").press("Escape");
   await page.locator(".command-dock input").fill("");
   // 恢复默认补全样式与字符宽度，避免影响后续用例
-  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.locator(".terminal-actions").getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
   await page.getByLabel("补全样式").selectOption("inline");
   await page.getByLabel("字符宽度").selectOption("compact");
@@ -463,19 +502,19 @@ try {
   assert.match(await failedTab.textContent() ?? "", /进程已退出，代码 3/);
 
   // 标签栏位置切换：顶部-only 隐藏侧边标签，侧边-only 隐藏顶部标签
-  await page.locator(".terminal-actions").getByTitle("设置").click();
+  await page.locator(".terminal-actions").getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
   await page.getByLabel("标签栏位置").selectOption("top");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).tabPosition, "top");
   await page.getByRole("button", { name: "返回工作台" }).click();
   await page.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 1 && document.querySelectorAll(".terminal-side-tabs").length === 0);
-  await page.locator(".terminal-actions").getByTitle("设置").click();
+  await page.locator(".terminal-actions").getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
   await page.getByLabel("标签栏位置").selectOption("side");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).tabPosition, "side");
   await page.getByRole("button", { name: "返回工作台" }).click();
   await page.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 0 && document.querySelectorAll(".terminal-side-tabs").length === 1);
-  await page.locator(".terminal-actions").getByTitle("设置").click();
+  await page.locator(".terminal-actions").getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
   await page.getByLabel("标签栏位置").selectOption("both");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).tabPosition, "both");
@@ -502,7 +541,7 @@ try {
   await page.waitForTimeout(150);
   assert.equal(await page.locator(".pane-toolbar.bell-flash").count(), 0);
   // 闪烁-only：bell 事件令 pane 工具栏闪烁
-  await page.locator(".terminal-actions").getByTitle("设置").click();
+  await page.locator(".terminal-actions").getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
   await page.getByLabel("终端铃声模式").selectOption("flash");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).bellMode, "flash");
@@ -515,7 +554,7 @@ try {
   });
   await page.locator(".pane-toolbar.bell-flash").waitFor();
   // 恢复 both，HSV 取色断言需要重新打开设置页
-  await page.locator(".terminal-actions").getByTitle("设置").click();
+  await page.locator(".terminal-actions").getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
   await page.getByLabel("终端铃声模式").selectOption("both");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).bellMode, "both");

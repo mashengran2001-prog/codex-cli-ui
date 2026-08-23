@@ -85,7 +85,7 @@ try {
   assert.equal(exportedPath, exportProbe);
   assert.match(await readFile(exportProbe, "utf8"), /NEBULA_PTY_OK line/);
   console.log("electron-export: terminal:export-session IPC verified");
-  await window.getByRole("button", { name: "设置", exact: true }).click();
+  await window.locator(".terminal-actions").getByTitle("更多操作").click(); await window.getByRole("menuitem", { name: "打开设置" }).click();
   await window.getByLabel("打开 PowerShell/CMD 时唤起工作台").check();
   await window.waitForFunction(async () => (await window.codex.getAppSettings()).shellStartupIntegration === true, undefined, { timeout: 15_000 });
   await window.getByLabel("打开 PowerShell/CMD 时唤起工作台").uncheck();
@@ -120,7 +120,7 @@ try {
   }, lastSessionId);
   assert.equal(closed, "clicked");
   await window.waitForFunction(async (expected) => (await window.codex.listTerminals()).length === expected, proxySessionCount, { timeout: 10_000 });
-  await window.locator(".terminal-actions").getByTitle("设置").click();
+  await window.locator(".terminal-actions").getByTitle("更多操作").click(); await window.getByRole("menuitem", { name: "打开设置" }).click();
   await window.getByLabel("代理地址").fill("");
   await window.getByLabel("不走代理的地址").fill("");
   await window.waitForFunction(async () => (await window.codex.getAppSettings()).proxyUrl === "", undefined, { timeout: 15_000 });
