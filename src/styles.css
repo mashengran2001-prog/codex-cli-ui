@@ -710,7 +710,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .terminal-workspace[data-density="compact"] .terminal-pane-shell { inset: 28px 0 0; }
 .terminal-workspace[data-density="compact"] .terminal-side-tabs { padding: 5px 4px; }
 .terminal-workspace[data-density="compact"] .terminal-side-panel .terminal-tab { height: 38px; }
-.terminal-workspace[data-density="compact"] .settings-row, .terminal-workspace[data-density="compact"] .settings-toggle { min-height: 32px; }
+.terminal-workspace[data-density="compact"] .settings-row, .terminal-workspace[data-density="compact"] .settings-toggle { min-height: 38px; }
 .terminal-workspace[data-density="comfortable"] .terminal-header { min-height: 48px; }
 .terminal-workspace[data-density="comfortable"] .pane-toolbar { height: 40px; }
 .terminal-workspace[data-density="comfortable"] .terminal-pane-shell { inset: 40px 0 0; }
@@ -951,20 +951,31 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .palette-list strong { overflow: hidden; font-size: 9px; font-weight: 580; text-overflow: ellipsis; white-space: nowrap; }
 .palette-list small { max-width: 220px; overflow: hidden; color: var(--t-muted); font-size: 7.5px; text-overflow: ellipsis; white-space: nowrap; }
 .palette-empty { padding: 34px; color: var(--t-muted); font-size: 9px; text-align: center; }
-.terminal-settings, .document-viewer { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; background: color-mix(in srgb, var(--t-bg) 94%, transparent); }
-.terminal-settings > header, .document-viewer > header { display: flex; height: 42px; flex: 0 0 auto; align-items: center; justify-content: space-between; padding: 0 9px 0 14px; border-bottom: 1px solid var(--t-border); }
-.terminal-settings > header span, .document-viewer > header span, .document-viewer > header div { display: flex; min-width: 0; align-items: center; gap: 7px; }
-.terminal-settings > header strong, .document-viewer > header strong { overflow: hidden; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
-.terminal-settings > header button, .document-viewer > header button { display: grid; width: 27px; height: 27px; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--t-muted); cursor: pointer; }
-.terminal-settings > header button:hover, .document-viewer > header button:hover { background: var(--t-panel-2); color: var(--t-text); }
-.settings-scroll { width: 100%; min-width: 0; min-height: 0; flex: 1; margin: 0; padding: 18px 24px 36px; overflow: auto; }
+.terminal-settings, .document-viewer { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; background: var(--t-panel); }
+.document-viewer > header { display: flex; height: 42px; flex: 0 0 auto; align-items: center; justify-content: space-between; padding: 0 9px 0 14px; border-bottom: 1px solid var(--t-border); }
+.document-viewer > header span, .document-viewer > header div { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.document-viewer > header strong { overflow: hidden; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.document-viewer > header button { display: grid; width: 27px; height: 27px; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--t-muted); cursor: pointer; }
+.document-viewer > header button:hover { background: var(--t-panel-2); color: var(--t-text); }
+.settings-scroll { width: 100%; min-width: 0; min-height: 0; flex: 1; margin: 0; padding: 32px 24px; overflow: auto; }
 .settings-layout { display: flex; min-width: 0; min-height: 0; flex: 1; }
-.settings-nav { display: flex; width: 196px; flex: 0 0 196px; flex-direction: column; gap: 2px; padding: 10px 8px; overflow-y: auto; border-right: 1px solid var(--t-border); background: color-mix(in srgb, var(--t-bg-raised) 96%, transparent); }
-.settings-nav button { display: flex; width: 100%; height: 38px; flex: 0 0 auto; align-items: center; gap: 8px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--t-muted); font-size: 11px; text-align: left; cursor: pointer; }
-.settings-nav button:hover { background: var(--t-panel-2); color: var(--t-text); }
-.settings-nav button.active { background: var(--t-accent-soft); color: var(--t-accent); }
-.settings-scroll > section { padding: 4px 0 19px; border-bottom: 1px solid var(--t-border); }
-.settings-scroll h2 { margin: 0 0 10px; color: var(--t-muted); font-size: 9.5px; text-transform: uppercase; }
+.settings-main { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
+.settings-header { display: flex; height: 72px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; padding: 0 24px; border-bottom: 1px solid var(--t-border); }
+.settings-header strong { overflow: hidden; font-size: 11px; font-weight: 400; color: var(--t-text); text-overflow: ellipsis; white-space: nowrap; }
+.settings-header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
+.settings-header-actions button { display: grid; width: 24px; height: 24px; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--t-muted); cursor: pointer; }
+.settings-header-actions button:hover { background: var(--t-panel-2); color: var(--t-text); }
+.settings-nav { display: flex; width: 196px; flex: 0 0 196px; flex-direction: column; gap: 2px; padding: 0 8px 8px; overflow-y: auto; }
+.settings-nav-brand { display: flex; width: 100%; height: 72px; flex: 0 0 72px; align-items: center; padding: 0 12px; overflow: hidden; color: var(--t-text); font-size: 16px; font-weight: 400; white-space: nowrap; }
+.settings-nav button { display: flex; width: 100%; height: 32px; flex: 0 0 auto; align-items: center; gap: 8px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--t-muted); font-size: 11px; font-weight: 400; text-align: left; cursor: pointer; }
+.settings-nav button > svg { flex: 0 0 auto; }
+.settings-nav button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-nav button:hover { background: color-mix(in srgb, var(--t-accent) 12%, transparent); color: var(--t-text); }
+.settings-nav button.active { background: var(--t-accent-soft); color: var(--t-text); }
+.settings-scroll > section { padding: 0; }
+.settings-scroll h2 { display: flex; height: 26px; align-items: center; margin: 0 0 16px; color: var(--t-text); font-size: 11px; font-weight: 400; text-transform: none; }
+.settings-group-divider { display: flex; width: 100%; height: 32px; flex: 0 0 32px; align-items: center; }
+.settings-group-divider::after { width: 100%; height: 1px; background: var(--t-border); content: ""; }
 .theme-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-bottom: 14px; }
 .theme-grid button { display: grid; min-width: 0; height: 50px; grid-template-columns: minmax(0, 1fr) auto; align-content: center; gap: 5px; padding: 7px 8px; border: 1px solid var(--t-border); border-radius: 5px; background: var(--t-panel); color: var(--t-text); text-align: left; cursor: pointer; }
 .theme-grid button.selected { border-color: var(--t-accent); background: var(--t-accent-soft); }
@@ -983,7 +994,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .hsv-footer input:focus { border-color: var(--t-accent); }
 .hsv-footer button { display: grid; width: 27px; height: 27px; place-items: center; padding: 0; border: 1px solid var(--t-border); border-radius: 4px; background: var(--t-panel); color: var(--t-muted); cursor: pointer; }
 .hsv-footer button:hover { color: var(--t-text); background: var(--t-panel-2); }
-.settings-row, .settings-toggle { display: flex; min-height: 38px; align-items: center; justify-content: space-between; gap: 12px; color: var(--t-text); font-size: 11px; }
+.settings-row, .settings-toggle { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 4px; padding: 0 16px; color: var(--t-text); font-size: 11px; }
 .settings-row select, .settings-inline-actions button { height: 29px; padding: 0 8px; border: 1px solid var(--t-border); border-radius: 4px; outline: 0; background: var(--t-panel); color: var(--t-text); font-size: 10px; }
 .settings-inline-actions { display: flex; gap: 4px; }
 .settings-inline-actions button { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }

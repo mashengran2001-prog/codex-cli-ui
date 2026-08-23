@@ -58,8 +58,17 @@ try {
   await desktop.page.screenshot({ path: join(artifacts, "codex-ui-settings.png"), fullPage: true });
   const settingsMetrics = await desktop.page.evaluate(() => {
     const settings = document.querySelector(".terminal-settings").getBoundingClientRect();
+    const nav = document.querySelector(".settings-nav").getBoundingClientRect();
+    const navItem = document.querySelector(".settings-nav button").getBoundingClientRect();
+    const header = document.querySelector(".settings-header").getBoundingClientRect();
+    const row = document.querySelector(".settings-row:not(.color-picker-row)").getBoundingClientRect();
     return {
       settings,
+      navWidth: nav.width,
+      navItemHeight: navItem.height,
+      headerHeight: header.height,
+      rowHeight: row.height,
+      groupDividers: document.querySelectorAll(".settings-group-divider").length,
       splitButtons: [...document.querySelectorAll("button")].filter((button) => button.title === "向右拆分").length,
       filesButtons: [...document.querySelectorAll("button")].filter((button) => button.getAttribute("aria-label") === "文件").length,
       sidePanels: document.querySelectorAll(".terminal-side-panel").length,
@@ -67,6 +76,11 @@ try {
     };
   });
   assert.ok(settingsMetrics.settings.width > 600);
+  assert.ok(settingsMetrics.navWidth >= 192 && settingsMetrics.navWidth <= 200);
+  assert.ok(settingsMetrics.navItemHeight >= 30 && settingsMetrics.navItemHeight <= 34);
+  assert.ok(settingsMetrics.headerHeight >= 68 && settingsMetrics.headerHeight <= 76);
+  assert.ok(settingsMetrics.rowHeight >= 42 && settingsMetrics.rowHeight <= 46);
+  assert.ok(settingsMetrics.groupDividers >= 6);
   assert.equal(settingsMetrics.splitButtons, 0);
   assert.equal(settingsMetrics.filesButtons, 0);
   assert.equal(settingsMetrics.sidePanels, 0);
