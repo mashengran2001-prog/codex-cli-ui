@@ -23,7 +23,7 @@ try {
     };
   });
   assert.ok(desktopMetrics.composer.width > 600);
-  assert.ok(desktopMetrics.sidebar.width >= 238);
+  assert.ok(desktopMetrics.sidebar.width >= 226 && desktopMetrics.sidebar.width <= 234, "sidebar default width should match Nebula SIDEBAR_W_LOGICAL=230");
   assert.ok(desktopMetrics.titlebarReserve >= 150, "workspace actions entered the Windows titlebar controls area");
   assert.ok(desktopMetrics.text > 150);
   assert.equal(desktopMetrics.nebulaShells, 1);
@@ -42,7 +42,7 @@ try {
   });
   assert.ok(terminalMetrics.terminal.width > 700);
   assert.ok(terminalMetrics.canvas.height > 500);
-  assert.ok(terminalMetrics.drawer.width >= 260);
+  assert.ok(terminalMetrics.drawer.width >= 296 && terminalMetrics.drawer.width <= 304, "drawer default width should match Nebula PANEL_W_LOGICAL=300");
   assert.equal(terminalMetrics.brandIcons.length, 2);
   assert.ok(terminalMetrics.brandIcons.every((icon) => icon.width <= 16 && icon.height <= 16));
   assert.ok(terminalMetrics.overflow <= 1);

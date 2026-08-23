@@ -321,8 +321,8 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [unread, setUnread] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<{ sessionId: string; title: string; message: string }>();
-  const [sidebarWidth, setSidebarWidth] = useState(initialLayout.sidebarWidth || 250);
-  const [drawerWidth, setDrawerWidth] = useState(initialLayout.drawerWidth || 330);
+  const [sidebarWidth, setSidebarWidth] = useState(initialLayout.sidebarWidth || 230);
+  const [drawerWidth, setDrawerWidth] = useState(initialLayout.drawerWidth || 300);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(initialLayout.sidebarCollapsed || false);
   const [tabsCollapsed, setTabsCollapsed] = useState(initialLayout.tabsCollapsed || false);
   const [toolsCollapsed, setToolsCollapsed] = useState(initialLayout.toolsCollapsed || false);
@@ -994,8 +994,8 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     const start = kind === "sidebar" ? sidebarWidth : drawerWidth;
     const move = (pointer: PointerEvent) => {
       const next = kind === "sidebar" ? start + pointer.clientX - startX : start - pointer.clientX + startX;
-      if (kind === "sidebar") { if (next < 90) setSidebarCollapsed(true); else { setSidebarCollapsed(false); setSidebarWidth(Math.max(210, Math.min(390, next))); } }
-      else if (next < 150) setDrawer(null); else setDrawerWidth(Math.max(270, Math.min(520, next)));
+      if (kind === "sidebar") { if (next < 120) setSidebarCollapsed(true); else { setSidebarCollapsed(false); setSidebarWidth(Math.max(170, Math.min(420, next))); } }
+      else if (next < 150) setDrawer(null); else setDrawerWidth(Math.max(220, Math.min(560, next)));
     };
     const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
     window.addEventListener("pointermove", move);
