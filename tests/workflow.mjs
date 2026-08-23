@@ -185,18 +185,21 @@ try {
   // 新标签位置：切换为追加到末尾并断言持久化
   await page.getByLabel("新标签页位置").selectOption("end");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).newTabPlacement, "end");
-  // 字体族：输入自定义字体链并断言持久化，再清空恢复默认
-  await page.getByLabel("字体族").fill("JetBrains Mono, Consolas");
-  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).fontFamily, "JetBrains Mono, Consolas");
-  const fontChips = page.locator(".font-chip");
-  assert.equal(await fontChips.count(), 2);
-  assert.equal(await fontChips.nth(0).locator(".font-chip-name").textContent(), "JetBrains Mono");
-  assert.equal(await fontChips.nth(1).locator(".font-chip-name").textContent(), "Consolas");
-  assert.ok(await fontChips.nth(0).locator(".font-chip-sample").evaluate((el) => el.style.fontFamily.includes("JetBrains Mono")));
-  await fontChips.nth(0).getByRole("button").click();
-  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).fontFamily, "Consolas");
-  await page.getByLabel("字体族").fill("");
-  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).fontFamily, "");
+  // 字体选择器：系统字体异步枚举、400px 弹层、搜索与逐字体字形预览
+  await page.getByRole("button", { name: "字体族" }).click();
+  const fontPanel = page.locator(".font-picker-panel");
+  await fontPanel.waitFor();
+  const fontPanelBox = await fontPanel.boundingBox();
+  assert.ok(fontPanelBox && fontPanelBox.width >= 396 && fontPanelBox.width <= 404);
+  await fontPanel.getByRole("checkbox", { name: "显示全部" }).check();
+  await fontPanel.getByPlaceholder("搜索字体…").fill("JetBrains");
+  const fontOption = fontPanel.getByRole("option", { name: /JetBrains Mono/ });
+  await fontOption.waitFor();
+  assert.ok((await fontOption.getAttribute("style"))?.includes("JetBrains Mono"));
+  assert.ok(Math.abs((await fontOption.boundingBox()).height - 36) <= 1);
+  await fontOption.click();
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).fontFamily, "JetBrains Mono");
+  assert.match(await page.getByRole("button", { name: "字体族" }).textContent(), /JetBrains Mono/);
   await page.getByRole("button", { name: "返回工作台" }).click();
 
   // 弹窗补全：输入命令后弹出候选列表；Tab 接受、Esc 关闭

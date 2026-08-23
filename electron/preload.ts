@@ -9,6 +9,7 @@ const bridge: CodexBridge = {
   setProviderCredential: (providerId: AgentProviderId, credential: string) => ipcRenderer.invoke("provider:credential", providerId, credential),
   getAppSettings: () => ipcRenderer.invoke("app:settings:get"),
   setAppSettings: (settings: AppSettings) => ipcRenderer.invoke("app:settings:set", settings),
+  listSystemFonts: () => ipcRenderer.invoke("fonts:list"),
   chooseDirectory: () => ipcRenderer.invoke("dialog:directory"),
   chooseImages: () => ipcRenderer.invoke("dialog:images"),
   chooseBackgroundImage: () => ipcRenderer.invoke("dialog:background-image"),

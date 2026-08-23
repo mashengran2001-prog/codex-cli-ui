@@ -154,6 +154,7 @@ export async function installMockBridge(page) {
       setProviderCredential: async () => ({ ...deepseekProvider, configured: true }),
       getAppSettings: async () => settings,
       setAppSettings: async (value) => { settings = value; return settings; },
+      listSystemFonts: async () => ["Cascadia Mono", "Consolas", "JetBrains Mono", "Microsoft YaHei", "Segoe UI"],
       chooseDirectory: async () => "F:\\demo\\atlas-workspace",
       chooseImages: async () => ["F:\\demo\\ui-reference.png"],
       chooseBackgroundImage: async () => "F:\\demo\\background.png",

@@ -404,6 +404,7 @@ export interface CodexBridge {
   setProviderCredential(providerId: AgentProviderId, credential: string): Promise<AgentProviderInfo>;
   getAppSettings(): Promise<AppSettings>;
   setAppSettings(settings: AppSettings): Promise<AppSettings>;
+  listSystemFonts(): Promise<string[]>;
   chooseDirectory(): Promise<string | null>;
   chooseImages(): Promise<string[]>;
   chooseBackgroundImage(): Promise<string | null>;

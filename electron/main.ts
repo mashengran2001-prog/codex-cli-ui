@@ -58,6 +58,7 @@ import { DEFAULT_KEYBINDINGS, normalizeKeybindings } from "../src/types";
 import { DeepSeekProvider } from "./deepseek-provider";
 import { CliLifecycleBridge, type CliLifecycleEvent } from "./cli-lifecycle";
 import { ProviderRegistry, type AgentProvider, type ProviderRunContext } from "./provider-registry";
+import { enumerateSystemFonts } from "./system-fonts";
 import { terminalShellArguments, terminalTitleFromPath } from "./terminal-utils";
 import {
   parseSvnRevision,
@@ -2568,6 +2569,12 @@ ipcMain.handle("app:settings:set", async (_event, value: unknown) => {
   updateQuickTerminalShortcut();
   queueTerminalSnapshotSave();
   return appSettings;
+});
+
+let systemFontsPromise: Promise<string[]> | undefined;
+ipcMain.handle("fonts:list", () => {
+  systemFontsPromise ??= enumerateSystemFonts();
+  return systemFontsPromise;
 });
 
 ipcMain.handle("dialog:directory", async () => {

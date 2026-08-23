@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { BellRing, Brain, Check, Command, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Plus, RotateCcw, TerminalSquare, Trash2, X, type LucideIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { BellRing, Brain, Check, ChevronDown, Command, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Plus, RotateCcw, Search, TerminalSquare, Trash2, X, type LucideIcon } from "lucide-react";
 import BrandIcon, { type BrandIconName } from "../BrandIcon";
 import { chordFromEvent, isModifierOnly, KEYBINDING_ACTIONS } from "../keybindings";
 import type { AppSettings, CliLifecycleStatus, CliProfile, CliToolInfo, KeybindingAction, ShellProfile, TerminalThemeName } from "../types";
@@ -35,8 +35,6 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
     setNewName("");
     setNewCommand("");
   };
-  const fontFamilies = settings.fontFamily.split(",").map((item) => item.trim()).filter(Boolean);
-  const removeFontFamily = (index: number) => update("fontFamily", fontFamilies.filter((_, item) => item !== index).join(", "));
   const sections: Array<{ id: string; label: string }> = [
     { id: "settings-appearance", label: copy.appearance },
     { id: "settings-terminal", label: copy.terminal },
@@ -135,21 +133,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <Toggle label={copy.cursorBlink} checked={settings.cursorBlink} onChange={(value) => update("cursorBlink", value)} />
           <div className="settings-row font-family-row">
             <label>{copy.fontFamily}</label>
-            <div className="font-family-editor">
-              <input aria-label={copy.fontFamily} value={settings.fontFamily} placeholder={copy.fontFamilyPlaceholder} onChange={(event) => update("fontFamily", event.target.value)} />
-              {fontFamilies.length > 0 && (
-                <div className="font-chips" role="list">
-                  {fontFamilies.map((family, index) => (
-                    <span className="font-chip" role="listitem" key={`${index}-${family}`}>
-                      <span className="font-chip-sample" style={{ fontFamily: family }}>Ag 永 0123</span>
-                      <span className="font-chip-name" style={{ fontFamily: family }}>{family}</span>
-                      <button type="button" className="font-chip-remove" title={`${copy.removeFont} ${family}`} aria-label={`${copy.removeFont} ${family}`} onClick={() => removeFontFamily(index)}><X size={10} /></button>
-                    </span>
-                  ))}
-                </div>
-              )}
-              {fontFamilies.length > 1 && <small className="font-fallback-hint">{copy.fontFallbackHint}</small>}
-            </div>
+            <FontPicker copy={copy} value={settings.fontFamily} onChange={(value) => update("fontFamily", value)} />
           </div>
           <div className="settings-row"><label>{copy.bellMode}</label><select aria-label={copy.bellMode} value={settings.bellMode} onChange={(event) => update("bellMode", event.target.value as AppSettings["bellMode"])}><option value="off">{copy.bellModeOff}</option><option value="flash">{copy.bellModeFlash}</option><option value="sound">{copy.bellModeSound}</option><option value="both">{copy.bellModeBoth}</option></select></div>
           <Toggle label={copy.loadPowerShellProfile} checked={settings.loadShellProfile} onChange={(value) => update("loadShellProfile", value)} />
@@ -232,6 +216,169 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
         </div>
       </div>
     </section>
+  );
+}
+
+const fontWidthCache = new Map<string, boolean>();
+
+function fontChain(value: string) {
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function isMonospacedFont(family: string) {
+  const cached = fontWidthCache.get(family.toLocaleLowerCase());
+  if (cached !== undefined) return cached;
+  if (/(?:\bmono\b|\bcode\b|consolas?|courier|terminal|typewriter|fixed)/i.test(family)) {
+    fontWidthCache.set(family.toLocaleLowerCase(), true);
+    return true;
+  }
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) return false;
+  context.font = `32px ${JSON.stringify(family)}`;
+  const monospaced = Math.abs(context.measureText("iiiiiiii").width - context.measureText("WWWWWWWW").width) < 0.5;
+  fontWidthCache.set(family.toLocaleLowerCase(), monospaced);
+  return monospaced;
+}
+
+function replacePrimaryFont(value: string, family: string) {
+  const chain = fontChain(value);
+  const rest = chain.slice(1).filter((item) => item.toLocaleLowerCase() !== family.toLocaleLowerCase());
+  return [family, ...rest].join(", ");
+}
+
+function FontPicker({ value, onChange, copy }: {
+  value: string;
+  onChange(value: string): void;
+  copy: ReturnType<typeof getSettingsCopy>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const [fonts, setFonts] = useState<string[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [panelPosition, setPanelPosition] = useState({ left: 8, top: 8, width: 400 });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const primary = fontChain(value)[0] || "Cascadia Mono";
+
+  const updatePanelPosition = () => {
+    const bounds = triggerRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const width = Math.min(400, Math.max(220, window.innerWidth - 16));
+    const left = Math.min(window.innerWidth - width - 8, Math.max(8, bounds.right - width));
+    const below = bounds.bottom + 6;
+    const panelHeight = Math.min(panelRef.current?.getBoundingClientRect().height || 410, window.innerHeight - 16);
+    const top = below + panelHeight <= window.innerHeight - 8
+      ? below
+      : Math.max(8, bounds.top - panelHeight - 6);
+    setPanelPosition({ left, top, width });
+  };
+
+  const loadFonts = async () => {
+    if (fonts || loading) return;
+    setLoading(true);
+    try {
+      setFonts(await window.codex.listSystemFonts());
+    } catch {
+      setFonts([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggle = () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setQuery("");
+    setShowAll(false);
+    updatePanelPosition();
+    setOpen(true);
+    void loadFonts();
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const reposition = () => updatePanelPosition();
+    const dismiss = (event: globalThis.PointerEvent) => {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !panelRef.current?.contains(target)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => {
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(updatePanelPosition);
+    return () => cancelAnimationFrame(frame);
+  }, [fonts, loading, open, query, showAll]);
+
+  const catalog = useMemo(() => {
+    const unique = new Map<string, string>();
+    for (const family of [primary, ...(fonts ?? [])]) {
+      const normalized = family.trim();
+      if (normalized) unique.set(normalized.toLocaleLowerCase(), normalized);
+    }
+    const needle = query.trim().toLocaleLowerCase();
+    return [...unique.values()]
+      .map((family) => ({ family, monospaced: isMonospacedFont(family), current: family.toLocaleLowerCase() === primary.toLocaleLowerCase() }))
+      .filter((entry) => entry.current || ((showAll || entry.monospaced) && (!needle || entry.family.toLocaleLowerCase().includes(needle))))
+      .sort((left, right) => Number(right.current) - Number(left.current) || left.family.localeCompare(right.family, undefined, { sensitivity: "base" }));
+  }, [fonts, primary, query, showAll]);
+
+  const panel = open ? (
+    <div className="font-picker-panel" ref={panelRef} style={panelPosition} role="dialog" aria-label={copy.fontFamily}>
+      <div className="font-picker-tools">
+        <label className="font-picker-search"><Search size={13} /><input autoFocus value={query} placeholder={copy.fontSearchPlaceholder} onChange={(event) => setQuery(event.target.value)} /></label>
+        <span>{copy.showAllFonts}</span>
+        <label className="font-show-all-toggle">
+          <input type="checkbox" checked={showAll} aria-label={copy.showAllFonts} onChange={(event) => setShowAll(event.target.checked)} />
+          <i />
+        </label>
+      </div>
+      {loading ? <div className="font-picker-loading"><LoaderCircle className="spin" size={13} />{copy.loadingFonts}</div> : (
+        <div className="font-picker-list" role="listbox" aria-label={copy.fontFamily}>
+          {catalog.map((entry) => (
+            <button
+              className={entry.current ? "selected" : ""}
+              style={{ fontFamily: entry.family }}
+              role="option"
+              aria-selected={entry.current}
+              key={entry.family}
+              onClick={() => { onChange(replacePrimaryFont(value, entry.family)); setOpen(false); }}
+            >
+              <span>{entry.family}</span>
+              {entry.current && <em>{copy.currentFont}</em>}
+              {!entry.monospaced && <em className="warning">{copy.proportionalFont}</em>}
+              {entry.current && <Check size={13} />}
+            </button>
+          ))}
+          {catalog.length === 0 && <div className="font-picker-empty">{copy.noMatchingFonts}</div>}
+        </div>
+      )}
+    </div>
+  ) : null;
+
+  return (
+    <div className="font-family-picker">
+      <button className={open ? "font-picker-trigger selected" : "font-picker-trigger"} ref={triggerRef} type="button" aria-label={copy.fontFamily} aria-expanded={open} aria-haspopup="listbox" onClick={toggle}>
+        <span style={{ fontFamily: primary }}>{primary}</span><ChevronDown className={open ? "open" : ""} size={13} />
+      </button>
+      {fontChain(value).length > 1 && <small className="font-fallback-hint">{copy.fontFallbackHint}</small>}
+      {panel}
+    </div>
   );
 }
 

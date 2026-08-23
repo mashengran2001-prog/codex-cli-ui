@@ -48,6 +48,11 @@ try {
   await window.getByText("Imported response is ready.").waitFor();
   assert.match(await window.locator(".reasoning-content").textContent(), /Checking the parser/);
   assert.match(await window.locator(".activity-row").textContent(), /shell_command/);
+  const systemFonts = await window.evaluate(async () => window.codex.listSystemFonts());
+  assert.ok(systemFonts.length >= 4);
+  assert.equal(new Set(systemFonts.map((name) => name.toLocaleLowerCase())).size, systemFonts.length);
+  assert.ok(systemFonts.every((name) => typeof name === "string" && name.length > 0));
+  console.log(`electron-fonts: ${systemFonts.length} system font families enumerated through real IPC`);
 
   await window.getByText("Fix the parser from CLI").first().click();
   const textarea = window.locator("textarea");
