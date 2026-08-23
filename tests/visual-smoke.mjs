@@ -113,17 +113,23 @@ try {
     const header = document.querySelector(".terminal-header").getBoundingClientRect();
     const tabs = document.querySelector(".terminal-side-panel").getBoundingClientRect();
     const drawer = document.querySelector(".terminal-drawer").getBoundingClientRect();
+    const topTabs = document.querySelector(".terminal-top-tabs")?.getBoundingClientRect();
+    const firstTab = document.querySelector(".terminal-top-tab")?.getBoundingClientRect();
     return {
       overflow: shell.scrollWidth - shell.clientWidth,
       headerHeight: header.height,
       tabsHeight: tabs.height,
       drawerInside: drawer.right <= window.innerWidth && drawer.left >= 0,
+      topTabBottomAlign: topTabs ? Math.abs(topTabs.bottom - header.bottom) <= 1 : null,
+      firstTabLeft: firstTab ? firstTab.left : null,
     };
   });
   assert.ok(compactTerminalMetrics.overflow <= 1, `compact terminal overflowed by ${compactTerminalMetrics.overflow}px`);
-  assert.ok(compactTerminalMetrics.headerHeight >= 70);
+  assert.ok(compactTerminalMetrics.headerHeight >= 44 && compactTerminalMetrics.headerHeight <= 56, `Nebula title bar should be 48px, got ${compactTerminalMetrics.headerHeight}`);
   assert.ok(compactTerminalMetrics.tabsHeight >= 34);
   assert.ok(compactTerminalMetrics.drawerInside);
+  assert.ok(compactTerminalMetrics.topTabBottomAlign === true, "top tabs must sit on the title bar bottom edge");
+  assert.ok(compactTerminalMetrics.firstTabLeft !== null && compactTerminalMetrics.firstTabLeft >= 7 && compactTerminalMetrics.firstTabLeft <= 10, `first top tab must align with the 8px card inset, got left ${compactTerminalMetrics.firstTabLeft}`);
   await compact.context.close();
   console.log("visual-smoke: desktop and 800px layouts passed");
 } finally {

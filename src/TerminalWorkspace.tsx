@@ -1035,6 +1035,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const primaryView = view === "terminal";
   const chatView = primaryView && workspaceMode === "chat";
   const terminalView = primaryView && workspaceMode === "terminal";
+  const showTopTabs = terminalView && sessions.length > 0 && (settings.tabPosition === "top" || settings.tabPosition === "both");
   const showSidePanel = primaryView && !sidebarCollapsed;
   const headingTitle = view === "settings" ? workbenchCopy.settings : view === "document" ? document?.name || workbenchCopy.document : chatView ? chatTitle || workbenchCopy.conversations : workbenchCopy.terminal;
   const headingLabel = view === "settings" ? workbenchCopy.settingsLabel : chatView ? workbenchCopy.conversationsLabel : workbenchCopy.terminalLabel;
@@ -1094,48 +1095,10 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     : undefined;
 
   return (
-    <main className="terminal-workspace" data-terminal-theme={settings.theme} data-density={settings.density} data-workspace-view={view} data-window-focused={windowFocused} style={{ "--terminal-sidebar-width": `${sidebarWidth}px`, "--terminal-drawer-width": `${drawerWidth}px`, "--terminal-bg-opacity": settings.backgroundOpacity, "--terminal-bg-image": pathToCssUrl(settings.backgroundImage), ...(settings.accentColor ? { "--t-accent": settings.accentColor } : {}) } as React.CSSProperties}>
+    <main className="terminal-workspace" data-terminal-theme={settings.theme} data-tab-position={settings.tabPosition} data-density={settings.density} data-workspace-view={view} data-window-focused={windowFocused} style={{ "--terminal-sidebar-width": `${sidebarWidth}px`, "--terminal-drawer-width": `${drawerWidth}px`, "--terminal-bg-opacity": settings.backgroundOpacity, "--terminal-bg-image": pathToCssUrl(settings.backgroundImage), ...(settings.accentColor ? { "--t-accent": settings.accentColor } : {}) } as React.CSSProperties}>
       <header className="terminal-header">
-        <div className="terminal-heading">
-          <span className="terminal-brand">{view === "settings" ? <Settings2 size={17} /> : chatView ? <Bot size={17} /> : <TerminalSquare size={17} />}</span>
-          <div>
-            <h1 aria-label={headingLabel}>{headingTitle}</h1>
-            {project ? <button title={projectPath} onClick={() => void window.codex.revealPath(projectPath)}><FolderOpen size={11} /><span>{projectLabel}</span><small>{chatView ? providerName : active?.cwd || projectPath}</small></button> : <button title={workbenchCopy.selectDirectory} onClick={() => void onAddProject()}><FolderOpen size={11} /><span>{workbenchCopy.selectDirectory}</span><small>{providerName}</small></button>}
-          </div>
-        </div>
-        <div className="terminal-actions">
-          {primaryView && <div className="workspace-view-switch" role="tablist" aria-label={workbenchCopy.viewSwitcher}>
-            <button role="tab" aria-selected={workspaceMode === "chat"} className={workspaceMode === "chat" ? "active" : ""} title={workbenchCopy.chat} onClick={() => void activateWorkspaceMode("chat")}><Bot size={13} /><span>{workbenchCopy.chat}</span></button>
-            <button role="tab" aria-selected={workspaceMode === "terminal"} className={workspaceMode === "terminal" ? "active" : ""} title={workbenchCopy.terminal} onClick={() => void activateWorkspaceMode("terminal")}><TerminalSquare size={13} /><span>{workbenchCopy.terminal}</span></button>
-          </div>}
-          {chatView && <button title={workbenchCopy.refreshChat} disabled={!project} onClick={onRefreshChat}><RefreshCw size={14} /></button>}
-          {terminalView && <>
-            <button className={drawer === "files" ? "active" : ""} aria-label={workbenchCopy.files} title={workbenchCopy.files} onClick={() => setDrawer((value) => value === "files" ? null : "files")}><FolderTree size={14} /></button>
-            <button className={drawer === "git" ? "active" : ""} aria-label={workbenchCopy.gitStatus} title={workbenchCopy.gitStatus} onClick={() => setDrawer((value) => value === "git" ? null : "git")}><GitBranch size={14} /></button>
-            <button className={drawer === "directories" ? "active" : ""} aria-label={directoriesCopy.title} title={directoriesCopy.title} onClick={() => setDrawer((value) => value === "directories" ? null : "directories")}><History size={14} /></button>
-            {active?.kind === "ssh" && selectedSsh && <button className={drawer === "sftp" ? "active" : ""} title="SFTP" onClick={() => openSftp(selectedSsh)}><Upload size={14} /></button>}
-            <button title={workbenchCopy.splitRight} onClick={() => void splitPane("columns")}><Columns2 size={14} /></button>
-            <button title={workbenchCopy.commandPalette} onClick={() => setPaletteOpen(true)}><Command size={14} /></button>
-          </>}
-          {primaryView && <button title={sidebarCollapsed ? workbenchCopy.showSidebar : workbenchCopy.hideSidebar} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}</button>}
-          {view === "settings"
-            ? <button className="active" title={workbenchCopy.back} onClick={() => setView("terminal")}>{workspaceMode === "chat" ? <Bot size={14} /> : <TerminalSquare size={14} />}</button>
-            : <button className={moreMenuOpen ? "active" : ""} title={workbenchCopy.moreActions} onClick={() => setMoreMenuOpen((value) => !value)}><MoreHorizontal size={15} /></button>}
-        </div>
-      </header>
-      {moreMenuOpen && (
-        <div className="more-menu-overlay" onClick={() => setMoreMenuOpen(false)}>
-          <div className="more-menu" role="menu" onClick={(event) => event.stopPropagation()}>
-            <button role="menuitem" onClick={() => { setMoreMenuOpen(false); openSettings(); }}><Settings2 size={13} />{workbenchCopy.openSettingsAction}</button>
-            <button role="menuitem" onClick={() => { setMoreMenuOpen(false); setPaletteOpen(true); }}><Command size={13} />{workbenchCopy.commandPalette}</button>
-            <button role="menuitem" onClick={() => { setMoreMenuOpen(false); void createTerminal(active?.cwd || projectPath, { reuseExisting: false, shellId: settings.defaultShellId }); }}><SquareTerminal size={13} />{workbenchCopy.newTerminalAction}</button>
-            <button role="menuitem" onClick={() => { setMoreMenuOpen(false); void splitPane("columns"); }}><Columns2 size={13} />{workbenchCopy.splitRight}</button>
-            <button role="menuitem" onClick={() => { setMoreMenuOpen(false); void splitPane("rows"); }}><Rows2 size={13} />{workbenchCopy.splitDown}</button>
-            <button role="menuitem" aria-checked={settings.resizablePanels} onClick={() => { setMoreMenuOpen(false); onSettingsChange({ ...settings, resizablePanels: !settings.resizablePanels }); }}><GripVertical size={13} />{workbenchCopy.resizePanels}</button>
-          </div>
-        </div>
-      )}
-      {primaryView && terminalView && sessions.length > 0 && (settings.tabPosition === "top" || settings.tabPosition === "both") && (
+        {showTopTabs ? (
+          <>
         <div className="terminal-top-tabs" role="tablist" aria-label={workbenchCopy.topTabs} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; tabDragXRef.current = event.clientX; }}>
           {sessions.map((session) => (
             <div
@@ -1166,6 +1129,49 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
               <button className="terminal-tab-close" title={workbenchCopy.closeTerminal} onClick={() => void closeTerminal(session.id)}><X size={11} /></button>
             </div>
           ))}
+        </div>
+        <button className="terminal-header-action" title={workbenchCopy.newTerminal} onClick={() => void createTerminal(active?.cwd || projectPath, { reuseExisting: false, shellId: settings.defaultShellId })}><Plus size={15} /></button>
+          </>
+        ) : (
+        <div className="terminal-heading">
+          <span className="terminal-brand">{view === "settings" ? <Settings2 size={17} /> : chatView ? <Bot size={17} /> : <TerminalSquare size={17} />}</span>
+          <div>
+            <h1 aria-label={headingLabel}>{headingTitle}</h1>
+            {project ? <button title={projectPath} onClick={() => void window.codex.revealPath(projectPath)}><FolderOpen size={11} /><span>{projectLabel}</span><small>{chatView ? providerName : active?.cwd || projectPath}</small></button> : <button title={workbenchCopy.selectDirectory} onClick={() => void onAddProject()}><FolderOpen size={11} /><span>{workbenchCopy.selectDirectory}</span><small>{providerName}</small></button>}
+          </div>
+        </div>
+        )}
+        <div className="titlebar-drag" />
+        <div className="terminal-actions">
+          {primaryView && <div className="workspace-view-switch" role="tablist" aria-label={workbenchCopy.viewSwitcher}>
+            <button role="tab" aria-selected={workspaceMode === "chat"} className={workspaceMode === "chat" ? "active" : ""} title={workbenchCopy.chat} onClick={() => void activateWorkspaceMode("chat")}><Bot size={13} /><span>{workbenchCopy.chat}</span></button>
+            <button role="tab" aria-selected={workspaceMode === "terminal"} className={workspaceMode === "terminal" ? "active" : ""} title={workbenchCopy.terminal} onClick={() => void activateWorkspaceMode("terminal")}><TerminalSquare size={13} /><span>{workbenchCopy.terminal}</span></button>
+          </div>}
+          {chatView && <button title={workbenchCopy.refreshChat} disabled={!project} onClick={onRefreshChat}><RefreshCw size={14} /></button>}
+          {terminalView && <>
+            <button className={drawer === "files" ? "active" : ""} aria-label={workbenchCopy.files} title={workbenchCopy.files} onClick={() => setDrawer((value) => value === "files" ? null : "files")}><FolderTree size={14} /></button>
+            <button className={drawer === "git" ? "active" : ""} aria-label={workbenchCopy.gitStatus} title={workbenchCopy.gitStatus} onClick={() => setDrawer((value) => value === "git" ? null : "git")}><GitBranch size={14} /></button>
+            <button className={drawer === "directories" ? "active" : ""} aria-label={directoriesCopy.title} title={directoriesCopy.title} onClick={() => setDrawer((value) => value === "directories" ? null : "directories")}><History size={14} /></button>
+            {active?.kind === "ssh" && selectedSsh && <button className={drawer === "sftp" ? "active" : ""} title="SFTP" onClick={() => openSftp(selectedSsh)}><Upload size={14} /></button>}
+            <button title={workbenchCopy.splitRight} onClick={() => void splitPane("columns")}><Columns2 size={14} /></button>
+            <button title={workbenchCopy.commandPalette} onClick={() => setPaletteOpen(true)}><Command size={14} /></button>
+          </>}
+          {primaryView && <button title={sidebarCollapsed ? workbenchCopy.showSidebar : workbenchCopy.hideSidebar} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}</button>}
+          {view === "settings"
+            ? <button className="active" title={workbenchCopy.back} onClick={() => setView("terminal")}>{workspaceMode === "chat" ? <Bot size={14} /> : <TerminalSquare size={14} />}</button>
+            : <button className={moreMenuOpen ? "active" : ""} title={workbenchCopy.moreActions} onClick={() => setMoreMenuOpen((value) => !value)}><MoreHorizontal size={15} /></button>}
+        </div>
+      </header>
+      {moreMenuOpen && (
+        <div className="more-menu-overlay" onClick={() => setMoreMenuOpen(false)}>
+          <div className="more-menu" role="menu" onClick={(event) => event.stopPropagation()}>
+            <button role="menuitem" onClick={() => { setMoreMenuOpen(false); openSettings(); }}><Settings2 size={13} />{workbenchCopy.openSettingsAction}</button>
+            <button role="menuitem" onClick={() => { setMoreMenuOpen(false); setPaletteOpen(true); }}><Command size={13} />{workbenchCopy.commandPalette}</button>
+            <button role="menuitem" onClick={() => { setMoreMenuOpen(false); void createTerminal(active?.cwd || projectPath, { reuseExisting: false, shellId: settings.defaultShellId }); }}><SquareTerminal size={13} />{workbenchCopy.newTerminalAction}</button>
+            <button role="menuitem" onClick={() => { setMoreMenuOpen(false); void splitPane("columns"); }}><Columns2 size={13} />{workbenchCopy.splitRight}</button>
+            <button role="menuitem" onClick={() => { setMoreMenuOpen(false); void splitPane("rows"); }}><Rows2 size={13} />{workbenchCopy.splitDown}</button>
+            <button role="menuitem" aria-checked={settings.resizablePanels} onClick={() => { setMoreMenuOpen(false); onSettingsChange({ ...settings, resizablePanels: !settings.resizablePanels }); }}><GripVertical size={13} />{workbenchCopy.resizePanels}</button>
+          </div>
         </div>
       )}
       {tabMenu && (

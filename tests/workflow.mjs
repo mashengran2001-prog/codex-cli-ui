@@ -31,7 +31,7 @@ try {
   assert.equal(await page.locator(".terminal-workspace").count(), 1);
   assert.equal(await page.locator(".sidebar-header").count(), 0);
   await page.getByRole("tab", { name: "终端" }).click();
-  await page.getByRole("heading", { name: "CLI 工作台终端" }).waitFor();
+  await page.locator(".terminal-top-tabs").waitFor();
   await page.locator(".xterm-screen").waitFor();
   assert.match(await page.locator(".terminal-tab").textContent(), /atlas-workspace/);
   assert.match(await page.locator(".cli-tool-list").textContent(), /Claude Code/);

@@ -648,13 +648,13 @@ function normalizeAppSettings(value: Partial<AppSettings> | null | undefined): A
 
 function applyWindowAppearance(window: BrowserWindow) {
   const titleBarThemes: Record<AppSettings["theme"], { color: string; symbolColor: string }> = {
-    nebula: { color: "#171a21", symbolColor: "#d8dee9" },
-    silver: { color: "#eaedef", symbolColor: "#262a2e" },
-    steel: { color: "#272d33", symbolColor: "#e2e7eb" },
-    limestone: { color: "#ebe9e3", symbolColor: "#302f2b" },
-    coal: { color: "#252522", symbolColor: "#e7e4dc" },
-    linen: { color: "#eeeae1", symbolColor: "#34312c" },
-    moss: { color: "#232924", symbolColor: "#e3e7de" },
+    nebula: { color: "#222630", symbolColor: "#e2e8f0" },
+    silver: { color: "#f3f4f6", symbolColor: "#334155" },
+    steel: { color: "#16181e", symbolColor: "#e2e8f0" },
+    limestone: { color: "#f0efeb", symbolColor: "#334155" },
+    coal: { color: "#161616", symbolColor: "#e2e8f0" },
+    linen: { color: "#f2f2ec", symbolColor: "#334155" },
+    moss: { color: "#191c19", symbolColor: "#e2e8f0" },
   };
   const light = appSettings.theme === "silver" || appSettings.theme === "limestone" || appSettings.theme === "linen";
   const titleBarTheme = titleBarThemes[appSettings.theme];
@@ -663,7 +663,7 @@ function applyWindowAppearance(window: BrowserWindow) {
     symbolColor: titleBarTheme.symbolColor,
     height: 44,
   });
-  window.setBackgroundColor(light ? "#f7f7f5" : "#181a17");
+  window.setBackgroundColor(light ? "#f3f4f6" : "#222630");
   if (process.platform === "win32") {
     try { window.setBackgroundMaterial(appSettings.backgroundBlur ? "mica" : "none"); } catch { /* Unsupported Windows builds ignore blur. */ }
   }

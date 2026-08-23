@@ -52,16 +52,24 @@ try {
   const titlebarMetrics = await window.evaluate(() => {
     const actions = document.querySelector(".terminal-actions").getBoundingClientRect();
     const header = document.querySelector(".terminal-header").getBoundingClientRect();
+    const topTabs = document.querySelector(".terminal-top-tabs")?.getBoundingClientRect();
+    const firstTab = document.querySelector(".terminal-top-tab")?.getBoundingClientRect();
     return {
       reserve: window.innerWidth - actions.right,
       actionsLeft: actions.left,
       headerLeft: header.left,
+      headerHeight: header.height,
+      topTabBottomAlign: topTabs ? Math.abs(topTabs.bottom - header.bottom) <= 1 : null,
+      firstTabLeft: firstTab ? firstTab.left : null,
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     };
   });
   assert.ok(titlebarMetrics.reserve >= 150, "workspace actions entered the native Windows controls area");
   assert.ok(titlebarMetrics.actionsLeft >= titlebarMetrics.headerLeft);
   assert.ok(titlebarMetrics.overflow <= 1);
+  assert.ok(titlebarMetrics.headerHeight >= 44 && titlebarMetrics.headerHeight <= 56, `Nebula title bar should be 48px, got ${titlebarMetrics.headerHeight}`);
+  assert.ok(titlebarMetrics.topTabBottomAlign === true, "top tabs must sit on the title bar bottom edge");
+  assert.ok(titlebarMetrics.firstTabLeft !== null && titlebarMetrics.firstTabLeft >= 7 && titlebarMetrics.firstTabLeft <= 10, `first top tab must align with the 8px card inset, got left ${titlebarMetrics.firstTabLeft}`);
   await window.screenshot({ path: join(artifacts, "codex-ui-electron-titlebar.png") });
   console.log("electron-visual: real Electron window screenshot and layout checks passed");
 } finally {
