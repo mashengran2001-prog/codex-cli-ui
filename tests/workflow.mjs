@@ -144,7 +144,7 @@ try {
   assert.equal(await page.locator("html").getAttribute("lang"), "en-US");
   assert.equal(await page.getByLabel("Cursor shape").inputValue(), "bar");
   assert.equal(await page.getByRole("tab", { name: "Chat" }).count(), 0);
-  await page.getByText("Appearance", { exact: true }).waitFor();
+  await page.getByRole("heading", { name: "Appearance" }).waitFor();
   await page.getByLabel("Interface language").selectOption("zh-CN");
   await page.getByRole("heading", { name: "CLI 工作台设置" }).waitFor();
   assert.equal(await page.getByLabel("终端铃声模式").inputValue(), "both");

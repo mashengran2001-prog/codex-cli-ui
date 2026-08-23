@@ -50,11 +50,11 @@ try {
   await desktop.page.locator(".terminal-actions").getByTitle("更多操作").click(); await desktop.page.getByRole("menuitem", { name: "打开设置" }).click();
   await desktop.page.locator(".terminal-settings").waitFor();
   await desktop.page.getByLabel("界面语言").selectOption("en-US");
-  await desktop.page.getByText("Appearance", { exact: true }).waitFor();
+  await desktop.page.getByRole("heading", { name: "Appearance" }).waitFor();
   await desktop.page.screenshot({ path: join(artifacts, "codex-ui-settings-en.png"), fullPage: true });
   assert.equal(await desktop.page.locator("html").getAttribute("lang"), "en-US");
   await desktop.page.getByLabel("Interface language").selectOption("zh-CN");
-  await desktop.page.getByText("外观", { exact: true }).waitFor();
+  await desktop.page.getByRole("heading", { name: "外观" }).waitFor();
   await desktop.page.screenshot({ path: join(artifacts, "codex-ui-settings.png"), fullPage: true });
   const settingsMetrics = await desktop.page.evaluate(() => {
     const settings = document.querySelector(".terminal-settings").getBoundingClientRect();

@@ -37,11 +37,41 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
   };
   const fontFamilies = settings.fontFamily.split(",").map((item) => item.trim()).filter(Boolean);
   const removeFontFamily = (index: number) => update("fontFamily", fontFamilies.filter((_, item) => item !== index).join(", "));
+  const sections: Array<{ id: string; label: string }> = [
+    { id: "settings-appearance", label: copy.appearance },
+    { id: "settings-terminal", label: copy.terminal },
+    { id: "settings-cli", label: copy.cliTools },
+    { id: "settings-ai", label: copy.aiIntegration },
+    { id: "settings-interaction", label: copy.interaction },
+    { id: "settings-proxy", label: copy.proxy },
+    { id: "settings-keybindings", label: copy.keybindings },
+  ];
+  const [activeSection, setActiveSection] = useState("settings-appearance");
+  const settingsScrollRef = useRef<HTMLDivElement>(null);
+  const updateActiveSection = () => {
+    const container = settingsScrollRef.current;
+    if (!container) return;
+    const items = container.querySelectorAll<HTMLElement>("section[id^=\"settings-\"]");
+    let current = items[0]?.id ?? "settings-appearance";
+    const containerTop = container.getBoundingClientRect().top;
+    for (const item of items) {
+      if (item.getBoundingClientRect().top - containerTop <= 10) current = item.id;
+    }
+    setActiveSection(current);
+  };
+  const jumpToSection = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setActiveSection(id);
+  };
   return (
     <section className="terminal-settings">
       <header><span><Settings2 size={16} /><strong>{copy.title}</strong></span><button title={copy.close} onClick={onClose}><X size={14} /></button></header>
-      <div className="settings-scroll">
-        <section>
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label={copy.title}>
+          {sections.map((item) => <button key={item.id} className={activeSection === item.id ? "active" : ""} onClick={() => jumpToSection(item.id)}>{item.label}</button>)}
+        </nav>
+        <div className="settings-scroll" ref={settingsScrollRef} onScroll={updateActiveSection}>
+        <section id="settings-appearance">
           <h2>{copy.appearance}</h2>
           <div className="theme-grid">
             {(Object.keys(terminalThemes) as TerminalThemeName[]).map((name) => {
@@ -74,7 +104,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <div className="settings-row range-row"><label>{copy.opacity} <output>{Math.round(settings.backgroundOpacity * 100)}%</output></label><input type="range" min="35" max="100" value={Math.round(settings.backgroundOpacity * 100)} onChange={(event) => update("backgroundOpacity", Number(event.target.value) / 100)} /></div>
           <Toggle label={copy.backgroundBlur} checked={settings.backgroundBlur} onChange={(value) => update("backgroundBlur", value)} />
         </section>
-        <section>
+        <section id="settings-terminal">
           <h2>{copy.terminal}</h2>
           <div className="settings-row"><label>{copy.defaultShell}</label><select value={settings.defaultShellId} onChange={(event) => update("defaultShellId", event.target.value)}>{shells.map((shell) => <option value={shell.id} key={shell.id}>{shell.label}</option>)}</select></div>
           <div className="settings-row"><label>{copy.newTabPlacement}</label><select aria-label={copy.newTabPlacement} value={settings.newTabPlacement} onChange={(event) => update("newTabPlacement", event.target.value as AppSettings["newTabPlacement"])}><option value="after-active">{copy.afterActiveTab}</option><option value="end">{copy.appendToEnd}</option></select></div>
@@ -109,13 +139,13 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <Toggle label={copy.restoreTabs} checked={settings.restoreTerminalTabs} onChange={(value) => update("restoreTerminalTabs", value)} />
           <Toggle label={copy.resumeAiSessions} checked={settings.resumeAiSessions} onChange={(value) => update("resumeAiSessions", value)} />
         </section>
-        <section>
+        <section id="settings-cli">
           <h2>{copy.cliTools}</h2>
           <div className="builtin-tool-grid">{cliTools.filter((tool) => tool.builtIn).map((tool) => { const brand = (["codex", "claude"] as BrandIconName[]).find((name) => tool.id.includes(name)); return <div key={tool.id}>{brand ? <BrandIcon brand={brand} size={14} /> : null}<span className="builtin-tool-copy"><strong>{tool.name}</strong><small>{tool.available ? tool.executable : tool.installCommand}</small></span><i className={`tool-status ${tool.available ? "online" : "offline"}`} /></div>; })}</div>
           <div className="custom-cli-list">{settings.cliProfiles.map((profile) => <CliProfileEditor copy={copy} profile={profile} onSave={saveProfile} onDelete={() => update("cliProfiles", settings.cliProfiles.filter((item) => item.id !== profile.id))} key={profile.id} />)}</div>
           <div className="custom-cli-add"><input value={newName} placeholder={copy.toolName} onChange={(event) => setNewName(event.target.value)} /><input value={newCommand} placeholder={copy.executable} onChange={(event) => setNewCommand(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addProfile(); }} /><button disabled={!newName.trim() || !newCommand.trim()} onClick={addProfile}><Plus size={13} />{copy.add}</button></div>
         </section>
-        <section>
+        <section id="settings-ai">
           <h2>{copy.aiIntegration}</h2>
           <div className="cli-lifecycle-setting">
             <div className="cli-lifecycle-heading"><BellRing size={15} /><span><strong>{copy.lifecycleTitle}</strong><small>{copy.lifecycleDetail}</small></span></div>
@@ -136,7 +166,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
             {cliLifecycleStatus?.error && <p className="cli-lifecycle-error">{cliLifecycleStatus.error}</p>}
           </div>
         </section>
-        <section>
+        <section id="settings-interaction">
           <h2>{copy.interaction}</h2>
           <Toggle label={copy.resizablePanels} checked={settings.resizablePanels} onChange={(value) => update("resizablePanels", value)} />
           <Toggle label={copy.quickTerminal} checked={settings.quickTerminal} onChange={(value) => update("quickTerminal", value)} />
@@ -144,13 +174,13 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <Toggle label={copy.completionNotifications} checked={settings.notifyOnCompletion} onChange={(value) => update("notifyOnCompletion", value)} />
           <div className="settings-row"><label>{copy.closeWindow}</label><select value={settings.closeBehavior} onChange={(event) => update("closeBehavior", event.target.value as AppSettings["closeBehavior"])}><option value="tray">{copy.keepRunning}</option><option value="quit">{copy.quitApplication}</option></select></div>
         </section>
-        <section>
+        <section id="settings-proxy">
           <h2>{copy.proxy}</h2>
           <div className="settings-row"><label>{copy.proxyUrl}</label><input aria-label={copy.proxyUrl} type="text" value={settings.proxyUrl} placeholder={copy.proxyUrlPlaceholder} onChange={(event) => update("proxyUrl", event.target.value)} /></div>
           <div className="settings-row"><label>{copy.proxyBypass}</label><input aria-label={copy.proxyBypass} type="text" value={settings.proxyBypass} placeholder={copy.proxyBypassPlaceholder} onChange={(event) => update("proxyBypass", event.target.value)} /></div>
           <p className="settings-hint">{copy.proxyHint}</p>
         </section>
-        <section>
+        <section id="settings-keybindings">
           <h2>{copy.keybindings}</h2>
           <p className="settings-hint">{copy.keybindingsHint}</p>
           <div className="keybinding-list">
@@ -171,6 +201,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
             <button className="keybinding-reset" onClick={resetAllKeybindings}><RotateCcw size={12} />{copy.resetAllKeybindings}</button>
           </div>
         </section>
+        </div>
       </div>
     </section>
   );
