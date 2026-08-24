@@ -17,9 +17,14 @@ const exportProbe = join(testRoot, "export-probe.txt");
 await rm(testRoot, { recursive: true, force: true });
 await mkdir(testRoot, { recursive: true });
 await createElectronFixture(root, codexHome);
+const fakeBin = join(testRoot, "fake-bin");
+await mkdir(fakeBin, { recursive: true });
+writeFileSync(join(fakeBin, "codex.cmd"), "@echo off\r\necho FAKE_CODEX_AGENT_OK\r\nexit /b 0\r\n", "utf8");
+writeFileSync(join(fakeBin, "codex.ps1"), "Write-Output 'FAKE_CODEX_AGENT_OK'\r\n", "utf8");
 
 const electronEnv = {
   ...process.env,
+  PATH: fakeBin + ";" + (process.env.PATH ?? ""),
   CODEX_UI_CLI_PATH: process.execPath,
   CODEX_UI_CLI_PREFIX_ARGS: JSON.stringify([join(root, "tests", "fake-codex.mjs")]),
   CODEX_UI_CODEX_HOME: codexHome,
@@ -188,6 +193,47 @@ try {
   const createdPane = receipt.result.steps.find((step) => step.id === "tab_a")?.action?.pane_id;
   assert.ok(typeof createdPane === "string" && createdPane.length > 0, "workflow did not report a created pane");
   assert.equal(await window.evaluate((paneId) => window.codex.closeTerminal(paneId), createdPane), true);
+
+  // --- agent.fork: 事务式托管 worktree（对标 Nebula git_worktree.rs + agent.fork） ---
+  const forkRepo = join(testRoot, "fork-repo");
+  await rm(forkRepo, { recursive: true, force: true });
+  await mkdir(forkRepo, { recursive: true });
+  execFileSync("git", ["-C", forkRepo, "init", "--initial-branch=main"], { windowsHide: true });
+  writeFileSync(join(forkRepo, "tracked.txt"), "tracked");
+  execFileSync("git", ["-C", forkRepo, "add", "tracked.txt"], { windowsHide: true });
+  execFileSync("git", ["-C", forkRepo, "-c", "user.name=Workflow Test", "-c", "user.email=workflow@example.invalid", "commit", "-m", "initial"], { windowsHide: true });
+  const forkEndpoint = join(userData, "runtime-endpoint.json");
+  const forkReceipt = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "agent.fork", "--name", "reviewer", "--kind", "codex", "--source-cwd", forkRepo, "--branch", "nebula/reviewer", "--endpoint", forkEndpoint], { encoding: "utf8" }));
+  assert.equal(forkReceipt.ok, true, JSON.stringify(forkReceipt.error || forkReceipt.result));
+  const forkAction = forkReceipt.result;
+  assert.ok(typeof forkAction.pane_id === "string" && forkAction.pane_id.length > 0);
+  const forkProvenance = forkAction.worktree;
+  assert.ok(forkProvenance && typeof forkProvenance.path === "string");
+  assert.equal(forkProvenance.branch, "nebula/reviewer");
+  assert.equal(String(forkProvenance.source_root).replaceAll("\\", "/"), String(forkRepo).replaceAll("\\", "/"));
+  assert.equal(String(forkProvenance.repo_root).replaceAll("\\", "/"), String(forkRepo).replaceAll("\\", "/"));
+  assert.equal(forkProvenance.created, true);
+  assert.ok(existsSync(join(forkProvenance.path, "tracked.txt")));
+  const forkSnapshot = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "snapshot", "--endpoint", forkEndpoint], { encoding: "utf8" }));
+  assert.equal(forkSnapshot.ok, true, JSON.stringify(forkSnapshot.error));
+  const forkPane = forkSnapshot.result.panes.find((pane) => pane.pane_id === forkAction.pane_id);
+  assert.ok(forkPane, "agent.fork pane must appear in the runtime snapshot");
+  assert.equal(forkPane.cwd, forkProvenance.path);
+  // 已确认成功 → 资源保留（提交语义）；关闭 pane 后 worktree 与分支仍在
+  assert.ok(existsSync(forkProvenance.path));
+  assert.doesNotThrow(() => execFileSync("git", ["-C", forkRepo, "show-ref", "--verify", "--quiet", "refs/heads/nebula/reviewer"], { windowsHide: true }));
+  assert.equal(await window.evaluate((paneId) => window.codex.closeTerminal(paneId), forkAction.pane_id), true);
+  assert.ok(existsSync(forkProvenance.path));
+  assert.doesNotThrow(() => execFileSync("git", ["-C", forkRepo, "show-ref", "--verify", "--quiet", "refs/heads/nebula/reviewer"], { windowsHide: true }));
+  // 脏工作区未显式允许 → 拒绝且不创建分支
+  writeFileSync(join(forkRepo, "untracked.txt"), "dirty");
+  const dirtyResult = spawnSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "agent.fork", "--name", "dirty-agent", "--kind", "codex", "--source-cwd", forkRepo, "--branch", "nebula/dirty-agent", "--endpoint", forkEndpoint], { encoding: "utf8", timeout: 10_000 });
+  assert.notEqual(dirtyResult.status, 0, dirtyResult.stdout);
+  const dirtyReceipt = JSON.parse(dirtyResult.stdout);
+  assert.equal(dirtyReceipt.ok, false);
+  assert.equal(dirtyReceipt.error.code, "dirty_source");
+  assert.throws(() => execFileSync("git", ["-C", forkRepo, "show-ref", "--verify", "--quiet", "refs/heads/nebula/dirty-agent"], { windowsHide: true }));
+  console.log("electron-agent-fork: transactional worktree creation, commit, and dirty-source rejection passed");
 
 } finally {
   await app.close();

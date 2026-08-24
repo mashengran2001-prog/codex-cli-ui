@@ -88,7 +88,8 @@ function usage() {
   process.stdout.write("  codex-ui-ctl pane.read --pane <id> [--lines <n>] [--pretty]\n");
   process.stdout.write("  codex-ui-ctl pane.prompt --pane <id> --text <text> [--no-submit] [--pretty]\n");
   process.stdout.write("  codex-ui-ctl pane.run --pane <id> --command <command> [--no-wait] [--timeout-ms <n>] [--pretty]\n");
-  process.stdout.write("  codex-ui-ctl pane.split --pane <id> --direction <columns|rows> [--pretty]\n\n");
+  process.stdout.write("  codex-ui-ctl pane.split --pane <id> --direction <columns|rows> [--pretty]\n");
+  process.stdout.write("  codex-ui-ctl agent.fork --name <name> --kind <claude|codex|...> (--source-cwd <dir> | --source-pane <id>) [--resume-session-id <id>] [--branch <name>] [--base <rev>] [--path <dir>] [--allow-dirty-source] [--pretty]\n\n");
   process.stdout.write("Options:\n");
   process.stdout.write("  --endpoint <path>   override the runtime endpoint file\n");
   process.stdout.write("  --pretty            pretty-print the JSON response\n");
@@ -104,6 +105,7 @@ function parseArgs(argv) {
     else if (arg === "--pretty") flags.pretty = true;
     else if (arg === "--no-submit") flags["no-submit"] = true;
     else if (arg === "--no-wait") flags["no-wait"] = true;
+    else if (arg === "--allow-dirty-source") flags["allow-dirty-source"] = true;
     else if (arg.startsWith("--")) {
       const value = argv[i + 1];
       if (value === undefined) fail("missing value for " + arg);
@@ -187,6 +189,23 @@ async function main() {
       if (!flags.pane) fail("pane.split requires --pane");
       if (flags.direction !== "columns" && flags.direction !== "rows") fail("pane.split requires --direction columns|rows");
       params = { pane_id: flags.pane, direction: flags.direction };
+      break;
+    case "agent.fork":
+      method = "agent.fork";
+      if (!flags.name) fail("agent.fork requires --name");
+      if (!flags.kind) fail("agent.fork requires --kind");
+      if (!flags["source-cwd"] && !flags["source-pane"]) fail("agent.fork requires --source-cwd or --source-pane");
+      params = {
+        name: flags.name,
+        kind: flags.kind,
+        resume_session_id: flags["resume-session-id"],
+        source_pane: flags["source-pane"],
+        source_cwd: flags["source-cwd"],
+        branch: flags.branch,
+        base: flags.base,
+        path: flags.path,
+        allow_dirty_source: !!flags["allow-dirty-source"],
+      };
       break;
     default:
       fail("unknown command \"" + command + "\" (run with --help)");

@@ -5,7 +5,8 @@
 
 import { createServer, type Server, type Socket } from "node:net";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
+import { WorktreeError, WorktreeTransaction } from "./git-worktree";
 import { randomBytes } from "node:crypto";
 
 export const MAX_ORCHESTRATE_STEPS = 32;
@@ -53,7 +54,7 @@ export interface PaneSnapshot {
 
 export interface RuntimeControlCallbacks {
   windowId(): number;
-  createTab(params: { cwd?: string; title?: string; shellId?: string; profileId?: string }): Promise<{ pane_id: string }>;
+  createTab(params: { cwd?: string; title?: string; shellId?: string; profileId?: string; seedCommand?: string }): Promise<{ pane_id: string }>;
   listPanes(): PaneSnapshot[];
   focusPane(paneId: string): void;
   readPane(paneId: string, lines: number): string;
@@ -440,6 +441,77 @@ function responseFor(request: ApiRequest, ok: boolean, resultOrError: unknown): 
   return { id: request.id, ok: false, error: { code: error.code, message: error.message, details: error.details } };
 }
 
+
+// ---- named agent kinds (ported from nebula_app/src/ai_agents.rs) ----
+// Only clients with a verified start/resume spelling are accepted; unknown
+// spellings are rejected instead of guessed from their detection slug.
+const AGENT_ALIASES: Record<string, string> = {
+  claude: "claude", "claude-code": "claude",
+  codex: "codex", "codex-cli": "codex",
+  gemini: "gemini", "gemini-cli": "gemini",
+  opencode: "opencode", "open-code": "opencode",
+  amp: "amp", "amp-local": "amp",
+  cursor: "cursor", "cursor-agent": "cursor",
+  copilot: "copilot", "github-copilot": "copilot", ghcs: "copilot",
+  grok: "grok", "grok-cli": "grok", "grok-build": "grok",
+  pi: "pi",
+  omp: "omp", "oh-my-pi": "omp",
+};
+
+const AGENT_RESUME_COMMANDS: Record<string, (sessionId: string) => string> = {
+  claude: (id) => "claude --resume " + id,
+  codex: (id) => "codex resume " + id,
+  gemini: (id) => "gemini --resume " + id,
+  opencode: (id) => "opencode --session " + id,
+  amp: (id) => "amp threads continue " + id,
+  cursor: (id) => "cursor-agent --resume " + id,
+  copilot: (id) => "copilot --resume " + id,
+  grok: (id) => "grok --resume " + id,
+  pi: (id) => "pi --session " + id,
+  omp: (id) => "omp --resume " + id,
+};
+
+const AGENT_START_COMMANDS: Record<string, string> = { claude: "claude", codex: "codex" };
+
+function parseAgentKind(raw: string): string | null {
+  let value = raw.trim().replace(/^["']+|["']+$/g, "").split(/[\\/]/).pop() ?? raw;
+  value = value.toLowerCase();
+  for (const suffix of [".exe", ".cmd", ".bat", ".ps1", ".com", ".js"]) {
+    if (value.endsWith(suffix)) { value = value.slice(0, -suffix.length); break; }
+  }
+  return AGENT_ALIASES[value] ?? null;
+}
+
+function validSessionId(id: string): boolean {
+  return id.length > 0 && id.length <= 64 && /^[A-Za-z0-9._-]+$/.test(id);
+}
+
+function validateAgentName(name: string): void {
+  const bytes = Buffer.byteLength(name, "utf8");
+  if (bytes < 1 || bytes > 64) {
+    throw new ApiErrorImpl("invalid_params", "agent name must contain between 1 and 64 bytes");
+  }
+  if (name.trim() !== name || /[\u0000-\u001f\u007f]/.test(name)) {
+    throw new ApiErrorImpl("invalid_params", "agent name must not have surrounding whitespace or control characters");
+  }
+}
+
+function verifiedAgentLaunch(kindRaw: string, resumeSessionId?: string): { kind: string; sessionId?: string; command: string } {
+  const kind = parseAgentKind(kindRaw);
+  if (!kind) throw new ApiErrorImpl("invalid_params", "unknown agent kind \"" + kindRaw + "\"");
+  if (resumeSessionId !== undefined && resumeSessionId.length > 0) {
+    if (!validSessionId(resumeSessionId)) {
+      throw new ApiErrorImpl("invalid_params", "resume_session_id must be 1-64 characters of [A-Za-z0-9._-]");
+    }
+    const command = AGENT_RESUME_COMMANDS[kind]?.(resumeSessionId);
+    if (!command) throw new ApiErrorImpl("agent_resume_unsupported", "the agent kind or session id does not have a verified resume command");
+    return { kind, sessionId: resumeSessionId, command };
+  }
+  const command = AGENT_START_COMMANDS[kind];
+  if (!command) throw new ApiErrorImpl("agent_launch_unsupported", "cold start is not verified for agent kind \"" + kind + "\"");
+  return { kind, command };
+}
+
 async function dispatch(request: ApiRequest, callbacks: RuntimeControlCallbacks): Promise<ApiResponse> {
   try {
     const params = request.params === undefined ? {} : parseParams(request.params);
@@ -448,7 +520,8 @@ async function dispatch(request: ApiRequest, callbacks: RuntimeControlCallbacks)
         return responseFor(request, true, {
           runtime: "codex-cli-ui",
           version: 1,
-          capabilities: ["runtime.describe", "runtime.snapshot", "runtime.orchestrate", "tab.new", "pane.focus", "pane.read", "pane.prompt", "pane.run", "pane.split"],
+          capabilities: ["runtime.describe", "runtime.snapshot", "runtime.orchestrate", "tab.new", "pane.focus", "pane.read", "pane.prompt", "pane.run", "pane.split", "agent.fork"],
+          features: ["agent.fork.transactional_worktree", "agent.worktree.provenance"],
           wait_states: ["idle", "running", "waiting_input", "attention", "finished", "failed", "settled"],
         });
       case "runtime.snapshot": {
@@ -509,11 +582,59 @@ async function dispatch(request: ApiRequest, callbacks: RuntimeControlCallbacks)
         if (!split.ok) throw new ApiErrorImpl("split_failed", split.error || "split failed");
         return responseFor(request, true, { pane_id: split.paneId ?? paneId });
       }
+      case "agent.fork": {
+        const name = stringValue(params.name, "name");
+        validateAgentName(name);
+        const verified = verifiedAgentLaunch(stringValue(params.kind, "kind"), optionalString(params.resume_session_id, "resume_session_id"));
+        const sourcePane = optionalString(params.source_pane, "source_pane");
+        const sourceCwd = optionalString(params.source_cwd, "source_cwd");
+        if (!sourcePane && !sourceCwd) throw invalidParams("source_pane or source_cwd is required");
+        let cwd = sourceCwd;
+        if (sourcePane) {
+          const pane = callbacks.listPanes().find((candidate) => candidate.pane_id === sourcePane);
+          if (!pane) throw new ApiErrorImpl("pane_not_found", "pane \"" + sourcePane + "\" was not found");
+          if (pane.kind === "ssh") {
+            throw new ApiErrorImpl("remote_worktree_unsupported", "agent.fork cannot create a local Git worktree from an SSH pane");
+          }
+          if (!pane.cwd || pane.cwd.trim().length === 0) {
+            throw new ApiErrorImpl("cwd_unavailable", "the source pane has not reported a working directory");
+          }
+          if (!isAbsolute(pane.cwd)) {
+            throw new ApiErrorImpl("cwd_unavailable", "the source pane did not report an absolute working directory", { cwd: pane.cwd });
+          }
+          cwd = pane.cwd;
+        }
+        if (!cwd) throw invalidParams("source_cwd must be an absolute path when source_pane is not used");
+        const transaction = await WorktreeTransaction.prepare({
+          source_cwd: cwd,
+          agent_name: name,
+          branch: optionalString(params.branch, "branch"),
+          base: optionalString(params.base, "base"),
+          path: optionalString(params.path, "path"),
+          allow_dirty_source: booleanValue(params.allow_dirty_source, "allow_dirty_source", false),
+        });
+        try {
+          const result = await callbacks.createTab({ cwd: transaction.provenance().path, title: name, seedCommand: verified.command });
+          const provenance = transaction.commit();
+          return responseFor(request, true, { window_id: callbacks.windowId(), pane_id: result.pane_id, worktree: provenance });
+        } catch (error) {
+          let rollback;
+          try {
+            await transaction.rollback();
+          } catch (rollbackError) {
+            rollback = rollbackError;
+          }
+          if (rollback) {
+            (error as { details?: unknown }).details = { operation: (error as { details?: unknown }).details, rollback };
+          }
+          throw error;
+        }
+      }
       default:
         return responseFor(request, false, new ApiErrorImpl("method_not_found", "unknown runtime method \"" + request.method + "\""));
     }
   } catch (error) {
-    if (error instanceof ApiErrorImpl) return responseFor(request, false, error);
+    if (error instanceof WorktreeError || error instanceof ApiErrorImpl) return responseFor(request, false, error);
     const message = error instanceof Error ? error.message : String(error);
     return responseFor(request, false, new ApiErrorImpl("runtime_error", message));
   }

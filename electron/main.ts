@@ -1021,7 +1021,7 @@ async function runtimeRunCommand(paneId: string, command: string, timeoutMs: num
   return { ok: false, error: `command timed out after ${Math.round(timeoutMs / 1000)}s` };
 }
 
-async function runtimeCreateTab(params: { cwd?: string; title?: string; shellId?: string; profileId?: string }) {
+async function runtimeCreateTab(params: { cwd?: string; title?: string; shellId?: string; profileId?: string; seedCommand?: string }) {
   await terminalIntegrationReady;
   bootTrace("runtime-newtab:integration-ready");
   const owner = runtimeOwner();
@@ -1036,7 +1036,7 @@ async function runtimeCreateTab(params: { cwd?: string; title?: string; shellId?
     shellId: params.shellId,
     profileId: params.profileId && PROVIDER_ID_PATTERN.test(params.profileId) ? params.profileId : undefined,
     title: params.title,
-  });
+  }, undefined, params.seedCommand);
   bootTrace("runtime-newtab:created:" + session.id);
   return { pane_id: session.id };
 }
