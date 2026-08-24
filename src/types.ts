@@ -410,6 +410,8 @@ export interface PersistedState {
 }
 
 export interface CodexBridge {
+  /** 终端渲染器模式：webgl（默认，几何绘制制表符）或 dom（测试环境。 */
+  rendererMode: "webgl" | "dom";
   getInfo(): Promise<CodexInfo>;
   listProviders(): Promise<AgentProviderInfo[]>;
   refreshProvider(providerId: AgentProviderId): Promise<AgentProviderInfo>;

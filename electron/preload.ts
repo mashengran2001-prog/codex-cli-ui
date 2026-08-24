@@ -1,7 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AgentProviderId, AiForkRequest, AppSettings, CodexBridge, GitActionRequest, LauncherRequest, RunEvent, RunRequest, SftpActionRequest, ShellProfile, SshProfile, TerminalCreateRequest, TerminalEvent } from "../src/types";
 
+const rendererMode: "webgl" | "dom" =
+  typeof process !== "undefined" && process.argv?.includes("--codex-ui-dom-renderer") ? "dom" : "webgl";
+
 const bridge: CodexBridge = {
+  rendererMode,
   getInfo: () => ipcRenderer.invoke("codex:info"),
   listProviders: () => ipcRenderer.invoke("provider:list"),
   refreshProvider: (providerId: AgentProviderId) => ipcRenderer.invoke("provider:refresh", providerId),

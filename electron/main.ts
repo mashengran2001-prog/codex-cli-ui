@@ -327,6 +327,7 @@ function createWindow() {
     },
     webPreferences: {
       preload: join(__dirname, "preload.js"),
+      additionalArguments: [process.env.CODEX_UI_RENDERER === "dom" ? "--codex-ui-dom-renderer" : "--codex-ui-webgl-renderer"],
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

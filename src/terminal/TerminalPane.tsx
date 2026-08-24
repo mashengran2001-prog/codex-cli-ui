@@ -3,6 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import type { ILink } from "@xterm/xterm";
 import { ImageAddon } from "@xterm/addon-image";
 import { SearchAddon } from "@xterm/addon-search";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
@@ -114,6 +115,7 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
       reflowCursorLine: true,
       rescaleOverlappingGlyphs: true,
       scrollback: 10_000,
+      customGlyphs: true,
       convertEol: false,
       allowTransparency: false,
       theme: terminalThemes[theme].terminal,
@@ -125,6 +127,21 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
     terminal.loadAddon(new WebLinksAddon());
     try { terminal.loadAddon(new ImageAddon()); } catch { /* Canvas-less test browsers can skip image decoding. */ }
     terminal.open(container);
+    let webgl: WebglAddon | undefined;
+    const forceDom = Boolean((window as { __mock?: unknown }).__mock) || window.codex?.rendererMode === "dom";
+    if (!forceDom) {
+      try {
+        const renderer = new WebglAddon();
+        renderer.onContextLoss(() => renderer.dispose());
+        terminal.loadAddon(renderer);
+        webgl = renderer;
+        container.dataset.renderer = "webgl";
+      } catch {
+        container.dataset.renderer = "dom";
+      }
+    } else {
+      container.dataset.renderer = "dom";
+    }
     terminalRef.current = terminal;
     container.dataset.cols = String(terminal.cols);
     container.dataset.rows = String(terminal.rows);
@@ -296,6 +313,7 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
       removeEvents();
       selection.dispose();
       input.dispose();
+      try { webgl?.dispose(); } catch { /* Renderer may already be gone. */ }
       terminal.dispose();
       terminalRef.current = undefined;
       onTerminalReady?.(session.id, null);

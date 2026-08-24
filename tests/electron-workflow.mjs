@@ -35,6 +35,7 @@ const electronEnv = {
   CODEX_UI_SHELL_STARTUP_PWSH_PROFILE: join(shellStartupRoot, "PowerShell", "profile.ps1"),
   CODEX_UI_SHELL_STARTUP_HOOK_PATH: join(shellStartupRoot, "hooks", "shell-startup.ps1"),
   CODEX_UI_SHELL_STARTUP_REGISTRY_PATH: shellStartupRegistry,
+  CODEX_UI_RENDERER: "dom",
   CODEX_UI_EXPORT_PATH: exportProbe,
 };
 
