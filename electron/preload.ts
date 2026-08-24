@@ -46,6 +46,7 @@ const bridge: CodexBridge = {
   saveSshProfile: (profile: SshProfile) => ipcRenderer.invoke("terminal:ssh-save", profile),
   deleteSshProfile: (id: string) => ipcRenderer.invoke("terminal:ssh-delete", id),
   testSshProfile: (profile: SshProfile) => ipcRenderer.invoke("terminal:ssh-test", profile),
+  pickSshKeys: () => ipcRenderer.invoke("dialog:ssh-key"),
   listSftp: (profileId: string, path: string) => ipcRenderer.invoke("terminal:sftp-list", profileId, path),
   runSftpAction: (request: SftpActionRequest) => ipcRenderer.invoke("terminal:sftp-action", request),
   listSessions: (cwd: string) => ipcRenderer.invoke("codex:sessions", cwd),

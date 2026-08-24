@@ -293,6 +293,8 @@ export interface SshProfile {
   port: number;
   username: string;
   identityFile?: string;
+  /** 多个私钥文件（对标 Nebula 私钥列表，最多 4 个）。 */
+  identityFiles?: string[];
   remotePath?: string;
   createdAt: number;
   updatedAt: number;
@@ -310,6 +312,8 @@ export interface SshConnectionStage {
 export interface SshTestResult {
   ok: boolean;
   stages: SshConnectionStage[];
+  /** 连接测试耗时（毫秒）。 */
+  elapsedMs?: number;
   error?: string;
 }
 
@@ -443,6 +447,8 @@ export interface CodexBridge {
   saveSshProfile(profile: SshProfile): Promise<SshProfile>;
   deleteSshProfile(id: string): Promise<boolean>;
   testSshProfile(profile: SshProfile): Promise<SshTestResult>;
+  /** 打开私钥文件选择器（pem/key/ppk，最多返回 4 个）。 */
+  pickSshKeys(): Promise<string[]>;
   listSftp(profileId: string, path: string): Promise<SftpEntry[]>;
   runSftpAction(request: SftpActionRequest): Promise<OperationResult>;
   listSessions(cwd: string): Promise<SessionSummary[]>;

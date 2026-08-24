@@ -269,10 +269,14 @@ export async function installMockBridge(page) {
         ? { available: true, branch: "r124", revision: "124", vcs: "svn", entries: [{ status: "M", path: "src/App.tsx" }, { status: "A", path: "README.md" }] }
         : { available: true, branch: "main", vcs: "git", entries: [{ status: "M", path: "src/App.tsx" }] },
       runGitAction: async (request) => { window.__mock.lastGitAction = request; return { ok: true, message: `${request.action} completed` }; },
-      listSshProfiles: async () => [{ id: "ssh-mock", name: "Dev server", host: "example.com", port: 22, username: "dev", remotePath: "/home/dev", createdAt: Date.now(), updatedAt: Date.now(), source: "saved" }],
-      saveSshProfile: async (profile) => profile,
-      deleteSshProfile: async () => true,
-      testSshProfile: async () => ({ ok: true, stages: ["resolve", "tcp", "authenticate", "session"].map((name) => ({ name, status: "done" })) }),
+      listSshProfiles: async () => (window.__mock.sshProfiles || [
+        { id: "ssh-mock", name: "Dev server", host: "example.com", port: 22, username: "dev", remotePath: "/home/dev", createdAt: Date.now(), updatedAt: Date.now(), source: "saved" },
+        { id: "ssh-config-mock", name: "staging", host: "staging.example.com", port: 22, username: "ops", createdAt: Date.now(), updatedAt: Date.now(), source: "ssh-config" },
+      ]),
+      saveSshProfile: async (profile) => { window.__mock.sshProfiles = [...(window.__mock.sshProfiles || []).filter((item) => item.id !== profile.id), profile]; return profile; },
+      deleteSshProfile: async (id) => { const before = (window.__mock.sshProfiles || []).length; window.__mock.sshProfiles = (window.__mock.sshProfiles || []).filter((item) => item.id !== id || item.source === "ssh-config"); return (window.__mock.sshProfiles || []).length !== before; },
+      testSshProfile: async () => ({ ok: true, elapsedMs: 42, stages: ["resolve", "tcp", "authenticate", "session"].map((name) => ({ name, status: "done" })) }),
+      pickSshKeys: async () => ["C:\\mock\\.ssh\\id_ed25519", "C:\\mock\\.ssh\\id_rsa"],
       listSftp: async (_id, path) => [{ name: "remote.txt", path: `${path.replace(/\/$/, "")}/remote.txt`, type: "file", size: 512 }],
       runSftpAction: async (request) => ({ ok: true, message: `${request.action} completed` }),
       listSessions: async () => [],

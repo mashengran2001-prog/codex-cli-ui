@@ -1346,7 +1346,8 @@ function sshExecutable() {
 function sshArguments(profile: SshProfile, batchMode = false) {
   const args = ["-p", String(profile.port || 22)];
   if (batchMode) args.push("-o", "BatchMode=yes", "-o", "ConnectTimeout=8");
-  if (profile.identityFile) args.push("-i", profile.identityFile);
+  const identities = profile.identityFiles?.length ? profile.identityFiles : profile.identityFile ? [profile.identityFile] : [];
+  for (const identity of identities) args.push("-i", identity);
   args.push(`${profile.username ? `${profile.username}@` : ""}${profile.host}`);
   return args;
 }
@@ -1669,6 +1670,10 @@ function normalizeSshProfile(value: Partial<SshProfile>, preserveId = true): Ssh
   const identityFile = typeof value.identityFile === "string" && value.identityFile.trim()
     ? resolve(value.identityFile.trim().replace(/^~(?=[\\/])/, homedir()))
     : undefined;
+  const identityFiles = [...new Set([
+    ...(identityFile ? [identityFile] : []),
+    ...(Array.isArray(value.identityFiles) ? value.identityFiles : []).filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => resolve(item.trim().replace(/^~(?=[\\/])/, homedir()))),
+  ])].slice(0, 4);
   const remotePath = typeof value.remotePath === "string" && value.remotePath.trim() ? value.remotePath.trim().slice(0, 4096) : undefined;
   const now = Date.now();
   return {
@@ -1678,6 +1683,7 @@ function normalizeSshProfile(value: Partial<SshProfile>, preserveId = true): Ssh
     port,
     username,
     identityFile,
+    identityFiles: identityFiles.length ? identityFiles : undefined,
     remotePath,
     createdAt: typeof value.createdAt === "number" ? value.createdAt : now,
     updatedAt: now,
@@ -1743,10 +1749,11 @@ async function persistSshProfiles() {
 
 async function testSshConnection(value: Partial<SshProfile>): Promise<SshTestResult> {
   const stages: SshConnectionStage[] = ["resolve", "tcp", "authenticate", "session"].map((name) => ({ name: name as SshConnectionStage["name"], status: "pending" }));
+  const startedAt = Date.now();
   let profile: SshProfile;
   try { profile = normalizeSshProfile(value); } catch (reason) {
     stages[0] = { ...stages[0], status: "error", message: reason instanceof Error ? reason.message : "Invalid profile" };
-    return { ok: false, stages, error: stages[0].message };
+    return { ok: false, stages, elapsedMs: 0, error: stages[0].message };
   }
   try {
     stages[0].status = "running";
@@ -1758,7 +1765,7 @@ async function testSshConnection(value: Partial<SshProfile>): Promise<SshTestRes
     stages[1] = { ...stages[1], status: "done" };
     stages[2] = { ...stages[2], status: "done" };
     stages[3] = { ...stages[3], status: stdout.includes("CODEX_UI_SSH_OK") ? "done" : "error" };
-    return { ok: stages[3].status === "done", stages, error: stages[3].status === "done" ? undefined : "Remote session did not answer" };
+    return { ok: stages[3].status === "done", stages, elapsedMs: Date.now() - startedAt, error: stages[3].status === "done" ? undefined : "Remote session did not answer" };
   } catch (reason) {
     const message = reason instanceof Error ? String((reason as Error & { stderr?: string }).stderr || reason.message) : "SSH connection failed";
     if (/permission denied|authentication/i.test(message)) {
@@ -1767,7 +1774,7 @@ async function testSshConnection(value: Partial<SshProfile>): Promise<SshTestRes
     } else {
       stages[1] = { ...stages[1], status: "error", message: message.trim() };
     }
-    return { ok: false, stages, error: message.trim() };
+    return { ok: false, stages, elapsedMs: Date.now() - startedAt, error: message.trim() };
   }
 }
 
@@ -1906,7 +1913,8 @@ function quoteSftpPath(value: string) {
 function runSftpBatch(profile: SshProfile, commands: string[], timeout = 60_000) {
   return new Promise<{ stdout: string; stderr: string }>((resolveResult, reject) => {
     const args = ["-b", "-", "-P", String(profile.port || 22), "-o", "BatchMode=yes"];
-    if (profile.identityFile) args.push("-i", profile.identityFile);
+    const identities = profile.identityFiles?.length ? profile.identityFiles : profile.identityFile ? [profile.identityFile] : [];
+    for (const identity of identities) args.push("-i", identity);
     args.push(`${profile.username ? `${profile.username}@` : ""}${profile.host}`);
     const child = spawn(sftpExecutable(), args, { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
@@ -2604,6 +2612,20 @@ ipcMain.handle("dialog:directory", async () => {
     ? await dialog.showOpenDialog(mainWindow, options)
     : await dialog.showOpenDialog(options);
   return result.canceled ? null : result.filePaths[0] ?? null;
+});
+
+ipcMain.handle("dialog:ssh-key", async () => {
+  const options: Electron.OpenDialogOptions = {
+    properties: ["openFile", "multiSelections"],
+    filters: [
+      { name: "SSH 私钥", extensions: ["pem", "key", "ppk"] },
+      { name: "所有文件", extensions: ["*"] },
+    ],
+  };
+  const result = mainWindow && !mainWindow.isDestroyed()
+    ? await dialog.showOpenDialog(mainWindow, options)
+    : await dialog.showOpenDialog(options);
+  return result.canceled ? [] : result.filePaths.slice(0, 4);
 });
 
 ipcMain.handle("dialog:images", async () => {

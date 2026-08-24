@@ -622,8 +622,35 @@ try {
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).accentColor, "#336699");
   await page.getByRole("button", { name: "返回工作台" }).click();
 
+  // SSH 设置区：58px 行、两击删除 + 8 秒撤销、端口 5 位过滤、私钥列表
+  await page.getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
+  await page.locator(".terminal-settings").waitFor();
+  await page.getByRole("button", { name: "SSH", exact: true }).click();
+  const sshSection = page.locator("#settings-ssh");
+  await sshSection.waitFor();
+  assert.equal(await sshSection.locator(".settings-ssh-row").count(), 2);
+  assert.ok(Math.abs((await sshSection.locator(".settings-ssh-row").first().boundingBox()).height - 58) <= 1);
+  // 两击删除 → 撤销条；撤销后行数恢复
+  await sshSection.locator(".settings-ssh-row").first().hover();
+  await sshSection.locator(".settings-ssh-row").first().getByTitle("删除主机").click();
+  await sshSection.locator(".settings-ssh-row").first().getByTitle("确认删除").click();
+  assert.equal(await sshSection.locator(".settings-ssh-row").count(), 1);
+  await sshSection.locator(".ssh-undo-bar").waitFor();
+  await sshSection.getByRole("button", { name: "撤销" }).click();
+  assert.equal(await sshSection.locator(".settings-ssh-row").count(), 2);
+  // 添加主机 → 编辑器：端口只保留至多 5 位数字；私钥列表可添加
+  await sshSection.getByRole("button", { name: "添加主机" }).click();
+  const sshModal = page.locator(".ssh-editor");
+  await sshModal.waitFor();
+  const sshPortInput = sshModal.getByLabel("端口");
+  await sshPortInput.fill("123456789");
+  assert.equal(await sshPortInput.inputValue(), "12345");
+  await sshModal.getByRole("button", { name: "添加私钥" }).click();
+  assert.equal(await sshModal.locator(".ssh-key-row").count(), 2);
+  await sshModal.getByTitle("关闭").click();
+  await page.getByRole("button", { name: "返回工作台" }).click();
   await context.close();
-  console.log("workflow: chat, Nebula terminal, drawers, launcher, overflow, SVN, split restore, and WSL checks passed");
+  console.log("workflow: chat, Nebula terminal, drawers, launcher, overflow, SVN, split restore, SSH settings, and WSL checks passed");
 } finally {
   await browser.close();
   server.stop();

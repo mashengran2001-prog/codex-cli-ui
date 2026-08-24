@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { BellRing, Brain, Check, ChevronDown, Command, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Plus, RotateCcw, Search, TerminalSquare, Trash2, X, type LucideIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { BellRing, Brain, Check, ChevronDown, Command, Download, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Pencil, Plug, Plus, RotateCcw, Search, Server, TerminalSquare, Trash2, Undo2, X, type LucideIcon } from "lucide-react";
 import BrandIcon, { type BrandIconName } from "../BrandIcon";
 import { chordFromEvent, isModifierOnly, modifierPrefix, setKeybindingCaptureActive } from "../keybindings";
-import type { AppSettings, CliLifecycleStatus, CliProfile, CliToolInfo, KeybindingAction, ShellProfile, TerminalThemeName } from "../types";
+import type { AppSettings, CliLifecycleStatus, CliProfile, CliToolInfo, KeybindingAction, ShellProfile, SshProfile, TerminalThemeName } from "../types";
 import { DEFAULT_KEYBINDINGS } from "../types";
 import { getSettingsCopy } from "../i18n";
 import { terminalThemes } from "./themes";
+import SshEditor from "./SshEditor";
 
 const KEYMAP_GROUPS: { id: "global" | "tabs" | "panes"; actions: KeybindingAction[] }[] = [
   { id: "global", actions: ["quick-terminal", "command-palette", "open-settings"] },
@@ -44,10 +45,11 @@ interface SettingsPanelProps {
   cliLifecycleBusy: boolean;
   onChange(settings: AppSettings): void;
   onCliLifecycleToggle(): void;
+  onConnectSsh?(profile: SshProfile): void;
   onClose(): void;
 }
 
-export default function SettingsPanel({ settings, shells, cliTools, cliLifecycleStatus, cliLifecycleBusy, onChange, onCliLifecycleToggle, onClose }: SettingsPanelProps) {
+export default function SettingsPanel({ settings, shells, cliTools, cliLifecycleStatus, cliLifecycleBusy, onChange, onCliLifecycleToggle, onConnectSsh, onClose }: SettingsPanelProps) {
   const [newName, setNewName] = useState("");
   const [newCommand, setNewCommand] = useState("");
   const copy = getSettingsCopy(settings.language);
@@ -58,6 +60,49 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
   const resetAllKeybindings = () => update("keybindings", { ...DEFAULT_KEYBINDINGS });
   const [keymapQuery, setKeymapQuery] = useState("");
   const [keymapCapture, setKeymapCapture] = useState<KeybindingAction | null>(null);
+  const [sshHosts, setSshHosts] = useState<SshProfile[]>([]);
+  const [sshEditor, setSshEditor] = useState<SshProfile | "new">();
+  const [sshDeleteConfirm, setSshDeleteConfirm] = useState<string>();
+  const [sshUndo, setSshUndo] = useState<{ host: SshProfile; seq: number }>();
+  const [sshStatus, setSshStatus] = useState<{ message: string; error?: boolean }>();
+  const refreshSshHosts = useCallback(() => {
+    void window.codex.listSshProfiles()
+      .then(setSshHosts)
+      .catch(() => setSshStatus({ message: copy.loadSshFailed, error: true }));
+  }, [copy.loadSshFailed]);
+  useEffect(() => { refreshSshHosts(); }, [refreshSshHosts]);
+  useEffect(() => {
+    if (!sshUndo) return;
+    const timer = window.setTimeout(() => {
+      setSshUndo(undefined);
+      void window.codex.deleteSshProfile(sshUndo.host.id).then((removed) => { if (removed) refreshSshHosts(); });
+    }, 8000);
+    return () => window.clearTimeout(timer);
+  }, [refreshSshHosts, sshUndo]);
+  const deleteSshHost = (profile: SshProfile) => {
+    if (sshDeleteConfirm !== profile.id) { setSshDeleteConfirm(profile.id); return; }
+    setSshDeleteConfirm(undefined);
+    setSshHosts((current) => current.filter((item) => item.id !== profile.id));
+    setSshUndo({ host: profile, seq: Date.now() });
+  };
+  const undoDeleteSshHost = () => {
+    const undo = sshUndo;
+    if (!undo) return;
+    setSshHosts((current) => [undo.host, ...current.filter((item) => item.id !== undo.host.id)]);
+    setSshUndo(undefined);
+    setSshStatus({ message: copy.restoredHost(undo.host.name) });
+  };
+  const importSshConfig = async () => {
+    try {
+      const hosts = await window.codex.listSshProfiles();
+      setSshHosts(hosts);
+      const count = hosts.filter((item) => item.source === "ssh-config").length;
+      setSshStatus({ message: copy.importedConfig(count) });
+    } catch {
+      setSshStatus({ message: copy.loadSshFailed, error: true });
+    }
+  };
+
   const [keymapCapturePreview, setKeymapCapturePreview] = useState("");
   const keymapVisible = useMemo(() => {
     const query = keymapQuery.trim().toLocaleLowerCase();
@@ -143,6 +188,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
     { id: "settings-appearance", label: copy.appearance },
     { id: "settings-terminal", label: copy.terminal },
     { id: "settings-cli", label: copy.cliTools },
+    { id: "settings-ssh", label: copy.ssh },
     { id: "settings-ai", label: copy.aiIntegration },
     { id: "settings-interaction", label: copy.interaction },
     { id: "settings-proxy", label: copy.proxy },
@@ -169,6 +215,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
     "settings-appearance": Palette,
     "settings-terminal": TerminalSquare,
     "settings-cli": Command,
+    "settings-ssh": Server,
     "settings-ai": Brain,
     "settings-interaction": MousePointerClick,
     "settings-proxy": Globe,
@@ -256,6 +303,50 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <div className="custom-cli-list">{settings.cliProfiles.map((profile) => <CliProfileEditor copy={copy} profile={profile} onSave={saveProfile} onDelete={() => update("cliProfiles", settings.cliProfiles.filter((item) => item.id !== profile.id))} key={profile.id} />)}</div>
           <div className="custom-cli-add"><input value={newName} placeholder={copy.toolName} onChange={(event) => setNewName(event.target.value)} /><input value={newCommand} placeholder={copy.executable} onChange={(event) => setNewCommand(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addProfile(); }} /><button disabled={!newName.trim() || !newCommand.trim()} onClick={addProfile}><Plus size={13} />{copy.add}</button></div>
         </section>
+        <section id="settings-ssh">
+          <h2>{copy.ssh}</h2>
+          <div className="settings-ssh-head">
+            <strong>{copy.savedHosts}</strong>
+            {sshHosts.length > 0 && <span className="settings-ssh-count">{sshHosts.length}</span>}
+            <span className="settings-ssh-head-spacer" />
+            <button className="settings-ssh-add" onClick={() => setSshEditor("new")}><Plus size={13} />{copy.addHost}</button>
+          </div>
+          <div className="settings-ssh-card">
+            {sshHosts.map((profile) => (
+              <div className={"settings-ssh-row" + (sshDeleteConfirm === profile.id ? " confirm" : "")} key={profile.id}>
+                <span className="settings-ssh-icon"><Server size={16} /></span>
+                <button className="settings-ssh-main" title={copy.connectHost(profile.name)} onClick={() => void onConnectSsh?.(profile)}>
+                  <strong>{profile.name}</strong>
+                  <small>{profile.username ? profile.username + "@" + profile.host : profile.host}{profile.port && profile.port !== 22 ? " :" + profile.port : ""}{profile.source === "ssh-config" ? " · " + copy.fromConfig : ""}</small>
+                </button>
+                <span className="settings-ssh-actions">
+                  <button title={copy.connectHost(profile.name)} onClick={() => void onConnectSsh?.(profile)}><Plug size={13} /></button>
+                  <button title={copy.editHost} onClick={() => setSshEditor(profile)}><Pencil size={13} /></button>
+                  <button className={sshDeleteConfirm === profile.id ? "danger" : ""} title={sshDeleteConfirm === profile.id ? copy.confirmDeleteHost : copy.deleteHost} onClick={() => deleteSshHost(profile)}>
+                    {sshDeleteConfirm === profile.id ? <Check size={13} /> : <Trash2 size={13} />}
+                  </button>
+                </span>
+              </div>
+            ))}
+            {sshHosts.length === 0 && (
+              <div className="settings-ssh-empty">
+                <strong>{copy.emptyHosts}</strong>
+                <small>{copy.emptyHostsHint}</small>
+              </div>
+            )}
+          </div>
+          <div className="settings-ssh-foot">
+            <button onClick={() => void importSshConfig()}><Download size={12} />{copy.importConfig}</button>
+            <span>{copy.configHint}</span>
+          </div>
+          {sshUndo && (
+            <div className="ssh-undo-bar">
+              <Undo2 size={13} /><span>{copy.deletedUndo(sshUndo.host.name)}</span>
+              <button onClick={undoDeleteSshHost}>{copy.undo}</button>
+            </div>
+          )}
+          {sshStatus && <div className={"settings-ssh-status" + (sshStatus.error ? " error" : "")}>{sshStatus.message}</div>}
+        </section>
           <div className="settings-group-divider" />
         <section id="settings-ai">
           <h2>{copy.aiIntegration}</h2>
@@ -341,6 +432,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           </div>
         </div>
       </div>
+      {sshEditor && <SshEditor profile={sshEditor === "new" ? undefined : sshEditor} onClose={() => setSshEditor(undefined)} onError={(message) => setSshStatus({ message, error: true })} onSave={async (profile) => { const saved = await window.codex.saveSshProfile(profile); setSshEditor(undefined); await refreshSshHosts(); setSshStatus({ message: copy.savedHost(saved.name) }); }} onDelete={async (id) => { await window.codex.deleteSshProfile(id); setSshEditor(undefined); await refreshSshHosts(); setSshStatus({ message: copy.deletedHost }); }} />}
     </section>
   );
 }
