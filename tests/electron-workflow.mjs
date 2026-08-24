@@ -88,6 +88,47 @@ try {
   await window.keyboard.press("Enter");
   await window.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent?.includes("NEBULA_PTY_OK"), undefined, { timeout: 15_000 });
  assert.equal(await window.evaluate(async () => (await window.codex.listTerminals()).length), 1);
+  // 通过真实终端执行官方 hook 脚本注入 CLI 生命周期事件（对标 Nebula runtime_task_state）：
+  // 终端 PTY 环境自带 CODEX_UI_NOTIFY_PIPE / CODEX_UI_SESSION_ID，调用形态与生产 config.toml 的 notify 命令一致
+  const aiTerminalId = (await window.evaluate(async () => (await window.codex.listTerminals())[0].id));
+  const aiThreadId = "33333333-3333-4333-8333-333333333333";
+  const lifecycleHookPath = join(root, "scripts", "cli-lifecycle-hook.ps1").replaceAll("'", "''");
+  const waitForTerminal = async (match, label) => {
+    const deadline = Date.now() + 20_000;
+    for (;;) {
+      const terminals = await window.evaluate(async () => await window.codex.listTerminals());
+      const terminal = terminals.find((item) => item.id === aiTerminalId);
+      if (terminal && match(terminal)) return terminal;
+      if (Date.now() > deadline) {
+        const xtermText = await window.evaluate(() => document.querySelector(".xterm-rows")?.textContent ?? "");
+        throw new Error(`${label} timeout; terminals=${JSON.stringify(terminals)}; xterm=${JSON.stringify(xtermText.slice(-600))}`);
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+    }
+  };
+  const injectHookEvent = async (hookEventName) => {
+    const payload = JSON.stringify({ hook_event_name: hookEventName, thread_id: aiThreadId });
+    // payload 经管道 stdin 传给 hook，避开 Windows 原生 argv 对双引号 JSON 的破坏（hook 对 codex 无位置参数时读 stdin）
+    const command = `'${payload}' | powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '${lifecycleHookPath}' -Source codex -Marker codex-cli-ui-hook-v1`;
+    await window.evaluate(async ([id, cmd]) => window.codex.writeTerminal(id, `${cmd}\r`), [aiTerminalId, command]);
+  };
+  await injectHookEvent("UserPromptSubmit");
+  await waitForTerminal((terminal) => terminal?.aiSource === "codex" && terminal?.aiSessionId === aiThreadId && terminal?.aiTaskState === "running", "ai running");
+  await injectHookEvent("Stop");
+  await waitForTerminal((terminal) => terminal?.aiSource === "codex" && terminal?.aiSessionId === aiThreadId && terminal?.aiTaskState === "finished", "ai finished");
+  // 触发设置持久化（同时排队保存终端快照），确保 AI 身份随快照跨重启
+  await window.evaluate(async () => window.codex.setAppSettings(await window.codex.getAppSettings()));
+  const snapshotPath = join(userData, "terminal-sessions.json");
+  const snapshotDeadline = Date.now() + 15_000;
+  while (Date.now() < snapshotDeadline) {
+    try {
+      const rawSnapshot = readFileSync(snapshotPath, "utf8");
+      if (rawSnapshot.includes(aiThreadId) && rawSnapshot.includes('"aiSource": "codex"')) break;
+    } catch { /* snapshot not written yet */ }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 300));
+  }
+  assert.ok(readFileSync(snapshotPath, "utf8").includes(aiThreadId), `terminal snapshot must persist AI identity before restart (${snapshotPath})`);
+  console.log("electron-ai-identity: hook in real terminal marked the project terminal as a codex session");
   // 真实 readDocumentImage IPC 验证
   const probeImg = join(root, "probe-img-test.png");
   const { writeFile, readFile, rm: rmFile } = await import("node:fs/promises");
@@ -180,9 +221,23 @@ try {
   assert.ok(describe.result.capabilities.includes("pane.procs"));
   assert.ok(describe.result.capabilities.includes("pane.send_key"));
   assert.ok(describe.result.capabilities.includes("events.pane_lifecycle"));
+  // Runtime orchestrate 测试使用专用普通终端：项目终端此时带 AI 身份（finished），按 Nebula 语义 pane 状态保持 finished 而非 idle
+  const runtimeTerminalId = await window.evaluate(async (cwd) => (await window.codex.createTerminal({ cwd, cols: 100, rows: 30, shellId: "powershell", reuseExisting: false })).id, root);
+  let runtimePane;
+  {
+    const paneDeadline = Date.now() + 10_000;
+    while (Date.now() < paneDeadline) {
+      const runtimeSnapshotProbe = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "snapshot", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+      runtimePane = runtimeSnapshotProbe.result.panes.find((pane) => pane.pane_id === runtimeTerminalId);
+      if (runtimePane) break;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+  assert.ok(runtimePane && runtimePane.pane_id, "runtime snapshot should expose the dedicated runtime pane");
+  // 等待专用终端进入 idle，避免 PowerShell 启动期状态抖动影响 revision 稳定性断言
+  const waitIdle = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "pane.wait", "--pane", runtimeTerminalId, "--state", "idle", "--timeout-ms", "8000", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+  assert.equal(waitIdle.ok, true, JSON.stringify(waitIdle.error));
   const runtimeSnapshot = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "snapshot", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
-  const runtimePane = runtimeSnapshot.result.panes.find((pane) => pane.status === "running");
-  assert.ok(runtimePane && runtimePane.pane_id, "runtime snapshot should expose a running pane");
   // 修订号语义（对标 Nebula RuntimeHub::publish）：语义状态未变化时重复快照保持同一 revision
   const runtimeSnapshotRepeat = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "snapshot", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
   assert.equal(runtimeSnapshotRepeat.result.revision, runtimeSnapshot.result.revision);
@@ -261,6 +316,8 @@ try {
   assert.equal(nonZeroReceipt.error.code, "command_failed");
   assert.equal(nonZeroReceipt.error.details.exit_code, 7, JSON.stringify(nonZeroReceipt));
   console.log("electron-runtime-exit-code: non-zero pane.run exit code preserved");
+  // Runtime 专用终端用完即关，保证恢复断言仍只看到项目终端
+  assert.equal(await window.evaluate((paneId) => window.codex.closeTerminal(paneId), runtimeTerminalId), true);
 
   // The orchestrate workflow created a real tab; close it before the app exits so the
   // session-restore assertion below still sees exactly the one project terminal.
@@ -329,7 +386,9 @@ try {
   await window.locator(".xterm-screen").waitFor({ timeout: 15_000 });
   assert.equal(await window.evaluate(async () => (await window.codex.listTerminals()).length), 1);
   assert.match(await window.locator(".terminal-tab, .terminal-top-tab").first().textContent(), /codex-ui/);
-  console.log("electron-restore: terminal snapshot recreated the project tab after restart");
+  // AI 对话跨重启接续：恢复出的终端自动重敲 codex resume（对标 Nebula resume 注入）
+  await window.waitForFunction(() => (document.querySelector(".xterm-rows")?.textContent ?? "").includes("codex resume 33333333-3333-4333-8333-333333333333"), undefined, { timeout: 20_000 });
+  console.log("electron-restore: terminal snapshot recreated the project tab and re-issued the AI resume command");
 } finally {
   await restoredApp.close();
   try { execFileSync("powershell.exe", ["-NoProfile", "-Command", `Remove-Item -LiteralPath '${shellStartupRegistry}' -Recurse -Force -ErrorAction SilentlyContinue`], { windowsHide: true }); } catch {}
