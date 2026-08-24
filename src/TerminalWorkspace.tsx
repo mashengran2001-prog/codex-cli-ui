@@ -320,6 +320,19 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shellPaletteOpen, setShellPaletteOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [quarantine, setQuarantine] = useState<{ quarantined: boolean; snapshotPath?: string | null }>();
+  const [quarantineDismissed, setQuarantineDismissed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (typeof window.codex.getTerminalQuarantineStatus !== "function") return undefined;
+    window.codex.getTerminalQuarantineStatus().then((status) => {
+      if (!cancelled) setQuarantine(status);
+    }).catch(() => {
+      // 主进程未暴露该通道时保持安静。
+    });
+    return () => { cancelled = true; };
+  }, []);
   const [moreMenuPosition, setMoreMenuPosition] = useState({ left: 8, top: 48 });
   const [unread, setUnread] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<{ sessionId: string; title: string; message: string }>();
@@ -1196,6 +1209,14 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
             : !terminalView && <button className={moreMenuOpen ? "active" : ""} title={workbenchCopy.moreActions} onClick={(event) => toggleMoreMenu(event.currentTarget)}><EllipsisVertical size={16} /></button>}
         </div>
       </header>
+      {quarantine?.quarantined && !quarantineDismissed && (
+        <div className="terminal-quarantine" role="alert">
+          <TriangleAlert size={15} aria-hidden="true" />
+          <span><strong>{workbenchCopy.quarantineTitle}</strong><small>{workbenchCopy.quarantineMessage}</small></span>
+          {quarantine.snapshotPath && <button title={workbenchCopy.quarantineReveal} onClick={() => void window.codex.revealPath(quarantine.snapshotPath!)}><FolderOpen size={12} aria-hidden="true" /><em>{workbenchCopy.quarantineReveal}</em></button>}
+          <button className="terminal-quarantine-dismiss" title={workbenchCopy.quarantineDismiss} onClick={() => setQuarantineDismissed(true)}><X size={13} aria-hidden="true" /></button>
+        </div>
+      )}
       {moreMenuOpen && (
         <div className="more-menu-overlay" onClick={() => setMoreMenuOpen(false)}>
           <div className="more-menu" role="menu" style={moreMenuPosition} onClick={(event) => event.stopPropagation()}>

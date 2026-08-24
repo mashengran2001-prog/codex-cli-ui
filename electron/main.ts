@@ -219,6 +219,7 @@ let ptyModule: typeof import("node-pty") | null = null;
 let detectedShells: DetectedShell[] = [];
 let sshProfiles: SshProfile[] = [];
 let terminalRestoreQuarantined = false;
+let terminalQuarantinePath: string | null = null;
 let providerRegistry: ProviderRegistry | null = null;
 let cliLifecycleBridge: CliLifecycleBridge | null = null;
 let terminalIntegrationReady: Promise<void> = Promise.resolve();
@@ -939,6 +940,7 @@ function initializeTerminalCrashGuard() {
     try {
       renameSync(terminalSnapshotsPath(), quarantine);
       terminalRestoreQuarantined = true;
+      terminalQuarantinePath = quarantine;
       failures = 0;
     } catch {
       // An unreadable snapshot is already ignored by the restore path.
@@ -2835,6 +2837,11 @@ ipcMain.handle("terminal:list", async (event) => {
   for (const session of terminalSessions.values()) session.subscribers.add(event.sender.id);
   return [...terminalSessions.values()].map(terminalInfo).sort((left, right) => left.createdAt - right.createdAt);
 });
+
+ipcMain.handle("terminal:quarantine-status", () => ({
+  quarantined: terminalRestoreQuarantined,
+  snapshotPath: terminalQuarantinePath,
+}));
 
 ipcMain.handle("terminal:shells", () => detectedShells.map(({ args: _args, ...profile }) => profile));
 ipcMain.handle("terminal:cli-tools", () => cliToolsInfo());

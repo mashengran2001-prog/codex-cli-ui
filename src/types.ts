@@ -280,6 +280,11 @@ export interface TerminalEvent {
   action?: { kind: "split"; direction: "columns" | "rows"; actionId: string };
 }
 
+export interface TerminalQuarantineStatus {
+  quarantined: boolean;
+  snapshotPath?: string | null;
+}
+
 export interface ShellProfile {
   id: string;
   label: string;
@@ -431,6 +436,7 @@ export interface CodexBridge {
   unpinDirectory(path: string): Promise<DirectoryEntry[]>;
   removeDirectory(path: string): Promise<DirectoryEntry[]>;
   listTerminals(): Promise<TerminalInfo[]>;
+  getTerminalQuarantineStatus(): Promise<TerminalQuarantineStatus>;
   createTerminal(request: TerminalCreateRequest): Promise<TerminalInfo>;
   resumeAiSession(id: string): Promise<boolean>;
   forkAiSession(request: AiForkRequest): Promise<TerminalInfo>;

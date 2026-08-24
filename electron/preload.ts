@@ -28,6 +28,7 @@ const bridge: CodexBridge = {
   unpinDirectory: (path: string) => ipcRenderer.invoke("directories:unpin", path),
   removeDirectory: (path: string) => ipcRenderer.invoke("directories:remove", path),
   listTerminals: () => ipcRenderer.invoke("terminal:list"),
+  getTerminalQuarantineStatus: () => ipcRenderer.invoke("terminal:quarantine-status"),
   createTerminal: (request: TerminalCreateRequest) => ipcRenderer.invoke("terminal:create", request),
   resumeAiSession: (id: string) => ipcRenderer.invoke("terminal:ai-resume", id),
   forkAiSession: (request: AiForkRequest) => ipcRenderer.invoke("terminal:ai-fork", request),

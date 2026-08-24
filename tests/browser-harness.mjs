@@ -249,6 +249,7 @@ export async function installMockBridge(page) {
         terminalSessions.splice(index, 1);
         return true;
       },
+      getTerminalQuarantineStatus: async () => ({ quarantined: false, snapshotPath: null }),
       listDirectory: async (_root, path) => [
         { name: "src", path: `${path}\\src`, type: "directory" },
         { name: "README.md", path: `${path}\\README.md`, type: "file", size: 2113 },

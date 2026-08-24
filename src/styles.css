@@ -609,6 +609,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .terminal-notice strong, .terminal-notice small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .terminal-notice strong { color: #e1e4de; font-size: 10px; }
 .terminal-notice small { color: #9da39a; font-size: 8.5px; }
+.terminal-quarantine { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid #4c5249; background: #262b25; color: #d8e0d3; }
+.terminal-quarantine > svg { flex: none; color: #d9a13b; }
+.terminal-quarantine > span { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.terminal-quarantine strong, .terminal-quarantine small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-quarantine strong { color: #e1e4de; font-size: 10.5px; }
+.terminal-quarantine small { color: #9da39a; font-size: 9px; }
+.terminal-quarantine button { display: inline-flex; flex: none; align-items: center; gap: 5px; padding: 4px 9px; border: 1px solid #59645a; border-radius: 4px; background: transparent; color: #a9c2b0; font-size: 9px; cursor: pointer; }
+.terminal-quarantine button:hover { background: #31372f; }
+.terminal-quarantine button em { font-style: normal; }
+.terminal-quarantine .terminal-quarantine-dismiss { padding: 4px; border-color: transparent; color: #96968e; }
+.terminal-quarantine .terminal-quarantine-dismiss:hover { color: #e1e4de; background: #31372f; }
 
 .modal-overlay { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 24px; background: rgb(29 29 26 / 32%); backdrop-filter: blur(2px); -webkit-app-region: no-drag; }
 .danger-dialog { width: min(100%, 480px); padding: 19px; border: 1px solid #cfc7c2; border-radius: 8px; background: #fbfbf9; box-shadow: 0 20px 56px rgb(25 25 22 / 23%); }
@@ -1175,6 +1186,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .terminal-notice { border-color: var(--t-border); background: var(--t-panel); color: var(--t-accent); }
 .terminal-notice strong { color: var(--t-text); }
 .terminal-notice small { color: var(--t-muted); }
+.terminal-quarantine { border-color: var(--t-border); background: color-mix(in srgb, var(--t-warning) 10%, var(--t-panel)); color: var(--t-text); }
+.terminal-quarantine > svg { color: var(--t-warning); }
+.terminal-quarantine strong { color: var(--t-text); }
+.terminal-quarantine small { color: var(--t-muted); }
+.terminal-quarantine button { border-color: var(--t-border); background: var(--t-panel-2); color: var(--t-text); }
+.terminal-quarantine button:hover { color: var(--t-accent); }
+.terminal-quarantine .terminal-quarantine-dismiss { background: transparent; color: var(--t-muted); }
 .app-shell.nebula-shell .completion-toast, .app-shell.nebula-shell .error-toast { border-color: var(--t-border, #2b313c); background: var(--t-panel, #1c2028); color: var(--t-accent, #78aee8); box-shadow: 0 12px 34px rgb(0 0 0 / 38%); }
 .app-shell.nebula-shell .completion-toast strong { color: var(--t-text, #d8dee9); }
 .app-shell.nebula-shell .completion-toast small { color: var(--t-muted, #8791a1); }

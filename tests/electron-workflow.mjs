@@ -54,6 +54,9 @@ try {
   assert.equal(new Set(systemFonts.map((name) => name.toLocaleLowerCase())).size, systemFonts.length);
   assert.ok(systemFonts.every((name) => typeof name === "string" && name.length > 0));
   console.log(`electron-fonts: ${systemFonts.length} system font families enumerated through real IPC`);
+  const quarantineStatus = await window.evaluate(async () => window.codex.getTerminalQuarantineStatus());
+  assert.deepEqual(quarantineStatus, { quarantined: false, snapshotPath: null });
+  console.log("electron-quarantine: IPC status channel answers normally");
 
   await window.getByText("Fix the parser from CLI").first().click();
   const textarea = window.locator("textarea");
@@ -210,4 +213,35 @@ try {
 } finally {
   await restoredApp.close();
   try { execFileSync("powershell.exe", ["-NoProfile", "-Command", `Remove-Item -LiteralPath '${shellStartupRegistry}' -Recurse -Force -ErrorAction SilentlyContinue`], { windowsHide: true }); } catch {}
+}
+
+// --- 崩溃隔离：连续崩溃后快照被隔离，UI 显示横幅且不恢复标签 ---
+const quarantineUserData = join(testRoot, "quarantine-user-data");
+await rm(quarantineUserData, { recursive: true, force: true });
+await mkdir(quarantineUserData, { recursive: true });
+writeFileSync(join(quarantineUserData, "terminal-runtime.json"), JSON.stringify({ cleanExit: false, failures: 2, startedAt: Date.now() }), "utf8");
+writeFileSync(join(quarantineUserData, "terminal-sessions.json"), JSON.stringify({ version: 1, sessions: [] }), "utf8");
+
+const quarantineApp = await electron.launch({
+  executablePath: electronPath,
+  args: [root],
+  cwd: root,
+  env: { ...electronEnv, CODEX_UI_USER_DATA_DIR: quarantineUserData },
+  timeout: 30_000,
+});
+
+try {
+  const qWindow = await quarantineApp.firstWindow();
+  await qWindow.waitForLoadState("domcontentloaded");
+  await qWindow.locator(".terminal-quarantine").waitFor({ timeout: 15_000 });
+  assert.match(await qWindow.locator(".terminal-quarantine strong").textContent(), /会话快照已隔离/);
+  const qStatus = await qWindow.evaluate(async () => window.codex.getTerminalQuarantineStatus());
+  assert.equal(qStatus.quarantined, true);
+  assert.ok(typeof qStatus.snapshotPath === "string" && qStatus.snapshotPath.includes("terminal-sessions.crashed-"));
+  assert.equal(await qWindow.evaluate(async () => (await window.codex.listTerminals()).length), 0);
+  await qWindow.getByTitle("知道了").click();
+  await qWindow.waitForFunction(() => document.querySelectorAll(".terminal-quarantine").length === 0);
+  console.log("electron-quarantine: 崩溃隔离横幅显示/关闭与快照隔离通过");
+} finally {
+  await quarantineApp.close();
 }
