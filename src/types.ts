@@ -250,6 +250,7 @@ export interface TerminalInfo {
   rows: number;
   aiSource?: "codex" | "claude";
   aiSessionId?: string;
+  aiTaskState?: "idle" | "running" | "waiting_input" | "attention" | "finished" | "failed" | "settled";
 }
 
 export interface TerminalCreateRequest {

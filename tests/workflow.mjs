@@ -62,6 +62,38 @@ try {
   await page.getByText("需要处理").waitFor();
   await page.locator(".terminal-notice").click();
 
+  // AI 回合四种状态（对标 Nebula SidebarActivity）：运行转圈、完成主色圆点、等待输入警告三角、失败红叉；空闲无圆点
+  const aiStateSessionId = await page.evaluate(() => window.__mock.terminalSessions[0].id);
+  const dispatchMeta = (patch) => page.evaluate(({ id, patch }) => {
+    const base = window.__mock.terminalSessions.find((item) => item.id === id);
+    if (!base) return;
+    window.__mock.terminalListeners.forEach((listener) => listener({ sessionId: id, type: "meta", terminal: { ...base, ...patch } }));
+  }, { id: aiStateSessionId, patch });
+  const stateTab = () => page.locator(`.terminal-top-tab[data-session-id="${aiStateSessionId}"] .terminal-state`);
+  await dispatchMeta({ activity: "running", aiTaskState: "running" });
+  await page.waitForFunction((id) => document.querySelector(`.terminal-top-tab[data-session-id="${id}"] .terminal-state.ai-running`) !== null, aiStateSessionId);
+  assert.ok((await stateTab().getAttribute("class"))?.includes(" ai-running"));
+  assert.equal(await stateTab().locator(".spin").count(), 1);
+  await dispatchMeta({ activity: "attention", aiTaskState: "finished" });
+  await page.waitForFunction((id) => document.querySelector(`.terminal-top-tab[data-session-id="${id}"] .terminal-state.ai-finished`) !== null, aiStateSessionId);
+  assert.equal(await stateTab().locator("svg").count(), 0);
+  await dispatchMeta({ activity: "attention", aiTaskState: "waiting_input" });
+  await page.waitForFunction((id) => document.querySelector(`.terminal-top-tab[data-session-id="${id}"] .terminal-state.ai-waiting_input`) !== null, aiStateSessionId);
+  assert.equal(await stateTab().locator("svg").count(), 1);
+  await dispatchMeta({ activity: "idle", status: "exited", exitCode: 1, aiTaskState: "failed" });
+  await page.waitForFunction((id) => document.querySelector(`.terminal-top-tab[data-session-id="${id}"] .terminal-state.ai-failed`) !== null, aiStateSessionId);
+  const failedCls = await stateTab().getAttribute("class");
+  assert.ok(failedCls?.includes(" failed") && failedCls?.includes(" ai-failed"));
+  // 空闲普通标签不再显示状态圆点（Nebula Idle 只显示 shell 标签）
+  await dispatchMeta({ activity: "idle", status: "running", exitCode: undefined, aiTaskState: undefined });
+  await page.waitForFunction((id) => document.querySelector(`.terminal-top-tab[data-session-id="${id}"] .terminal-state.idle`) !== null, aiStateSessionId);
+  const idleDot = await page.evaluate((id) => {
+    const el = document.querySelector(`.terminal-top-tab[data-session-id="${id}"] .terminal-state.idle`);
+    if (!el) return null;
+    return getComputedStyle(el, "::after").display;
+  }, aiStateSessionId);
+  assert.equal(idleDot, "none");
+
   // 可点击链接：终端内输出项目路径，Ctrl+悬停出现预览，Ctrl+点击触发 openPath
   const linkSessionId = await page.evaluate(() => document.querySelector(".terminal-pane-leaf")?.getAttribute("data-session-id") ?? window.__mock.terminalSessions[0].id);
   await page.evaluate((id) => window.__mock.terminalListeners.forEach((listener) => listener({ sessionId: id, type: "data", data: "\r\nF:\\demo\\atlas-workspace\\README.md" })), linkSessionId);

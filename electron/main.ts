@@ -1251,6 +1251,7 @@ function terminalInfo(session: TerminalSession): TerminalInfo {
     sshProfileId: session.sshProfileId,
     aiSource: session.aiSource,
     aiSessionId: session.aiSessionId,
+    aiTaskState: session.aiTaskState,
     kind: session.kind,
     remoteHost: session.remoteHost,
     activity: session.activity,

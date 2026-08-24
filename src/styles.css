@@ -798,12 +798,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .terminal-side-panel .terminal-tab-close:hover { background: var(--t-panel-2); color: var(--t-danger); }
 .terminal-state { position: relative; display: grid; width: 11px; height: 11px; place-items: center; background: transparent; color: var(--t-accent); }
 .terminal-state::after { width: 5px; height: 5px; border-radius: 50%; background: var(--t-accent); content: ""; }
-.terminal-state.running::after, .terminal-state.attention::after, .terminal-state.exited::after { display: none; }
 .terminal-state svg { flex: 0 0 auto; }
-.terminal-state.attention svg, .terminal-state.unread::after { color: var(--t-warning); background: var(--t-warning); box-shadow: 0 0 0 2px color-mix(in srgb, var(--t-warning) 18%, transparent); }
+.terminal-state:has(svg)::after, .terminal-state.idle:not([class*=" ai-"])::after { display: none; }
+.terminal-state.attention svg { color: var(--t-warning); box-shadow: 0 0 0 2px color-mix(in srgb, var(--t-warning) 18%, transparent); }
 .terminal-state.exited svg { color: var(--t-danger); }
 .terminal-state.failed svg { color: var(--t-danger); filter: drop-shadow(0 0 2px color-mix(in srgb, var(--t-danger) 45%, transparent)); }
-.terminal-state.failed::after { background: var(--t-danger); }
+.terminal-state.unread::after { box-shadow: 0 0 0 2px color-mix(in srgb, var(--t-accent) 18%, transparent); }
 .terminal-tab-main .terminal-exit-code { padding: 1px 4px; border-radius: 3px; background: color-mix(in srgb, var(--t-danger) 12%, var(--t-panel-2)); color: var(--t-danger); font-size: 8px; font-style: normal; }
 .ssh-heading { flex: 0 0 auto; border-top: 1px solid var(--t-border); }
 .ssh-host-list { max-height: 38%; flex: 0 1 auto; padding: 5px; overflow: auto; }
