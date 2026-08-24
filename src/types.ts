@@ -107,7 +107,7 @@ export interface AppSettings {
   cellWidth: "compact" | "relaxed";
   completionStyle: "inline" | "popup";
   bellMode: "off" | "flash" | "sound" | "both";
-  tabPosition: "top" | "side" | "both";
+  tabPosition: "top" | "side";
   backgroundColor?: string;
   accentColor?: string;
   resumeAiSessions: boolean;
@@ -458,5 +458,6 @@ export interface CodexBridge {
   onTerminalEvent(listener: (event: TerminalEvent) => void): () => void;
   onShellsChanged(listener: (shells: ShellProfile[]) => void): () => void;
   onQuickTerminal(listener: () => void): () => void;
+  pullLauncherRequest(): Promise<LauncherRequest | null>;
   onLauncherRequest(listener: (request: LauncherRequest) => void): () => void;
 }

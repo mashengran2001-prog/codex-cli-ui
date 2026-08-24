@@ -58,13 +58,17 @@ export async function installMockBridge(page) {
       backgroundBlur: false, backgroundOpacity: 0.92, restoreTerminalTabs: true,
       resizablePanels: false, completionEnabled: true, copyOnSelect: true, powerlinePrompt: true,
       quickTerminal: true, shellStartupIntegration: false, defaultShellId: "powershell", cursorStyle: "bar", cursorBlink: true, fontFamily: "",
-      bellMode: "both", tabPosition: "both", resumeAiSessions: true, loadShellProfile: false, proxyUrl: "", proxyBypass: "", newTabPlacement: "after-active", cliProfiles: [],
+      bellMode: "both", tabPosition: "side", resumeAiSessions: true, loadShellProfile: false, proxyUrl: "", proxyBypass: "", newTabPlacement: "after-active", cliProfiles: [],
       keybindings: {
         "command-palette": "Ctrl+Shift+P", "new-terminal": "Ctrl+Shift+T", "split-right": "Ctrl+Shift+D",
         "split-down": "Ctrl+Shift+E", "pane-next": "Ctrl+Alt+ArrowRight", "pane-prev": "Ctrl+Alt+ArrowLeft",
-        "quick-terminal": "Ctrl+`", "open-settings": "Ctrl+,",
+        "quick-terminal": "Ctrl+`", "open-settings": "Ctrl+,"
       },
     };
+    try {
+      const saved = localStorage.getItem("codex-cli-ui:test-app-settings");
+      if (saved) settings = { ...settings, ...JSON.parse(saved) };
+    } catch { /* ignore malformed saved settings */ }
     let cliLifecycleStatus = {
       enabled: false,
       supported: true,
@@ -153,7 +157,7 @@ export async function installMockBridge(page) {
       installProvider: async () => ({ ok: true, message: "Installed" }),
       setProviderCredential: async () => ({ ...deepseekProvider, configured: true }),
       getAppSettings: async () => settings,
-      setAppSettings: async (value) => { settings = value; return settings; },
+      setAppSettings: async (value) => { settings = value; try { localStorage.setItem("codex-cli-ui:test-app-settings", JSON.stringify(value)); } catch { /* ignore */ } return settings; },
       listSystemFonts: async () => ["Cascadia Mono", "Consolas", "JetBrains Mono", "Microsoft YaHei", "Segoe UI"],
       chooseDirectory: async () => "F:\\demo\\atlas-workspace",
       chooseImages: async () => ["F:\\demo\\ui-reference.png"],
@@ -297,6 +301,7 @@ export async function installMockBridge(page) {
       onRunEvent: (listener) => { runListeners.push(listener); return () => runListeners.splice(runListeners.indexOf(listener), 1); },
       onTerminalEvent: (listener) => { terminalListeners.push(listener); return () => terminalListeners.splice(terminalListeners.indexOf(listener), 1); },
       onQuickTerminal: () => () => {},
+      pullLauncherRequest: async () => null,
       onLauncherRequest: (listener) => { launcherListeners.push(listener); return () => launcherListeners.splice(launcherListeners.indexOf(listener), 1); },
     };
     window.workbench = window.codex;

@@ -49,7 +49,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   cellWidth: "compact",
   completionStyle: "inline",
   bellMode: "both",
-  tabPosition: "both",
+  tabPosition: "side",
   resumeAiSessions: true,
   loadShellProfile: false,
   proxyUrl: "",
@@ -407,6 +407,11 @@ export default function App() {
   useEffect(() => {
     const removeRun = window.codex.onRunEvent(handleRunEvent);
     const removeLauncher = window.codex.onLauncherRequest(handleLauncherRequest);
+    // Startup launcher requests are pulled once listeners are registered so a
+    // slow first paint can never drop the request (main no longer pushes it).
+    void window.codex.pullLauncherRequest().then((request) => {
+      if (request) handleLauncherRequest(request);
+    });
     const removeQuickTerminal = window.codex.onQuickTerminal(() => {
       const project = projectsRef.current.find((item) => item.id === selectedProjectId) || projectsRef.current[0];
       if (!project) return;

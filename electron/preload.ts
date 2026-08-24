@@ -79,6 +79,7 @@ const bridge: CodexBridge = {
     ipcRenderer.on("terminal:quick-open", handler);
     return () => ipcRenderer.removeListener("terminal:quick-open", handler);
   },
+  pullLauncherRequest: () => ipcRenderer.invoke("launcher:pull"),
   onLauncherRequest: (listener: (request: LauncherRequest) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, value: LauncherRequest) => listener(value);
     ipcRenderer.on("launcher:request", handler);

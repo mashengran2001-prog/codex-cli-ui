@@ -31,9 +31,18 @@ try {
   assert.equal(await page.locator(".terminal-workspace").count(), 1);
   assert.equal(await page.locator(".sidebar-header").count(), 0);
   await page.getByRole("tab", { name: "终端" }).click();
+  // 与 Nebula 一致，默认侧边；本用例其余部分基于顶部标签，先切到顶部
+  await page.locator(".xterm-screen").waitFor();
+  await page.getByTitle("CLI 工具设置").click();
+  await page.locator(".terminal-settings").waitFor();
+  const initialTabOptions = await page.locator('select[aria-label="标签栏位置"] option').allTextContents();
+  assert.deepEqual(initialTabOptions, ["侧边", "顶部"]);
+  await page.getByLabel("标签栏位置").selectOption("top");
+  await page.getByRole("button", { name: "返回工作台" }).click();
+  await page.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 1 && document.querySelectorAll(".terminal-side-tabs").length === 0);
   await page.locator(".terminal-top-tabs").waitFor();
   await page.locator(".xterm-screen").waitFor();
-  assert.match(await page.locator(".terminal-tab").textContent(), /atlas-workspace/);
+  assert.match(await page.locator(".terminal-top-tab").textContent(), /atlas-workspace/);
   assert.match(await page.locator(".cli-tool-list").textContent(), /Claude Code/);
   await page.evaluate(() => {
     const sessionId = document.querySelector(".terminal-pane-leaf")?.getAttribute("data-session-id") ?? window.__mock.terminalSessions[0].id;
@@ -132,7 +141,24 @@ try {
   await secondTab.locator(".terminal-tab-main").click();
   await page.waitForFunction((id) => document.querySelector(".terminal-pane-leaf")?.dataset.sessionId === id, secondSessionId);
 
-  await page.locator(".terminal-actions").getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
+  // Nebula 顶部三点菜单：竖三点紧跟 +，仅“选择终端 / 设置”两项并锚定按钮
+  const topNewButton = page.locator(".terminal-header > .terminal-header-action").filter({ has: page.locator("svg") }).first();
+  const moreButton = page.getByTitle("更多操作");
+  const newBox = await topNewButton.boundingBox();
+  const moreBox = await moreButton.boundingBox();
+  assert.ok(newBox && moreBox && moreBox.x >= newBox.x + newBox.width && moreBox.x - (newBox.x + newBox.width) <= 8);
+  await moreButton.click();
+  const moreMenu = page.locator(".more-menu");
+  const menuItems = moreMenu.getByRole("menuitem");
+  assert.deepEqual(await menuItems.allTextContents(), ["选择终端", "打开设置"]);
+  assert.equal(await moreMenu.getByRole("separator").count(), 1);
+  const menuBox = await moreMenu.boundingBox();
+  assert.ok(menuBox && Math.abs(menuBox.width - 180) <= 1 && Math.abs(menuBox.y - (moreBox.y + moreBox.height + 6)) <= 1);
+  await moreMenu.getByRole("menuitem", { name: "选择终端" }).click();
+  await page.locator(".command-palette").waitFor();
+  assert.equal(await page.locator(".command-palette .palette-list button").count(), 2);
+  await page.keyboard.press("Escape");
+  await moreButton.click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
   assert.equal(await page.locator(".terminal-side-panel").count(), 0);
   assert.equal(await page.getByRole("button", { name: "向右拆分" }).count(), 0);
@@ -219,7 +245,7 @@ try {
   await page.locator(".command-dock input").press("Escape");
   await page.locator(".command-dock input").fill("");
   // 恢复默认补全样式与字符宽度，避免影响后续用例
-  await page.locator(".terminal-actions").getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
+  await page.getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
   await page.getByLabel("补全样式").selectOption("inline");
   await page.getByLabel("字符宽度").selectOption("compact");
@@ -228,9 +254,9 @@ try {
   // 拖拽标签到分屏左缘：dock 为左右分屏并持久化分屏树
   const beforeDockTabs = await page.locator(".terminal-top-tab").count();
   // 新建两个终端，再把第一个会话放回 pane，让最后一个会话保持“未分配”作为拖拽源
-  await page.locator(".terminal-side-panel").getByRole("button", { name: "新建终端" }).first().click();
+  await page.getByTitle("新建终端").first().click();
   await page.waitForFunction((count) => document.querySelectorAll(".terminal-top-tab").length === count + 1, beforeDockTabs);
-  await page.locator(".terminal-side-panel").getByRole("button", { name: "新建终端" }).first().click();
+  await page.getByTitle("新建终端").first().click();
   await page.waitForFunction((count) => document.querySelectorAll(".terminal-top-tab").length === count + 2, beforeDockTabs);
   const firstSessionId = await page.locator(".terminal-top-tab").first().getAttribute("data-session-id");
   await page.locator(".terminal-top-tab").nth(0).locator(".terminal-tab-main").click();
@@ -270,9 +296,9 @@ try {
   await page.locator(".terminal-pane-leaf").nth(1).getByRole("button", { name: "关闭分屏" }).click();
   await page.waitForFunction(() => document.querySelectorAll(".terminal-pane-leaf").length === 1);
 
-  const tabCountBeforeMiddleClick = await page.locator(".terminal-tab").count();
-  await page.locator(".terminal-tab").nth(1).click({ button: "middle" });
-  await page.waitForFunction((count) => document.querySelectorAll(".terminal-tab").length === count - 1, tabCountBeforeMiddleClick);
+  const tabCountBeforeMiddleClick = await page.locator(".terminal-top-tab").count();
+  await page.locator(".terminal-top-tab").nth(1).click({ button: "middle" });
+  await page.waitForFunction((count) => document.querySelectorAll(".terminal-top-tab").length === count - 1, tabCountBeforeMiddleClick);
   assert.equal(await page.evaluate(() => window.__mock.terminalSessions.length), tabCountBeforeMiddleClick - 1);
 
   // 标签页颜色：右键菜单选色，断言 data-tab-color 与 localStorage 持久化，再清除
@@ -290,7 +316,7 @@ try {
   // 新建标签位置（追加到末尾）：激活首个标签后新建，新标签应出现在末尾
   await page.locator(".terminal-top-tab").nth(0).locator(".terminal-tab-main").click();
   const idsBeforeNewTab = await page.evaluate(() => window.__mock.terminalSessions.map((session) => session.id));
-  await page.locator(".terminal-side-panel").getByRole("button", { name: "新建终端" }).first().click();
+  await page.getByTitle("新建终端").first().click();
   await page.waitForFunction((count) => document.querySelectorAll(".terminal-top-tab").length === count, idsBeforeNewTab.length + 1);
   const idsAfterNewTab = await page.locator(".terminal-top-tab").evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("data-session-id")));
   const newestId = await page.evaluate(() => window.__mock.terminalSessions.at(-1).id);
@@ -495,32 +521,41 @@ try {
   await page.getByText("F:\\demo\\export\\session.txt").waitFor();
 
   // 退出码与失败状态：新建终端后模拟非零退出，标签出现 failed 状态与退出码文案
-  const tabCountBefore = await page.locator(".terminal-tab").count();
+  const tabCountBefore = await page.locator(".terminal-top-tab").count();
   await page.getByTitle("新建终端").first().click();
   await page.waitForFunction((count) => window.__mock.terminalSessions.length === count + 1, tabCountBefore);
   const failedSessionId = await page.evaluate(() => window.__mock.terminalSessions.at(-1).id);
   await page.evaluate((id) => window.__mock.terminalListeners.forEach((listener) => listener({ sessionId: id, type: "exit", code: 3 })), failedSessionId);
-  const failedTab = page.locator(`.terminal-tab[data-session-id="${failedSessionId}"]`);
+  const failedTab = page.locator(`.terminal-top-tab[data-session-id="${failedSessionId}"]`);
   await failedTab.locator(".terminal-state.failed").waitFor();
   assert.match(await failedTab.textContent() ?? "", /进程已退出，代码 3/);
 
-  // 标签栏位置切换：顶部-only 隐藏侧边标签，侧边-only 隐藏顶部标签
-  await page.locator(".terminal-actions").getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
+  // 标签栏位置切换：与 Nebula TabsPositionName 一致，顶部/侧边互斥（无“顶部+侧边”）
+  await page.getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
   await page.getByLabel("标签栏位置").selectOption("top");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).tabPosition, "top");
   await page.getByRole("button", { name: "返回工作台" }).click();
   await page.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 1 && document.querySelectorAll(".terminal-side-tabs").length === 0);
-  await page.locator(".terminal-actions").getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
+  await page.getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
   await page.getByLabel("标签栏位置").selectOption("side");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).tabPosition, "side");
   await page.getByRole("button", { name: "返回工作台" }).click();
   await page.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 0 && document.querySelectorAll(".terminal-side-tabs").length === 1);
-  await page.locator(".terminal-actions").getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
+  const sideShellButton = page.locator(".side-heading-actions").getByTitle("选择终端");
+  const sideShellBox = await sideShellButton.boundingBox();
+  assert.ok(sideShellBox && Math.abs(sideShellBox.width - 20) <= 1 && Math.abs(sideShellBox.height - 20) <= 1);
+  await sideShellButton.click();
+  await page.locator(".command-palette").waitFor();
+  assert.equal(await page.locator(".command-palette .palette-list button").count(), 2);
+  await page.keyboard.press("Escape");
+  await page.getByTitle("CLI 工具设置").click();
   await page.locator(".terminal-settings").waitFor();
-  await page.getByLabel("标签栏位置").selectOption("both");
-  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).tabPosition, "both");
+  const tabPositionOptions = await page.locator('select[aria-label="标签栏位置"] option').allTextContents();
+  assert.deepEqual(tabPositionOptions, ["侧边", "顶部"]);
+  await page.getByLabel("标签栏位置").selectOption("top");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).tabPosition, "top");
 
   // 代理设置：仅影响工作台内 CLI，输入地址与绕过列表后持久化，然后清空恢复
   await page.getByLabel("代理地址").fill("http://127.0.0.1:7890");
@@ -544,7 +579,7 @@ try {
   await page.waitForTimeout(150);
   assert.equal(await page.locator(".pane-toolbar.bell-flash").count(), 0);
   // 闪烁-only：bell 事件令 pane 工具栏闪烁
-  await page.locator(".terminal-actions").getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
+  await page.getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
   await page.getByLabel("终端铃声模式").selectOption("flash");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).bellMode, "flash");
@@ -557,7 +592,7 @@ try {
   });
   await page.locator(".pane-toolbar.bell-flash").waitFor();
   // 恢复 both，HSV 取色断言需要重新打开设置页
-  await page.locator(".terminal-actions").getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
+  await page.getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
   await page.getByLabel("终端铃声模式").selectOption("both");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).bellMode, "both");

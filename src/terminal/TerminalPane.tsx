@@ -26,6 +26,11 @@ interface TerminalPaneProps {
   onError?(message: string): void;
 }
 
+// Tiny transient pane sizes (tab re-layout, window minimize) must never reach
+// the PTY: ConPTY/PSReadLine loses its prompt state at 1-row sizes and later
+// repaints erase the whole screen without redrawing.
+const MIN_PTY_COLS = 10;
+const MIN_PTY_ROWS = 3;
 const draggedPathType = "application/x-codex-ui-path";
 const LINK_PATTERN = /(?:https?:\/\/[^\s<>"']+|\b[a-zA-Z]:[\\/][^\s<>"']*|\\\\[^\s<>"']+|\.[\\/][^\s<>"']+|\.{2}[\\/][^\s<>"']+)/;
 
@@ -137,6 +142,7 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
         try {
           fit.fit();
           if (terminal.cols !== lastCols || terminal.rows !== lastRows) {
+            if (terminal.cols < MIN_PTY_COLS || terminal.rows < MIN_PTY_ROWS) return;
             lastCols = terminal.cols;
             lastRows = terminal.rows;
             container.dataset.cols = String(terminal.cols);
@@ -432,6 +438,7 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
     window.requestAnimationFrame(() => {
       try {
         fitRef.current?.fit();
+        if (terminal.cols < MIN_PTY_COLS || terminal.rows < MIN_PTY_ROWS) return;
         void window.codex.resizeTerminal(session.id, terminal.cols, terminal.rows);
       } catch { /* Font swap can race with layout changes. */ }
     });
@@ -446,6 +453,7 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
     window.requestAnimationFrame(() => {
       try {
         fitRef.current?.fit();
+        if (terminal.cols < MIN_PTY_COLS || terminal.rows < MIN_PTY_ROWS) return;
         void window.codex.resizeTerminal(session.id, terminal.cols, terminal.rows);
       } catch { /* Cell-width swap can race with layout changes. */ }
     });

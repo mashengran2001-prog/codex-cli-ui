@@ -744,10 +744,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .terminal-actions button:disabled:hover { background: transparent; color: var(--t-muted); }
 .workspace-view-switch { display: grid; height: 31px; grid-template-columns: repeat(2, 62px); padding: 2px; border: 1px solid var(--t-border); border-radius: 5px; background: var(--t-bg); }
 .more-menu-overlay { position: fixed; z-index: 60; inset: 0; }
-.more-menu { position: absolute; top: 52px; right: 16px; display: grid; min-width: 210px; gap: 2px; padding: 6px; border: 1px solid var(--t-border); border-radius: 8px; background: var(--t-bg-raised); box-shadow: 0 16px 44px rgb(0 0 0 / 38%); }
+.more-menu { position: fixed; display: grid; width: 180px; gap: 2px; padding: 6px; border: 1px solid var(--t-border); border-radius: 8px; background: var(--t-bg-raised); box-shadow: 0 4px 12px rgb(0 0 0 / 30%); }
 .more-menu button { display: flex; height: 32px; align-items: center; gap: 9px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: var(--t-text); font-size: 11px; text-align: left; cursor: pointer; }
 .more-menu button:hover { background: var(--t-panel-2); color: var(--t-accent); }
 .more-menu button[aria-checked="true"]::after { margin-left: auto; color: var(--t-accent); content: "✓"; font-size: 10px; }
+.more-menu-separator { height: 1px; margin: 4px 6px; background: var(--t-border); }
 .terminal-actions .workspace-view-switch button { display: flex; width: 62px; height: 25px; align-items: center; justify-content: center; gap: 5px; border-radius: 3px; font-size: 9.5px; }
 .terminal-actions .workspace-view-switch button.active { background: var(--t-accent-soft); color: var(--t-accent); }
 .workspace-view-switch button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -768,6 +769,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .side-section-heading > span { min-width: 19px; padding: 2px 5px; border-radius: 8px; background: var(--t-panel-2); color: var(--t-muted); font-size: 8.5px; text-align: center; }
 .side-section-heading > button:last-child { display: grid; width: 25px; height: 25px; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--t-muted); cursor: pointer; }
 .side-section-heading > button:last-child:hover { background: var(--t-panel-2); color: var(--t-text); }
+.tabs-heading { grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px; }
+.side-heading-actions { display: flex; align-items: center; gap: 2px; }
+.side-heading-actions button { display: grid; width: 20px; height: 20px; flex: 0 0 20px; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--t-muted); cursor: pointer; }
+.side-heading-actions button:hover { background: var(--t-panel-2); color: var(--t-text); }
 .terminal-side-tabs { min-height: 68px; flex: 1 1 auto; padding: 7px 6px; overflow: auto; }
 .terminal-side-panel .terminal-tab { display: flex; width: 100%; min-width: 0; max-width: none; height: 34px; margin-bottom: 8px; border: 0; border-radius: 4px; color: var(--t-muted); }
 .terminal-side-panel .terminal-tab:hover { background: var(--t-panel); color: var(--t-text); }

@@ -47,7 +47,34 @@ try {
   assert.ok(terminalMetrics.brandIcons.every((icon) => icon.width <= 16 && icon.height <= 16));
   assert.ok(terminalMetrics.overflow <= 1);
   await desktop.page.getByRole("button", { name: "关闭文件面板" }).click();
-  await desktop.page.locator(".terminal-actions").getByTitle("更多操作").click(); await desktop.page.getByRole("menuitem", { name: "打开设置" }).click();
+  // Nebula 默认侧边：只有侧栏一组 + / 竖三点，顶部没有更多菜单
+  assert.equal(await desktop.page.getByTitle("更多操作").count(), 0);
+  assert.equal(await desktop.page.locator(".side-heading-actions button").count(), 2);
+  await desktop.page.getByTitle("CLI 工具设置").click();
+  await desktop.page.locator(".terminal-settings").waitFor();
+  await desktop.page.getByLabel("标签栏位置").selectOption("top");
+  await desktop.page.getByRole("button", { name: "返回工作台" }).click();
+  await desktop.page.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 1 && document.querySelectorAll(".terminal-side-tabs").length === 0);
+  await desktop.page.getByTitle("更多操作").click();
+  await desktop.page.screenshot({ path: join(artifacts, "codex-ui-more-menu.png"), fullPage: true });
+  const moreMenuMetrics = await desktop.page.evaluate(() => {
+    const newTerminal = document.querySelector('.terminal-header-action[title="新建终端"]').getBoundingClientRect();
+    const moreButton = document.querySelector('.top-tabs-menu').getBoundingClientRect();
+    const menu = document.querySelector(".more-menu").getBoundingClientRect();
+    return {
+      gap: moreButton.left - newTerminal.right,
+      menuWidth: menu.width,
+      menuOffset: menu.top - moreButton.bottom,
+      controlReserve: window.innerWidth - moreButton.right,
+      verticalIcon: Boolean(document.querySelector(".top-tabs-menu .lucide-ellipsis-vertical")),
+    };
+  });
+  assert.ok(moreMenuMetrics.gap >= 0 && moreMenuMetrics.gap <= 8);
+  assert.ok(Math.abs(moreMenuMetrics.menuWidth - 180) <= 1);
+  assert.ok(Math.abs(moreMenuMetrics.menuOffset - 6) <= 1);
+  assert.ok(moreMenuMetrics.controlReserve >= 150, "top menu entered the Windows titlebar controls area");
+  assert.equal(moreMenuMetrics.verticalIcon, true);
+  await desktop.page.getByRole("menuitem", { name: "打开设置" }).click();
   await desktop.page.locator(".terminal-settings").waitFor();
   await desktop.page.getByLabel("界面语言").selectOption("en-US");
   await desktop.page.getByRole("heading", { name: "Appearance" }).waitFor();
@@ -93,6 +120,26 @@ try {
   });
   assert.ok(lifecycleMetrics.top >= 0 && lifecycleMetrics.bottom <= lifecycleMetrics.viewport);
   assert.ok(lifecycleMetrics.width > 500);
+
+  const sideMode = await createPopulatedPage(browser, server.url, { width: 1380, height: 880 });
+  await sideMode.page.getByRole("tab", { name: "终端" }).click();
+  await sideMode.page.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 0 && document.querySelectorAll(".terminal-side-tabs").length === 1);
+  assert.equal(await sideMode.page.getByTitle("更多操作").count(), 0);
+  await sideMode.page.screenshot({ path: join(artifacts, "codex-ui-sidebar-menu.png"), fullPage: true });
+  const sidebarMenuMetrics = await sideMode.page.evaluate(() => {
+    const actions = [...document.querySelectorAll(".side-heading-actions button")];
+    const rects = actions.map((el) => el.getBoundingClientRect());
+    return { count: actions.length, width: rects[0]?.width, height: rects[0]?.height, gap: rects[1] ? rects[1].left - rects[0].right : null, titles: actions.map((el) => el.getAttribute("title")) };
+  });
+  assert.equal(sidebarMenuMetrics.count, 2);
+  assert.equal(sidebarMenuMetrics.width, 20);
+  assert.equal(sidebarMenuMetrics.height, 20);
+  assert.ok(sidebarMenuMetrics.gap >= 2 && sidebarMenuMetrics.gap <= 6);
+  assert.deepEqual(sidebarMenuMetrics.titles, ["新建终端", "选择终端"]);
+  await sideMode.page.getByTitle("选择终端").click();
+  await sideMode.page.locator(".command-palette").waitFor();
+  assert.equal(await sideMode.page.locator(".command-palette .palette-list button").count(), 2);
+  await sideMode.context.close();
   await desktop.context.close();
 
   const compact = await createPopulatedPage(browser, server.url, { width: 800, height: 720 });
@@ -119,6 +166,15 @@ try {
   assert.ok(compactMetrics.optionsRight <= compactMetrics.sendLeft + 1, "composer controls overlap send button");
   await compact.page.getByRole("tab", { name: "终端" }).click();
   await compact.page.locator(".xterm-screen").waitFor();
+  assert.equal(await compact.page.getByTitle("更多操作").count(), 0);
+  assert.equal(await compact.page.locator(".side-heading-actions button").count(), 2);
+  await compact.page.getByTitle("CLI 工具设置").click();
+  await compact.page.locator(".terminal-settings").waitFor();
+  const tabPositionOptionsCompact = await compact.page.locator('select[aria-label="标签栏位置"] option').allTextContents();
+  assert.deepEqual(tabPositionOptionsCompact, ["侧边", "顶部"]);
+  await compact.page.getByLabel("标签栏位置").selectOption("top");
+  await compact.page.getByRole("button", { name: "返回工作台" }).click();
+  await compact.page.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 1 && document.querySelectorAll(".terminal-side-tabs").length === 0);
   await compact.page.getByRole("button", { name: "文件", exact: true }).click();
   await compact.page.getByText("README.md").waitFor();
   await compact.page.screenshot({ path: join(artifacts, "codex-ui-terminal-compact.png"), fullPage: true });

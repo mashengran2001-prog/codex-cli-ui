@@ -48,6 +48,11 @@ try {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(760, 620));
   await window.waitForTimeout(250);
   await window.getByRole("tab", { name: "终端" }).click();
+  await window.getByTitle("CLI 工具设置").click();
+  await window.locator(".terminal-settings").waitFor();
+  await window.getByLabel("标签栏位置").selectOption("top");
+  await window.getByRole("button", { name: "返回工作台" }).click();
+  await window.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 1);
   await window.locator(".xterm-screen").waitFor({ timeout: 15_000 });
   const titlebarMetrics = await window.evaluate(() => {
     const actions = document.querySelector(".terminal-actions").getBoundingClientRect();

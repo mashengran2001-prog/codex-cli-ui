@@ -151,6 +151,11 @@ const MAX_SESSION_FILES = 250;
 const MAX_TERMINAL_HISTORY = 300_000;
 const MAX_TERMINAL_INPUT = 64 * 1024;
 const MAX_TERMINALS = 16;
+// Floor for accepted PTY sizes. A transiently tiny pane (tab re-layout, window
+// minimize) must not resize the PTY: ConPTY/PSReadLine loses its prompt state
+// at 1-row sizes and later repaints erase the whole screen without redrawing.
+const MIN_TERMINAL_COLS = 10;
+const MIN_TERMINAL_ROWS = 3;
 const MAX_DOCUMENT_BYTES = 4 * 1024 * 1024;
 const MAX_DOCUMENT_IMAGE_BYTES = 24 * 1024 * 1024;
 const MAX_HISTORY_ENTRIES = 1_000;
@@ -180,7 +185,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   cellWidth: "compact",
   completionStyle: "inline",
   bellMode: "both",
-  tabPosition: "both",
+  tabPosition: "side",
   backgroundColor: undefined,
   accentColor: undefined,
   resumeAiSessions: true,
@@ -278,6 +283,12 @@ function parseLauncherRequest(argv: string[]): LauncherRequest | null {
   }
 }
 
+ipcMain.handle("launcher:pull", () => {
+  const request = queuedLauncherRequest;
+  queuedLauncherRequest = null;
+  return request;
+});
+
 function sendLauncherRequest(window: BrowserWindow, request: LauncherRequest) {
   const send = () => setTimeout(() => {
     if (!window.isDestroyed()) window.webContents.send("launcher:request", request);
@@ -353,10 +364,6 @@ function createWindow() {
     if (mainWindow === window) mainWindow = null;
   });
   mainWindow = window;
-  if (queuedLauncherRequest) {
-    sendLauncherRequest(window, queuedLauncherRequest);
-    queuedLauncherRequest = null;
-  }
   bootTrace("create-window:ready");
   return window;
 }
@@ -631,7 +638,7 @@ function normalizeAppSettings(value: Partial<AppSettings> | null | undefined): A
     bellMode: value?.bellMode === "off" || value?.bellMode === "flash" || value?.bellMode === "sound" || value?.bellMode === "both"
       ? value.bellMode
       : ((value as { bellSound?: boolean } | null | undefined)?.bellSound === false ? "flash" : "both"),
-    tabPosition: value?.tabPosition === "top" || value?.tabPosition === "side" ? value.tabPosition : "both",
+    tabPosition: value?.tabPosition === "top" || value?.tabPosition === "side" ? value.tabPosition : "side",
     backgroundColor: typeof value?.backgroundColor === "string" && /^#[0-9a-fA-F]{6}$/.test(value.backgroundColor) ? value.backgroundColor.toLowerCase() : undefined,
     accentColor: typeof value?.accentColor === "string" && /^#[0-9a-fA-F]{6}$/.test(value.accentColor) ? value.accentColor.toLowerCase() : undefined,
     resumeAiSessions: value?.resumeAiSessions !== false,
@@ -2897,6 +2904,8 @@ ipcMain.handle("terminal:resize", (event, id: unknown, cols: unknown, rows: unkn
   if (!session || session.status !== "running" || !session.subscribers.has(event.sender.id)) return false;
   const nextCols = terminalDimension(cols, session.cols, 400);
   const nextRows = terminalDimension(rows, session.rows, 200);
+  if (nextCols < MIN_TERMINAL_COLS || nextRows < MIN_TERMINAL_ROWS) return false;
+  if (nextCols === session.cols && nextRows === session.rows) return false;
   session.cols = nextCols;
   session.rows = nextRows;
   session.pendingResize = { cols: nextCols, rows: nextRows };
