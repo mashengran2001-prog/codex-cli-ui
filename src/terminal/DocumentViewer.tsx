@@ -77,7 +77,11 @@ export default function DocumentViewer({ document, root, onClose, onError }: {
         </div>
       </header>
       <div className={`document-content ${document.kind}`}>
-        {document.kind === "markdown" ? (
+        {document.kind === "image" ? (
+          document.imageSrc
+            ? <img className="document-image" src={document.imageSrc} alt={document.name} />
+            : <div className="document-image-fallback">{copy.imageUnavailable}</div>
+        ) : document.kind === "markdown" ? (
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkMath]}
             rehypePlugins={[rehypeKatex]}

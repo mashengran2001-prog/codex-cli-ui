@@ -275,7 +275,7 @@ const uiCopies = {
       empty: "没有远程文件",
       listFailed: "无法读取远程文件",
     },
-    document: { copyPath: "复制路径", reveal: "在文件管理器中显示", close: "关闭文档" },
+    document: { copyPath: "复制路径", reveal: "在文件管理器中显示", close: "关闭文档", imageUnavailable: "图片预览不可用" },
     ssh: {
       edit: "编辑 SSH 主机",
       create: "新建 SSH 主机",
@@ -552,7 +552,7 @@ const uiCopies = {
       empty: "No remote files",
       listFailed: "Unable to list remote files",
     },
-    document: { copyPath: "Copy path", reveal: "Reveal in file manager", close: "Close document" },
+    document: { copyPath: "Copy path", reveal: "Reveal in file manager", close: "Close document", imageUnavailable: "Image preview unavailable" },
     ssh: {
       edit: "Edit SSH host",
       create: "New SSH host",

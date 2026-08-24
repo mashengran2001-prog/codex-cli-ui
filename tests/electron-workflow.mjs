@@ -98,6 +98,18 @@ try {
     const resultNull = await window.evaluate(async ([r, p]) => await window.codex.readDocumentImage(r, p), [root, "C:\\Windows\\win.ini"]);
     assert.equal(resultNull, null);
     console.log("electron-image: readDocumentImage IPC verified");
+    // 图片单独开标签查看（对标 Nebula open_image_tab）：文件树双击 PNG 进入图片文档标签
+    await window.getByRole("button", { name: "文件", exact: true }).click();
+    const probeRow = window.locator(".file-row").filter({ hasText: "probe-img-test.png" });
+    await probeRow.waitFor({ timeout: 10_000 });
+    await probeRow.click();
+    await window.locator(".document-viewer").waitFor({ timeout: 10_000 });
+    const imageDocSrc = await window.locator(".document-viewer img.document-image").getAttribute("src");
+    assert.match(imageDocSrc ?? "", /^data:image\/png;base64,/);
+    assert.equal(await window.locator(".document-viewer").count(), 1);
+    await window.getByTitle("关闭文档").click();
+    await window.locator(".terminal-pane-leaf").waitFor();
+    console.log("electron-image: image opens as its own document tab");
   } finally {
     await rmFile(probeImg).catch(() => {});
   }

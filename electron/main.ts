@@ -1875,8 +1875,24 @@ async function readWorkspaceDocument(rootValue: string, pathValue: string): Prom
     target = realTarget;
   }
   const details = wsl ? await statWithTimeout(target) : await stat(target);
-  if (!details.isFile() || details.size > MAX_DOCUMENT_BYTES) return null;
+  if (!details.isFile()) return null;
   const extension = extname(target).toLowerCase();
+  // 图片路由（对标 Nebula viewable_file：png/jpg/jpeg/webp/bmp 单独开图片标签）
+  const imageMime = IMAGE_MIME[extension];
+  if (imageMime) {
+    if (details.size > MAX_DOCUMENT_IMAGE_BYTES) return null;
+    const buffer = wsl ? await readFileWithTimeout(target) : await readFile(target);
+    return {
+      path: target,
+      name: basename(target),
+      kind: "image",
+      content: "",
+      size: details.size,
+      modifiedAt: details.mtimeMs,
+      imageSrc: `data:${imageMime};base64,${buffer.toString("base64")}`,
+    };
+  }
+  if (details.size > MAX_DOCUMENT_BYTES) return null;
   const kind: DocumentFile["kind"] = extension === ".md" || extension === ".markdown"
     ? "markdown"
     : extension === ".json"

@@ -356,10 +356,11 @@ export interface GitActionRequest {
 export interface DocumentFile {
   path: string;
   name: string;
-  kind: "markdown" | "json" | "text";
+  kind: "markdown" | "json" | "text" | "image";
   content: string;
   size: number;
   modifiedAt: number;
+  imageSrc?: string;
 }
 
 export interface FileSystemEntry {
