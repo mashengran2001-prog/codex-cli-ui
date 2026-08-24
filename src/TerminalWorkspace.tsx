@@ -9,7 +9,7 @@ import {
 import BrandIcon from "./BrandIcon";
 import type { AppSettings, CliLifecycleStatus, CliToolInfo, CompletionCandidate, DocumentFile, ProjectRecord, ShellProfile, SshProfile, TerminalEvent, TerminalInfo } from "./types";
 import { getUiCopy, getWorkbenchCopy } from "./i18n";
-import { keybindingMatches } from "./keybindings";
+import { keybindingCaptureActive, keybindingMatches } from "./keybindings";
 import CommandPalette, { type PaletteAction } from "./terminal/CommandPalette";
 import DocumentViewer from "./terminal/DocumentViewer";
 import { DirectoriesDrawer, FilesDrawer, GitDrawer, SftpDrawer } from "./terminal/Drawers";
@@ -631,6 +631,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (keybindingCaptureActive) return;
       if (keybindingMatches(event, settings.keybindings["command-palette"])) { event.preventDefault(); setPaletteOpen(true); }
       else if (keybindingMatches(event, settings.keybindings["new-terminal"])) { event.preventDefault(); void createTerminal(active?.cwd || projectPath, { shellId: settings.defaultShellId }); }
       else if (keybindingMatches(event, settings.keybindings["split-right"])) { event.preventDefault(); void splitPane("columns"); }

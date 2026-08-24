@@ -13,6 +13,13 @@ export const KEYBINDING_ACTIONS: KeybindingAction[] = [
 
 const MODIFIER_KEYS = new Set(["Control", "Shift", "Alt", "Meta", "CapsLock", "NumLock"]);
 
+/** True while the settings keymap page is capturing a new chord. */
+export let keybindingCaptureActive = false;
+
+export function setKeybindingCaptureActive(active: boolean) {
+  keybindingCaptureActive = active;
+}
+
 /** Convert a keydown event into the stored chord format, e.g. "Ctrl+Shift+K". */
 export function chordFromEvent(event: KeyboardEvent): string {
   const parts: string[] = [];
@@ -56,6 +63,15 @@ export function keybindingMatches(event: KeyboardEvent, chord: string | undefine
   if (wantsShift !== event.shiftKey) return false;
   if (!wantsCtrl && !wantsCmd && (event.ctrlKey || event.metaKey)) return false;
   return true;
+}
+
+/** Live modifier prefix shown while capturing, e.g. "Ctrl+Alt" or "". */
+export function modifierPrefix(event: KeyboardEvent): string {
+  const parts: string[] = [];
+  if (event.ctrlKey || event.metaKey) parts.push(event.metaKey && !event.ctrlKey ? "Cmd" : "Ctrl");
+  if (event.altKey) parts.push("Alt");
+  if (event.shiftKey) parts.push("Shift");
+  return parts.join("+");
 }
 
 /** Whether a keydown is only a modifier key, which cannot be a chord on its own. */

@@ -1,11 +1,40 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { BellRing, Brain, Check, ChevronDown, Command, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Plus, RotateCcw, Search, TerminalSquare, Trash2, X, type LucideIcon } from "lucide-react";
 import BrandIcon, { type BrandIconName } from "../BrandIcon";
-import { chordFromEvent, isModifierOnly, KEYBINDING_ACTIONS } from "../keybindings";
+import { chordFromEvent, isModifierOnly, modifierPrefix, setKeybindingCaptureActive } from "../keybindings";
 import type { AppSettings, CliLifecycleStatus, CliProfile, CliToolInfo, KeybindingAction, ShellProfile, TerminalThemeName } from "../types";
 import { DEFAULT_KEYBINDINGS } from "../types";
 import { getSettingsCopy } from "../i18n";
 import { terminalThemes } from "./themes";
+
+const KEYMAP_GROUPS: { id: "global" | "tabs" | "panes"; actions: KeybindingAction[] }[] = [
+  { id: "global", actions: ["quick-terminal", "command-palette", "open-settings"] },
+  { id: "tabs", actions: ["new-terminal"] },
+  { id: "panes", actions: ["split-right", "split-down", "pane-next", "pane-prev"] },
+];
+
+const KEYMAP_ORDER: KeybindingAction[] = KEYMAP_GROUPS.flatMap((group) => group.actions);
+
+const KEYBINDING_NAMES_EN: Record<KeybindingAction, string> = {
+  "quick-terminal": "Quick terminal",
+  "command-palette": "Command palette",
+  "open-settings": "Open settings",
+  "new-terminal": "New terminal",
+  "split-right": "Split right",
+  "split-down": "Split down",
+  "pane-next": "Focus next pane",
+  "pane-prev": "Focus previous pane",
+};
+
+function keycapChips(chord: string): ReactNode[] {
+  const labels = chord.split("+").filter((label) => label.length > 0);
+  const chips: ReactNode[] = [];
+  labels.forEach((label, index) => {
+    if (index > 0) chips.push(<i className="keycap-sep" key={`sep-${index}`} aria-label="+">+</i>);
+    chips.push(<kbd className="keycap" key={label}>{label}</kbd>);
+  });
+  return chips;
+}
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -27,6 +56,81 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
   const recordKeybinding = (action: KeybindingAction, chord: string) => update("keybindings", { ...settings.keybindings, [action]: chord });
   const resetKeybinding = (action: KeybindingAction) => update("keybindings", { ...settings.keybindings, [action]: DEFAULT_KEYBINDINGS[action] });
   const resetAllKeybindings = () => update("keybindings", { ...DEFAULT_KEYBINDINGS });
+  const [keymapQuery, setKeymapQuery] = useState("");
+  const [keymapCapture, setKeymapCapture] = useState<KeybindingAction | null>(null);
+  const [keymapCapturePreview, setKeymapCapturePreview] = useState("");
+  const keymapVisible = useMemo(() => {
+    const query = keymapQuery.trim().toLocaleLowerCase();
+    if (!query) return new Set(KEYMAP_ORDER);
+    return new Set(KEYMAP_ORDER.filter((action) => {
+      const haystack = `${copy.keybindingActions[action]} ${KEYBINDING_NAMES_EN[action]} ${settings.keybindings[action] ?? ""}`.toLocaleLowerCase();
+      return haystack.includes(query);
+    }));
+  }, [keymapQuery, settings.keybindings, copy]);
+  const keymapClash = useMemo(() => {
+    const rows = new Set<KeybindingAction>();
+    let note: string | null = null;
+    for (let a = 0; a < KEYMAP_ORDER.length; a += 1) {
+      const comboA = settings.keybindings[KEYMAP_ORDER[a]] ?? "";
+      if (!comboA) continue;
+      for (let b = a + 1; b < KEYMAP_ORDER.length; b += 1) {
+        const comboB = settings.keybindings[KEYMAP_ORDER[b]] ?? "";
+        if (!comboB || comboA.toLocaleLowerCase() !== comboB.toLocaleLowerCase()) continue;
+        rows.add(KEYMAP_ORDER[a]);
+        rows.add(KEYMAP_ORDER[b]);
+        if (!note) {
+          note = copy.keymapConflictNote
+            .replace("{combo}", comboA)
+            .replace("{a}", copy.keybindingActions[KEYMAP_ORDER[a]])
+            .replace("{b}", copy.keybindingActions[KEYMAP_ORDER[b]]);
+        }
+      }
+    }
+    return { rows, note };
+  }, [settings.keybindings, copy]);
+  useEffect(() => {
+    if (!keymapCapture) return;
+    setKeybindingCaptureActive(true);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" || (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey)) {
+        event.preventDefault();
+        event.stopPropagation();
+        setKeymapCapture(null);
+        setKeymapCapturePreview("");
+        return;
+      }
+      if (event.key === "Backspace") {
+        event.preventDefault();
+        event.stopPropagation();
+        setKeymapCapture(null);
+        setKeymapCapturePreview("");
+        resetKeybinding(keymapCapture);
+        return;
+      }
+      if (isModifierOnly(event)) {
+        event.preventDefault();
+        setKeymapCapturePreview(modifierPrefix(event));
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      recordKeybinding(keymapCapture, chordFromEvent(event));
+      setKeymapCapture(null);
+      setKeymapCapturePreview("");
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === "Control" || event.key === "Alt" || event.key === "Shift" || event.key === "Meta") setKeymapCapturePreview("");
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    return () => {
+      setKeybindingCaptureActive(false);
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+    };
+    // recordKeybinding/resetKeybinding 每次渲染都会重建，这里只需本次渲染的 settings 闭包。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keymapCapture, settings.keybindings]);
   const addProfile = () => {
     const name = newName.trim();
     const command = newCommand.trim();
@@ -192,25 +296,47 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
         </section>
           <div className="settings-group-divider" />
         <section id="settings-keybindings">
-          <h2>{copy.keybindings}</h2>
-          <p className="settings-hint">{copy.keybindingsHint}</p>
-          <div className="keybinding-list">
-            {KEYBINDING_ACTIONS.map((action) => (
-              <KeybindingRow
-                key={action}
-                action={action}
-                chord={settings.keybindings[action]}
-                label={copy.keybindingActions[action]}
-                hint={action === "quick-terminal" ? copy.quickTerminalGlobalHint : undefined}
-                copy={copy}
-                onRecord={recordKeybinding}
-                onReset={resetKeybinding}
-              />
-            ))}
+          <label className="keymap-search">
+            <Search size={14} />
+            <input value={keymapQuery} aria-label={copy.keymapSearchPlaceholder} placeholder={copy.keymapSearchPlaceholder} onChange={(event) => setKeymapQuery(event.target.value)} spellCheck={false} />
+            {keymapQuery && <button type="button" className="keymap-search-clear" onClick={() => setKeymapQuery("")}><X size={12} /></button>}
+          </label>
+          {keymapClash.note && (
+            <div className="keymap-clash" role="status">
+              <span className="keymap-clash-beam" />
+              <span className="keymap-clash-mark">!</span>
+              <span className="keymap-clash-copy">{keymapClash.note}</span>
+            </div>
+          )}
+          <div className="keymap-groups">
+            {KEYMAP_GROUPS.map((group) => {
+              const actions = group.actions.filter((action) => keymapVisible.has(action));
+              if (actions.length === 0) return null;
+              return (
+                <div className="keymap-group" key={group.id}>
+                  <h3 className="keymap-group-title">{copy.keymapGroups[group.id]}</h3>
+                  <div className="keymap-group-frame">
+                    {actions.map((action) => (
+                      <KeybindingRow
+                        key={action}
+                        action={action}
+                        chord={settings.keybindings[action]}
+                        label={copy.keybindingActions[action]}
+                        hint={action === "quick-terminal" ? copy.quickTerminalGlobalHint : undefined}
+                        copy={copy}
+                        clash={keymapClash.rows.has(action)}
+                        capturing={keymapCapture === action}
+                        capturePreview={keymapCapturePreview}
+                        onBegin={setKeymapCapture}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            {keymapVisible.size === 0 && <div className="keymap-empty">{copy.keymapNoMatches}</div>}
           </div>
-          <div className="keybinding-list-footer">
-            <button className="keybinding-reset" onClick={resetAllKeybindings}><RotateCcw size={12} />{copy.resetAllKeybindings}</button>
-          </div>
+          <p className="keymap-footer-hint">{copy.keymapFooterHint}</p>
         </section>
           </div>
         </div>
@@ -382,45 +508,48 @@ function FontPicker({ value, onChange, copy }: {
   );
 }
 
-function KeybindingRow({ action, chord, label, hint, copy, onRecord, onReset }: {
+function KeybindingRow({ action, chord, label, hint, copy, clash, capturing, capturePreview, onBegin }: {
   action: KeybindingAction;
   chord: string;
   label: string;
   hint?: string;
   copy: ReturnType<typeof getSettingsCopy>;
-  onRecord(action: KeybindingAction, chord: string): void;
-  onReset(action: KeybindingAction): void;
+  clash: boolean;
+  capturing: boolean;
+  capturePreview: string;
+  onBegin(action: KeybindingAction): void;
 }) {
-  const [recording, setRecording] = useState(false);
-  const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const begin = () => { setRecording(true); buttonRef.current?.focus(); };
-  const cancel = () => setRecording(false);
+  const customized = chord !== DEFAULT_KEYBINDINGS[action];
+  const bound = chord.length > 0;
+  const className = [
+    "keybinding-row",
+    clash ? "clash" : "",
+    capturing ? "capturing" : "",
+    customized ? "custom" : "",
+    bound ? "bound" : "unbound",
+  ].filter(Boolean).join(" ");
+  const value = capturing
+    ? (capturePreview ? `${capturePreview}…` : copy.keymapRecordingPlaceholder)
+    : bound ? chord : copy.keymapUnbound;
   return (
-    <div className="keybinding-row">
+    <div className={className} onClick={() => onBegin(action)}>
       <span className="keybinding-label"><strong>{label}</strong>{hint && <small>{hint}</small>}</span>
       <span className="keybinding-controls">
+        <span className="keymap-rebind-hint">{copy.keymapRebind}</span>
         <button
-          ref={buttonRef}
-          className={`keybinding-record${recording ? " recording" : ""}`}
-          onClick={begin}
-          onBlur={cancel}
-          onKeyDown={(event) => {
-            if (event.key === "Escape" || (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey)) {
-              event.preventDefault();
-              event.stopPropagation();
-              cancel();
-              return;
-            }
-            if (isModifierOnly(event.nativeEvent)) { event.preventDefault(); return; }
-            event.preventDefault();
-            event.stopPropagation();
-            setRecording(false);
-            onRecord(action, chordFromEvent(event.nativeEvent));
-          }}
+          type="button"
+          className={[
+            "keybinding-record",
+            clash ? "clash" : "",
+            capturing ? "recording" : "",
+            customized ? "custom" : "",
+            bound ? "bound" : "unbound",
+          ].filter(Boolean).join(" ")}
+          aria-label={capturing ? copy.keymapRecordingPlaceholder : bound ? chord : copy.keymapUnbound}
+          onClick={(event) => { event.stopPropagation(); onBegin(action); }}
         >
-          {recording ? copy.recordingKeybinding : <kbd>{chord}</kbd>}
+          {capturing || !bound ? value : keycapChips(chord)}
         </button>
-        <button className="keybinding-reset-one" title={copy.resetAllKeybindings} onClick={() => onReset(action)}><RotateCcw size={12} /></button>
       </span>
     </div>
   );

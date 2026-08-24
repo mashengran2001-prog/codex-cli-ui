@@ -198,6 +198,21 @@ try {
   await page.keyboard.press("Control+Alt+K");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).keybindings["command-palette"], "Ctrl+Alt+K");
   assert.equal(await paletteRow.getByText("Ctrl+Alt+K", { exact: true }).count(), 1);
+  // 按键映射页搜索：输入「新建」只剩新建终端一行
+  await page.getByLabel("搜索动作或按键…").fill("新建");
+  assert.equal(await page.locator(".keybinding-row").count(), 1);
+  assert.match(await page.locator(".keybinding-row").textContent(), /新建终端/);
+  await page.getByLabel("搜索动作或按键…").fill("");
+  // 冲突检测：命令面板改绑 Ctrl+Shift+T（与新建终端相同）→ 冲突条出现且两行 danger
+  await paletteRow.getByRole("button", { name: "Ctrl+Alt+K" }).click();
+  await page.keyboard.press("Control+Shift+T");
+  await page.waitForFunction(() => document.querySelectorAll(".keybinding-row.clash").length === 2);
+  assert.match(await page.locator(".keymap-clash").textContent(), /同时绑定了/);
+  // 捕获态按 Backspace 恢复默认绑定，冲突随之消失
+  await paletteRow.getByRole("button", { name: "Ctrl+Shift+T" }).click();
+  await page.keyboard.press("Backspace");
+  assert.equal((await page.evaluate(() => window.codex.getAppSettings())).keybindings["command-palette"], "Ctrl+Shift+P");
+  assert.equal(await page.locator(".keymap-clash").count(), 0);
 
   // 界面密度三档：选择紧凑并断言设置与根元素 data-density 同步
   await page.getByLabel("界面密度").selectOption("compact");

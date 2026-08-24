@@ -1045,21 +1045,45 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-toggle input:checked ~ i { background: var(--t-accent-soft); transition: background .3s ease; }
 .settings-toggle input:checked ~ i::after { background: var(--t-accent); transform: translateX(22px); }
 .settings-hint { margin: 0 0 10px; color: var(--t-muted); font-size: 9px; line-height: 1.5; }
-.keybinding-list { display: grid; gap: 5px; }
-.keybinding-row { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 10px; color: var(--t-text); font-size: 10.5px; }
+.keymap-search { display: flex; width: 100%; height: 34px; flex: 0 0 auto; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--t-border); border-radius: 8px; background: var(--t-panel); color: var(--t-muted); }
+.keymap-search:focus-within { border-color: var(--t-accent); box-shadow: 0 0 0 1px var(--t-ring); color: var(--t-text); }
+.keymap-search > svg { flex: 0 0 auto; }
+.keymap-search input { min-width: 0; height: 100%; flex: 1; padding: 0; border: 0; outline: 0; background: transparent; color: var(--t-text); font-size: 10.5px; }
+.keymap-search input::placeholder { color: var(--t-muted); }
+.keymap-search-clear { display: grid; width: 20px; height: 20px; flex: 0 0 auto; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--t-muted); cursor: pointer; }
+.keymap-search-clear:hover { background: var(--t-panel-2); color: var(--t-text); }
+.keymap-clash { display: flex; position: relative; min-height: 50px; align-items: center; gap: 10px; margin-top: 12px; padding: 0 12px 0 16px; }
+.keymap-clash-beam { position: absolute; top: 5px; bottom: 5px; left: 0; width: 3px; border-radius: 2px; background: color-mix(in srgb, var(--t-warning) 88%, transparent); }
+.keymap-clash-mark { display: grid; width: 16px; height: 16px; flex: 0 0 auto; place-items: center; border-radius: 8px; background: color-mix(in srgb, var(--t-warning) 15%, transparent); color: var(--t-warning); font-size: 10px; font-weight: 700; }
+.keymap-clash-copy { display: block; min-width: 0; color: var(--t-muted); font-size: 9.5px; line-height: 1.5; }
+.keymap-clash-copy::first-line { color: var(--t-warning); }
+.keymap-groups { display: grid; margin-top: 12px; }
+.keymap-group { display: grid; }
+.keymap-group + .keymap-group { margin-top: 32px; }
+.keymap-group-title { display: flex; height: 26px; align-items: center; margin: 0 0 16px; color: var(--t-text); font-size: 11px; font-weight: 400; }
+.keymap-group-frame { overflow: hidden; border: 1px solid var(--t-border); border-radius: 8px; background: var(--t-panel); }
+.keybinding-row { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 10px; padding: 0 16px; color: var(--t-text); font-size: 10.5px; cursor: pointer; }
+.keybinding-row:hover { background: color-mix(in srgb, var(--t-panel-2) 55%, transparent); }
+.keybinding-row.clash { background: color-mix(in srgb, var(--t-danger) 7%, transparent); }
+.keybinding-row.clash:hover { background: color-mix(in srgb, var(--t-danger) 12%, transparent); }
+.keybinding-row + .keybinding-row { border-top: 1px solid var(--t-border); }
 .keybinding-label { display: grid; min-width: 0; gap: 2px; }
 .keybinding-label strong { font-size: 10.5px; font-weight: 600; }
 .keybinding-label small { color: var(--t-muted); font-size: 8px; line-height: 1.35; }
-.keybinding-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
-.keybinding-record { display: inline-flex; height: 29px; min-width: 136px; align-items: center; justify-content: center; padding: 0 10px; border: 1px solid var(--t-border); border-radius: 4px; outline: 0; background: var(--t-panel); color: var(--t-muted); font-size: 10px; cursor: pointer; }
-.keybinding-record:hover { border-color: var(--t-accent); color: var(--t-text); }
-.keybinding-record.recording { border-color: var(--t-accent); background: var(--t-accent-soft); color: var(--t-accent); }
-.keybinding-record kbd { color: var(--t-text); font-family: "Cascadia Code", Consolas, monospace; font-size: 9.5px; }
-.keybinding-reset-one { display: grid; width: 25px; height: 25px; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--t-muted); cursor: pointer; }
-.keybinding-reset-one:hover { background: var(--t-panel-2); color: var(--t-danger); }
-.keybinding-list-footer { display: flex; justify-content: flex-end; margin-top: 10px; }
-.keybinding-reset { display: inline-flex; height: 28px; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--t-border); border-radius: 4px; background: var(--t-panel); color: var(--t-text); font-size: 9.5px; cursor: pointer; }
-.keybinding-reset:hover { border-color: var(--t-accent); color: var(--t-accent); }
+.keybinding-controls { display: flex; position: relative; flex: 0 0 auto; align-items: center; gap: 8px; }
+.keymap-rebind-hint { position: absolute; top: 50%; right: calc(100% + 8px); white-space: nowrap; opacity: 0; color: var(--t-accent); font-size: 9px; pointer-events: none; transform: translateY(-50%); transition: opacity .12s; }
+.keybinding-row:hover .keymap-rebind-hint { opacity: 1; }
+.keybinding-record { display: inline-flex; min-height: 20px; align-items: center; gap: 4px; padding: 0 7px; border: 0; border-radius: 4px; outline: 0; background: var(--t-panel); color: var(--t-muted); font-family: "Cascadia Code", Consolas, monospace; font-size: 9.5px; cursor: pointer; box-shadow: 0 1px 0 0 var(--t-border); }
+.keybinding-record:hover { color: var(--t-text); }
+.keybinding-record.custom { color: var(--t-accent); }
+.keybinding-record.clash { background: color-mix(in srgb, var(--t-danger) 13%, var(--t-panel)); color: var(--t-danger); box-shadow: 0 1px 0 0 color-mix(in srgb, var(--t-danger) 45%, transparent); }
+.keybinding-record.unbound { color: color-mix(in srgb, var(--t-muted) 72%, transparent); }
+.keybinding-record.recording { background: var(--t-accent-soft); color: var(--t-accent); box-shadow: 0 0 0 1px var(--t-accent); }
+.keycap { font: inherit; }
+.keycap-sep { display: inline-block; width: 0; overflow: hidden; font-size: 0; }
+.keymap-empty { display: flex; min-height: 72px; align-items: center; justify-content: center; color: var(--t-muted); font-size: 10px; }
+.keymap-footer-hint { margin: 14px 0 0; color: var(--t-muted); font-size: 9px; line-height: 1.5; }
+.terminal-workspace[data-density="compact"] .keybinding-row { min-height: 38px; }
 .cli-lifecycle-setting { display: grid; gap: 8px; }
 .cli-lifecycle-heading { display: flex; min-width: 0; align-items: center; gap: 8px; color: var(--t-text); }
 .cli-lifecycle-heading > span { display: grid; min-width: 0; gap: 2px; }
