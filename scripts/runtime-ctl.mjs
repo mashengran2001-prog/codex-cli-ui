@@ -84,6 +84,7 @@ function usage() {
   process.stdout.write("  codex-ui-ctl snapshot [--pretty]\n");
   process.stdout.write("  codex-ui-ctl orchestrate --spec <json> | --file <path> [--pretty]\n");
   process.stdout.write("  codex-ui-ctl tab.new [--cwd <dir>] [--pretty]\n");
+  process.stdout.write("  codex-ui-ctl window.create [--pretty]\n");
   process.stdout.write("  codex-ui-ctl pane.focus --pane <id> [--pretty]\n");
   process.stdout.write("  codex-ui-ctl pane.read --pane <id> [--lines <n>] [--pretty]\n");
   process.stdout.write("  codex-ui-ctl pane.prompt --pane <id> --text <text> [--no-submit] [--pretty]\n");
@@ -91,8 +92,8 @@ function usage() {
   process.stdout.write("  codex-ui-ctl pane.split --pane <id> --direction <columns|rows> [--pretty]\n");
   process.stdout.write("  codex-ui-ctl pane.procs --pane <id> [--pretty]\n");
   process.stdout.write("  codex-ui-ctl pane.send_key --pane <id> --key <key> [--control] [--alt] [--shift] [--repeat <n>] [--pretty]\n");
-  process.stdout.write("  codex-ui-ctl pane.wait --pane <id> --state <state> [--after-seq <n>] [--timeout-ms <n>] [--pretty]\n");  process.stdout.write("  codex-ui-ctl events.subscribe [--since-seq <n>] [--timeout-ms <n>] [--pretty]\n");
-  process.stdout.write("  codex-ui-ctl agents.list [--pretty]\n");
+  process.stdout.write("  codex-ui-ctl pane.wait --pane <id> --state <state> [--after-seq <n>] [--timeout-ms <n>] [--pretty]\n");  process.stdout.write("  codex-ui-ctl events.subscribe [--since-revision <n>] [--timeout-ms <n>] [--pretty]\n");
+  process.stdout.write("  codex-ui-ctl agents.list [--window <id>] [--pretty]\n");
   process.stdout.write("  codex-ui-ctl agent.get --agent <name-or-id> [--generation <n>] [--pretty]\n");
   process.stdout.write("  codex-ui-ctl agent.start --name <name> --kind <claude|codex|...> [--cwd <dir> | --pane <id>] [--resume-session-id <id>] [--pretty]\n");
   process.stdout.write("  codex-ui-ctl agent.prompt --agent <name-or-id> --text <text> [--generation <n>] [--no-submit] [--pretty]\n");
@@ -168,6 +169,9 @@ async function main() {
       method = "runtime.orchestrate";
       break;
     }
+    case "window.create":
+      method = "window.create";
+      break;
     case "tab.new":
       method = "tab.new";
       if (flags.cwd) params = { cwd: flags.cwd };
@@ -222,10 +226,12 @@ async function main() {
     case "events.subscribe":
       method = "events.subscribe";
       params = { timeout_ms: timeoutMs };
-      if (flags["since-seq"] !== undefined) params.since_seq = Number(flags["since-seq"]);
+      if (flags["since-revision"] !== undefined) params.since_revision = Number(flags["since-revision"]);
+      else if (flags["since-seq"] !== undefined) params.since_seq = Number(flags["since-seq"]);
       break;
     case "agents.list":
       method = "agents.list";
+      if (flags.window !== undefined) params = { window_id: Number(flags.window) };
       break;
     case "agent.get":
       method = "agent.get";

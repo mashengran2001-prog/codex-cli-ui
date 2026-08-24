@@ -705,6 +705,10 @@
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 86400000
+                  },
+                  "since_revision": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 }
               }

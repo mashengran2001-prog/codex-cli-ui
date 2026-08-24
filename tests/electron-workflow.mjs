@@ -170,6 +170,15 @@ try {
   const runtimeSnapshot = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "snapshot", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
   const runtimePane = runtimeSnapshot.result.panes.find((pane) => pane.status === "running");
   assert.ok(runtimePane && runtimePane.pane_id, "runtime snapshot should expose a running pane");
+  // 修订号语义（对标 Nebula RuntimeHub::publish）：语义状态未变化时重复快照保持同一 revision
+  const runtimeSnapshotRepeat = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "snapshot", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+  assert.equal(runtimeSnapshotRepeat.result.revision, runtimeSnapshot.result.revision);
+  // window.create 不假装成功：单窗口 runtime 返回 runtime_unavailable
+  const windowCreateRun = spawnSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "window.create", "--endpoint", runtimeEndpointPath], { encoding: "utf8" });
+  assert.equal(windowCreateRun.status, 1, windowCreateRun.stderr);
+  const windowCreate = JSON.parse(windowCreateRun.stdout);
+  assert.equal(windowCreate.ok, false, JSON.stringify(windowCreate.error));
+  assert.equal(windowCreate.error.code, "runtime_unavailable");
   const processTree = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "pane.procs", "--pane", runtimePane.pane_id, "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
   assert.equal(processTree.ok, true, JSON.stringify(processTree.error));
   assert.equal(processTree.result.pane_id, runtimePane.pane_id);
@@ -194,6 +203,8 @@ try {
   const agentsList = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "agents.list", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
   assert.equal(agentsList.ok, true, JSON.stringify(agentsList.error));
   assert.ok(agentsList.result.agents.some((agent) => agent.name === "runtime-agent"));
+  // 新 Agent pane 是语义状态变化：revision 必须大于初始快照
+  assert.ok(agentsList.result.revision > runtimeSnapshot.result.revision, `agents.list revision ${agentsList.result.revision} should exceed initial ${runtimeSnapshot.result.revision}`);
   const agentGet = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "agent.get", "--agent", "runtime-agent", "--generation", agentGeneration, "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
   assert.equal(agentGet.ok, true, JSON.stringify(agentGet.error));
   assert.equal(agentGet.result.agent.name, "runtime-agent");

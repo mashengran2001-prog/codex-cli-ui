@@ -245,6 +245,7 @@ interface ManagedAgent {
 const managedAgents = new Map<string, ManagedAgent>();
 let agentGeneration = 0;
 let runtimeRevision = 0;
+let runtimeSnapshotFingerprint: string | undefined;
 
 function agentIdFor(name: string, paneId: string): string {
   return `agent-${name}-${paneId.slice(0, 8)}`;
@@ -307,6 +308,28 @@ function listAgentViews(callbacks: RuntimeControlCallbacks, windowId?: number): 
     views.push(agentView(fallback, pane));
   }
   return views;
+}
+
+// Canonical snapshot publishing, ported from Nebula RuntimeHub::publish.
+// The revision advances only when the projected semantic state changes;
+// repeated snapshots of unchanged state keep the previous revision and do
+// not flood subscribers with identical snapshots.
+function canonicalSnapshot(callbacks: RuntimeControlCallbacks): { window_id: number; revision: number; panes: PaneSnapshot[]; pane_count: number; pane_lifecycles: RuntimeLifecycleEvent[] } {
+  const panes = callbacks.listPanes();
+  const pane_lifecycles = callbacks.lifecycleEvents?.(0) ?? [];
+  const fingerprint = JSON.stringify({
+    panes: panes.map((pane) => [
+      pane.pane_id, pane.window_id, pane.title, pane.cwd, pane.shell, pane.kind,
+      pane.activity, pane.status, pane.exit_code ?? null,
+      pane.ai_source ?? null, pane.ai_session_id ?? null, pane.ai_state ?? null, pane.state_change_seq ?? null,
+    ]),
+    pane_lifecycles: pane_lifecycles.map((event) => [event.sequence, event.window_id, event.pane_id, event.event, event.exit_code ?? null]),
+  });
+  if (fingerprint !== runtimeSnapshotFingerprint) {
+    runtimeRevision += 1;
+    runtimeSnapshotFingerprint = fingerprint;
+  }
+  return { window_id: callbacks.windowId(), revision: runtimeRevision, panes, pane_count: panes.length, pane_lifecycles };
 }
 // ---- orchestrate (ported from orchestrate.rs) ----
 
@@ -710,13 +733,10 @@ async function dispatch(request: ApiRequest, callbacks: RuntimeControlCallbacks)
           ],
           wait_states: ["idle", "running", "waiting_input", "attention", "finished", "failed", "settled"],
         });
-      case "runtime.snapshot": {
-        const panes = callbacks.listPanes();
-        return responseFor(request, true, { window_id: callbacks.windowId(), revision: ++runtimeRevision, panes, pane_count: panes.length, pane_lifecycles: callbacks.lifecycleEvents?.(0) ?? [] });
-      }
+      case "runtime.snapshot":
+        return responseFor(request, true, canonicalSnapshot(callbacks));
       case "window.create":
-        callbacks.focusWindow?.();
-        return responseFor(request, true, { window_id: callbacks.windowId(), created: false, reused: true });
+        throw new ApiErrorImpl("runtime_unavailable", "the runtime currently owns one workspace window; window.create is unavailable");
       case "window.focus":
         callbacks.focusWindow?.();
         return responseFor(request, true, { window_id: callbacks.windowId() });
@@ -725,19 +745,24 @@ async function dispatch(request: ApiRequest, callbacks: RuntimeControlCallbacks)
         return responseFor(request, true, { events: callbacks.lifecycleEvents?.(since) ?? [] });
       }
       case "events.subscribe": {
-        const since = optionalNumber(params.since_seq, "since_seq", 0, Number.MAX_SAFE_INTEGER);
+        const sinceSeq = optionalNumber(params.since_seq, "since_seq", 0, Number.MAX_SAFE_INTEGER);
+        const sinceRevision = optionalNumber(params.since_revision, "since_revision", 0, Number.MAX_SAFE_INTEGER);
         const timeoutMs = validateTimeout(params.timeout_ms ?? 30_000, "timeout_ms");
         const deadline = Date.now() + timeoutMs;
-        let events = callbacks.lifecycleEvents?.(since) ?? [];
-        while (!events.length && Date.now() < deadline) {
+        const baselineRevision = sinceRevision ?? 0;
+        let snapshot = canonicalSnapshot(callbacks);
+        let events = callbacks.lifecycleEvents?.(sinceSeq) ?? [];
+        while (events.length === 0 && snapshot.revision <= baselineRevision && Date.now() < deadline) {
           await new Promise((resolveWait) => setTimeout(resolveWait, 50));
-          events = callbacks.lifecycleEvents?.(since) ?? [];
+          snapshot = canonicalSnapshot(callbacks);
+          events = callbacks.lifecycleEvents?.(sinceSeq) ?? [];
         }
-        return responseFor(request, true, { events, next_seq: events.at(-1)?.sequence ?? since ?? 0, timed_out: events.length === 0 });
+        return responseFor(request, true, { revision: snapshot.revision, events, next_seq: events.at(-1)?.sequence ?? sinceSeq ?? 0, timed_out: events.length === 0 && snapshot.revision <= baselineRevision });
       }
       case "agents.list": {
         const windowId = optionalNumber(params.window_id, "window_id", 1, 0xffffffff);
-        return responseFor(request, true, { revision: ++runtimeRevision, agents: listAgentViews(callbacks, windowId) });
+        const snapshot = canonicalSnapshot(callbacks);
+        return responseFor(request, true, { revision: snapshot.revision, agents: listAgentViews(callbacks, windowId) });
       }
       case "agent.get": {
         const selector = stringValue(params.agent, "agent");
