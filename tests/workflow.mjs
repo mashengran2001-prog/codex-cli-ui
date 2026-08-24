@@ -37,12 +37,17 @@ try {
   await page.locator(".terminal-settings").waitFor();
   const initialTabOptions = await page.locator('select[aria-label="标签栏位置"] option').allTextContents();
   assert.deepEqual(initialTabOptions, ["侧边", "顶部"]);
+  // 设置是单例标签：侧边标签条先出现设置行，切到顶部后顶部标签条仍有同一设置标签
+  assert.equal(await page.locator('.terminal-tab[data-tab-kind="settings"]').count(), 1);
   await page.getByLabel("标签栏位置").selectOption("top");
-  await page.getByRole("button", { name: "返回工作台" }).click();
+  await page.locator('.terminal-top-tab[data-tab-kind="settings"]').waitFor();
+  assert.equal(await page.locator('.terminal-top-tab[data-tab-kind="settings"]').count(), 1);
+  await page.locator(".terminal-top-tab[data-session-id] .terminal-tab-main").first().click();
   await page.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 1 && document.querySelectorAll(".terminal-side-tabs").length === 0);
   await page.locator(".terminal-top-tabs").waitFor();
   await page.locator(".xterm-screen").waitFor();
-  assert.match(await page.locator(".terminal-top-tab").textContent(), /atlas-workspace/);
+  // 设置单例标签仍保留在顶部标签条，会话标签断言需限定 data-session-id
+  assert.match(await page.locator(".terminal-top-tab[data-session-id]").first().textContent(), /atlas-workspace/);
   assert.match(await page.locator(".cli-tool-list").textContent(), /Claude Code/);
   await page.evaluate(() => {
     const sessionId = document.querySelector(".terminal-pane-leaf")?.getAttribute("data-session-id") ?? window.__mock.terminalSessions[0].id;
@@ -160,19 +165,30 @@ try {
   await page.keyboard.press("Escape");
   await moreButton.click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
+  // 设置单例标签：只存在一个；点击终端标签后保留但非激活，点设置标签再回来
+  assert.equal(await page.locator('.terminal-top-tab[data-tab-kind="settings"]').count(), 1);
+  assert.equal(await page.locator('.terminal-top-tab[data-tab-kind="settings"].active').count(), 1);
+  await page.locator(".terminal-top-tab[data-session-id] .terminal-tab-main").first().click();
+  await page.locator(".xterm-screen").waitFor();
+  assert.equal(await page.locator('.terminal-top-tab[data-tab-kind="settings"]').count(), 1);
+  assert.equal(await page.locator('.terminal-top-tab[data-tab-kind="settings"].active').count(), 0);
+  await page.locator('.terminal-top-tab[data-tab-kind="settings"] .terminal-tab-main').click();
+  await page.locator(".terminal-settings").waitFor();
+  assert.equal(await page.locator('.terminal-top-tab[data-tab-kind="settings"].active').count(), 1);
   assert.equal(await page.locator(".terminal-side-panel").count(), 0);
   assert.equal(await page.getByRole("button", { name: "向右拆分" }).count(), 0);
   assert.equal(await page.getByRole("button", { name: "文件", exact: true }).count(), 0);
   assert.equal(await page.locator("html").getAttribute("lang"), "zh-CN");
   assert.equal(await page.getByLabel("光标形状").inputValue(), "bar");
   await page.getByLabel("界面语言").selectOption("en-US");
-  await page.getByRole("heading", { name: "CLI Workbench Settings" }).waitFor();
+  // 顶部标签模式下标签条即标题，无“CLI Workbench Settings”大标题；改断设置标签标题
+  await page.getByTitle("Settings", { exact: true }).waitFor();
   assert.equal(await page.locator("html").getAttribute("lang"), "en-US");
   assert.equal(await page.getByLabel("Cursor shape").inputValue(), "bar");
   assert.equal(await page.getByRole("tab", { name: "Chat" }).count(), 0);
   await page.getByRole("heading", { name: "Appearance" }).waitFor();
   await page.getByLabel("Interface language").selectOption("zh-CN");
-  await page.getByRole("heading", { name: "CLI 工作台设置" }).waitFor();
+  await page.getByTitle("设置", { exact: true }).waitFor();
   assert.equal(await page.getByLabel("终端铃声模式").inputValue(), "both");
   assert.equal(await page.getByLabel("加载 PowerShell 配置").isChecked(), false);
   assert.equal(await page.getByLabel("CLI 活动同步").isChecked(), false);
@@ -241,7 +257,8 @@ try {
   await fontOption.click();
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).fontFamily, "JetBrains Mono");
   assert.match(await page.getByRole("button", { name: "字体族" }).textContent(), /JetBrains Mono/);
-  await page.getByRole("button", { name: "返回工作台" }).click();
+  await page.locator('.terminal-top-tab[data-tab-kind="settings"] .terminal-tab-close').click();
+  await page.locator(".xterm-screen").waitFor();
 
   // 弹窗补全：输入命令后弹出候选列表；Tab 接受、Esc 关闭
   await page.locator(".command-dock input").fill("npm run");
@@ -262,9 +279,12 @@ try {
   // 恢复默认补全样式与字符宽度，避免影响后续用例
   await page.getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
+  // 再次打开仍是同一个单例标签
+  assert.equal(await page.locator('.terminal-top-tab[data-tab-kind="settings"]').count(), 1);
   await page.getByLabel("补全样式").selectOption("inline");
   await page.getByLabel("字符宽度").selectOption("compact");
-  await page.getByRole("button", { name: "返回工作台" }).click();
+  await page.locator('.terminal-top-tab[data-tab-kind="settings"] .terminal-tab-close').click();
+  await page.locator(".xterm-screen").waitFor();
 
   // 拖拽标签到分屏左缘：dock 为左右分屏并持久化分屏树
   const beforeDockTabs = await page.locator(".terminal-top-tab").count();
@@ -550,13 +570,13 @@ try {
   await page.locator(".terminal-settings").waitFor();
   await page.getByLabel("标签栏位置").selectOption("top");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).tabPosition, "top");
-  await page.getByRole("button", { name: "返回工作台" }).click();
+  await page.locator(".terminal-top-tab[data-session-id] .terminal-tab-main").first().click();
   await page.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 1 && document.querySelectorAll(".terminal-side-tabs").length === 0);
   await page.getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
   await page.getByLabel("标签栏位置").selectOption("side");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).tabPosition, "side");
-  await page.getByRole("button", { name: "返回工作台" }).click();
+  await page.locator(".terminal-tab[data-session-id] .terminal-tab-main").first().click();
   await page.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 0 && document.querySelectorAll(".terminal-side-tabs").length === 1);
   const sideShellButton = page.locator(".side-heading-actions").getByTitle("选择终端");
   const sideShellBox = await sideShellButton.boundingBox();
@@ -581,10 +601,10 @@ try {
   await page.getByLabel("不走代理的地址").fill("");
 
   // 铃声四模式：声音-only 时 bell 事件不闪烁；闪烁-only 时闪烁；最后恢复 both
-  // 设置页打开时会隐藏终端面板，因此先返回工作台再触发 bell，避免工具栏不可见。
+  // 设置页打开时会隐藏终端面板，因此先关闭设置标签再触发 bell，避免工具栏不可见。
   await page.getByLabel("终端铃声模式").selectOption("sound");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).bellMode, "sound");
-  await page.getByRole("button", { name: "返回工作台" }).click();
+  await page.locator('.terminal-top-tab[data-tab-kind="settings"] .terminal-tab-close').click();
   await page.locator(".terminal-pane-leaf").waitFor();
   await page.waitForTimeout(150);
   await page.evaluate(() => {
@@ -598,7 +618,7 @@ try {
   await page.locator(".terminal-settings").waitFor();
   await page.getByLabel("终端铃声模式").selectOption("flash");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).bellMode, "flash");
-  await page.getByRole("button", { name: "返回工作台" }).click();
+  await page.locator('.terminal-top-tab[data-tab-kind="settings"] .terminal-tab-close').click();
   await page.locator(".terminal-pane-leaf").waitFor();
   await page.waitForTimeout(150);
   await page.evaluate(() => {
@@ -620,7 +640,7 @@ try {
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).backgroundColor, undefined);
   await page.locator(".hsv-picker").nth(1).locator("input").fill("#336699");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).accentColor, "#336699");
-  await page.getByRole("button", { name: "返回工作台" }).click();
+  await page.locator('.terminal-top-tab[data-tab-kind="settings"] .terminal-tab-close').click();
 
   // SSH 设置区：58px 行、两击删除 + 8 秒撤销、端口 5 位过滤、私钥列表
   await page.getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
@@ -648,7 +668,7 @@ try {
   await sshModal.getByRole("button", { name: "添加私钥" }).click();
   assert.equal(await sshModal.locator(".ssh-key-row").count(), 2);
   await sshModal.getByTitle("关闭").click();
-  await page.getByRole("button", { name: "返回工作台" }).click();
+  await page.locator('.terminal-top-tab[data-tab-kind="settings"] .terminal-tab-close').click();
   await context.close();
   console.log("workflow: chat, Nebula terminal, drawers, launcher, overflow, SVN, split restore, SSH settings, and WSL checks passed");
 } finally {

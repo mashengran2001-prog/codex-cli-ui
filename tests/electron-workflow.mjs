@@ -79,7 +79,8 @@ try {
   await window.getByTitle("CLI 工具设置").click();
   await window.locator(".terminal-settings").waitFor();
   await window.getByLabel("标签栏位置").selectOption("top");
-  await window.getByRole("button", { name: "返回工作台" }).click();
+  await window.locator('.terminal-top-tab[data-tab-kind="settings"]').waitFor();
+  await window.locator(".terminal-top-tab[data-session-id] .terminal-tab-main").first().click();
   await window.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 1 && document.querySelectorAll(".terminal-side-tabs").length === 0);
   await window.locator(".xterm-helper-textarea").waitFor({ timeout: 15_000 });
   await window.locator(".xterm-helper-textarea").focus();
@@ -115,7 +116,7 @@ try {
   await window.getByLabel("代理地址").fill("http://127.0.0.1:7890");
   await window.getByLabel("不走代理的地址").fill("localhost,127.0.0.1");
   await window.waitForFunction(async () => (await window.codex.getAppSettings()).proxyUrl === "http://127.0.0.1:7890", undefined, { timeout: 15_000 });
-  await window.getByRole("button", { name: "返回工作台" }).click();
+  await window.locator('.terminal-top-tab[data-tab-kind="settings"] .terminal-tab-close').click();
   const proxySessionCount = await window.evaluate(async () => (await window.codex.listTerminals()).length);
   await window.getByTitle("新建终端").first().click();
   await window.waitForFunction((count) => (async () => (await window.codex.listTerminals()).length === count + 1)(), proxySessionCount, { timeout: 15_000 });

@@ -51,7 +51,8 @@ try {
   await window.getByTitle("CLI 工具设置").click();
   await window.locator(".terminal-settings").waitFor();
   await window.getByLabel("标签栏位置").selectOption("top");
-  await window.getByRole("button", { name: "返回工作台" }).click();
+  await window.locator('.terminal-top-tab[data-tab-kind="settings"]').waitFor();
+  await window.locator(".terminal-top-tab[data-session-id] .terminal-tab-main").first().click();
   await window.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 1);
   await window.locator(".xterm-screen").waitFor({ timeout: 15_000 });
   const titlebarMetrics = await window.evaluate(() => {

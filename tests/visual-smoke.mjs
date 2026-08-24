@@ -53,7 +53,8 @@ try {
   await desktop.page.getByTitle("CLI 工具设置").click();
   await desktop.page.locator(".terminal-settings").waitFor();
   await desktop.page.getByLabel("标签栏位置").selectOption("top");
-  await desktop.page.getByRole("button", { name: "返回工作台" }).click();
+  await desktop.page.locator('.terminal-top-tab[data-tab-kind="settings"]').waitFor();
+  await desktop.page.locator(".terminal-top-tab[data-session-id] .terminal-tab-main").first().click();
   await desktop.page.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 1 && document.querySelectorAll(".terminal-side-tabs").length === 0);
   await desktop.page.getByTitle("更多操作").click();
   await desktop.page.screenshot({ path: join(artifacts, "codex-ui-more-menu.png"), fullPage: true });
@@ -173,7 +174,8 @@ try {
   const tabPositionOptionsCompact = await compact.page.locator('select[aria-label="标签栏位置"] option').allTextContents();
   assert.deepEqual(tabPositionOptionsCompact, ["侧边", "顶部"]);
   await compact.page.getByLabel("标签栏位置").selectOption("top");
-  await compact.page.getByRole("button", { name: "返回工作台" }).click();
+  await compact.page.locator('.terminal-top-tab[data-tab-kind="settings"]').waitFor();
+  await compact.page.locator(".terminal-top-tab[data-session-id] .terminal-tab-main").first().click();
   await compact.page.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 1 && document.querySelectorAll(".terminal-side-tabs").length === 0);
   await compact.page.getByRole("button", { name: "文件", exact: true }).click();
   await compact.page.getByText("README.md").waitFor();
