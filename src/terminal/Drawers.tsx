@@ -174,12 +174,14 @@ export function DirectoriesDrawer({ onClose, onNewTerminal, onCd, onError }: {
       <label className="drawer-search"><Search size={13} /><input value={query} placeholder={copy.search} onChange={(event) => setQuery(event.target.value)} /></label>
       <div className="file-list">
         {visibleEntries.map((entry) => <div className="file-row directories-row" key={entry.path} title={entry.path}>
-          <span className={`file-kind ${entry.pinned ? "pinned" : "directory"}`}>{entry.pinned ? <Pin size={13} /> : <Folder size={14} />}</span>
+          <span className={`file-kind ${entry.source === "wsl" ? "wsl" : entry.pinned ? "pinned" : "directory"}`}>{entry.source === "wsl" ? <TerminalSquare size={13} /> : entry.pinned ? <Pin size={13} /> : <Folder size={14} />}</span>
           <button className="directories-jump" title={copy.jump} onClick={() => onCd(entry.path)}><strong>{baseName(entry.path)}</strong><small>{entry.path}</small></button>
           <span className="drawer-row-actions">
             <button title={copy.terminalHere} onClick={() => onNewTerminal(entry.path)}><TerminalSquare size={12} /></button>
-            <button title={entry.pinned ? copy.unpin : copy.pin} onClick={() => void update(() => entry.pinned ? window.codex.unpinDirectory(entry.path) : window.codex.pinDirectory(entry.path))}>{entry.pinned ? <PinOff size={12} /> : <Pin size={12} />}</button>
-            <button title={copy.remove} onClick={() => void update(() => window.codex.removeDirectory(entry.path))}><Trash2 size={12} /></button>
+            {entry.source !== "wsl" && <>
+              <button title={entry.pinned ? copy.unpin : copy.pin} onClick={() => void update(() => entry.pinned ? window.codex.unpinDirectory(entry.path) : window.codex.pinDirectory(entry.path))}>{entry.pinned ? <PinOff size={12} /> : <Pin size={12} />}</button>
+              <button title={copy.remove} onClick={() => void update(() => window.codex.removeDirectory(entry.path))}><Trash2 size={12} /></button>
+            </>}
           </span>
         </div>)}
         {!loading && visibleEntries.length === 0 && <div className="drawer-empty">{copy.empty}</div>}

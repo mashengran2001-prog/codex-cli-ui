@@ -59,7 +59,7 @@ import { DeepSeekProvider } from "./deepseek-provider";
 import { CliLifecycleBridge, type CliLifecycleEvent } from "./cli-lifecycle";
 import { ProviderRegistry, type AgentProvider, type ProviderRunContext } from "./provider-registry";
 import { enumerateSystemFonts } from "./system-fonts";
-import { terminalShellArguments, terminalTitleFromPath } from "./terminal-utils";
+import { terminalShellArguments, terminalTitleFromPath, wslQuickDirectoryEntries } from "./terminal-utils";
 import {
   parseSvnRevision,
   parseSvnStatus,
@@ -831,6 +831,7 @@ function loadDirectoryHistory(): DirectoryEntry[] {
 }
 
 let directoryHistory: DirectoryEntry[] = loadDirectoryHistory();
+let wslDistroNames: string[] = [];
 const lastDirectoryRecord = new Map<string, { path: string; at: number }>();
 
 function recordSessionDirectory(session: TerminalSession) {
@@ -881,15 +882,25 @@ function recordDirectoryPath(path: string) {
   saveDirectoryHistory();
 }
 
+function isWslQuickRoot(path: string) {
+  const lower = path.replace(/[\\/]+$/, "").toLowerCase();
+  return wslDistroNames.some((name) => lower === `\\\\wsl.localhost\\${name.toLowerCase()}` || lower === `\\\\wsl$\\${name.toLowerCase()}`);
+}
+
 function listDirectories(): DirectoryEntry[] {
   const now = Date.now();
-  return directoryHistory
-    .filter((entry) => isDirectory(entry.path))
-    .map((entry) => ({ ...entry, score: directoryScore(entry, now) }))
-    .sort((left, right) => (Number(right.pinned) - Number(left.pinned)) || (right.score - left.score) || left.path.localeCompare(right.path));
+  const quick = wslQuickDirectoryEntries(wslDistroNames);
+  const quickPaths = new Set(quick.map((entry) => entry.path.toLowerCase()));
+  return [
+    ...quick,
+    ...directoryHistory
+      .filter((entry) => !quickPaths.has(entry.path.toLowerCase()) && isDirectory(entry.path))
+      .map((entry) => ({ ...entry, score: directoryScore(entry, now) })),
+  ].sort((left, right) => (Number(right.pinned) - Number(left.pinned)) || (right.score - left.score) || left.path.localeCompare(right.path));
 }
 
 function updateDirectoryPin(path: string, pinned: boolean) {
+  if (isWslQuickRoot(path)) return listDirectories();
   const entry = directoryHistory.find((candidate) => normalizePath(candidate.path) === normalizePath(path));
   if (entry) entry.pinned = pinned;
   else if (pinned && isDirectory(path)) {
@@ -901,6 +912,7 @@ function updateDirectoryPin(path: string, pinned: boolean) {
 }
 
 function removeDirectoryEntry(path: string) {
+  if (isWslQuickRoot(path)) return listDirectories();
   directoryHistory = directoryHistory.filter((entry) => normalizePath(entry.path) !== normalizePath(path));
   saveDirectoryHistory();
   return listDirectories();
@@ -1237,7 +1249,9 @@ async function detectTerminalShells() {
     const wsl = join(systemRoot, "System32", "wsl.exe");
     if (existsSync(wsl)) {
       void execFileText(wsl, ["--list", "--quiet"]).then(({ stdout }) => {
-        const wslProfiles = stdout.replaceAll("\0", "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((distro) => ({
+        const distroNames = stdout.replaceAll("\0", "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        wslDistroNames = distroNames;
+        const wslProfiles = distroNames.map((distro) => ({
           id: `wsl:${Buffer.from(distro).toString("base64url")}`,
           label: distro,
           detail: "WSL",

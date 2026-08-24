@@ -365,6 +365,8 @@ export interface DirectoryEntry {
   lastAccessed: number;
   pinned: boolean;
   score: number;
+  /** "wsl" = WSL 发行版快捷目录（对标 Nebula 目录选择器侧栏钉入）。 */
+  source?: "wsl";
 }
 
 export interface GitStatusEntry {

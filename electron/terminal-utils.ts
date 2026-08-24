@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import type { ShellProfile } from "../src/types";
+import type { DirectoryEntry, ShellProfile } from "../src/types";
 
 interface LaunchShellProfile extends Pick<ShellProfile, "id" | "kind"> {
   args: string[];
@@ -24,4 +24,17 @@ export function terminalShellArguments(profile: LaunchShellProfile, cwd: string,
 
 export function terminalTitleFromPath(cwd: string) {
   return basename(cwd) || cwd.replace(/[\\/]+$/, "") || "Terminal";
+}
+
+/** WSL 发行版钉进目录快捷列表（对标 Nebula 原生目录选择器侧栏的钉入）。
+ * 始终保持 pinned 并在 pinned 组内按发行版顺序置顶。 */
+export function wslQuickDirectoryEntries(distroNames: string[]): DirectoryEntry[] {
+  return distroNames.map((name, index) => ({
+    path: `\\\\wsl.localhost\\${name}`,
+    rank: 0,
+    lastAccessed: 0,
+    pinned: true,
+    score: Number.MAX_SAFE_INTEGER - index,
+    source: "wsl",
+  }));
 }

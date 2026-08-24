@@ -586,6 +586,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .file-row:hover { background: #e2e2dc; }
 .file-kind { display: grid; width: 17px; flex: 0 0 auto; place-items: center; color: #777770; }
 .file-kind.directory { color: #68806e; }
+.file-kind.wsl { color: #3d6f8b; }
 .file-row strong { min-width: 0; flex: 1; overflow: hidden; color: #51514b; font-size: 9.5px; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
 .file-row small { flex: 0 0 auto; color: #999991; font-size: 7.5px; }
 .file-row.directories-row { padding: 0 4px 0 6px; }
