@@ -162,6 +162,48 @@ try {
   const describe = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "describe", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
   assert.equal(describe.ok, true);
   assert.ok(describe.result.capabilities.includes("runtime.orchestrate"));
+  assert.ok(describe.result.capabilities.includes("agents.list"));
+  assert.ok(describe.result.capabilities.includes("agent.wait"));
+  assert.ok(describe.result.capabilities.includes("pane.procs"));
+  assert.ok(describe.result.capabilities.includes("pane.send_key"));
+  assert.ok(describe.result.capabilities.includes("events.pane_lifecycle"));
+  const runtimeSnapshot = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "snapshot", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+  const runtimePane = runtimeSnapshot.result.panes.find((pane) => pane.status === "running");
+  assert.ok(runtimePane && runtimePane.pane_id, "runtime snapshot should expose a running pane");
+  const processTree = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "pane.procs", "--pane", runtimePane.pane_id, "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+  assert.equal(processTree.ok, true, JSON.stringify(processTree.error));
+  assert.equal(processTree.result.pane_id, runtimePane.pane_id);
+  assert.ok(Array.isArray(processTree.result.processes) && processTree.result.processes.length >= 1);
+  const keyResult = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "pane.send_key", "--pane", runtimePane.pane_id, "--key", "c", "--control", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+  assert.equal(keyResult.ok, true, JSON.stringify(keyResult.error));
+  assert.ok(keyResult.result.bytes_sent >= 1);
+  const waitResult = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "pane.wait", "--pane", runtimePane.pane_id, "--state", "idle", "--timeout-ms", "5000", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+  assert.equal(waitResult.ok, true, JSON.stringify(waitResult.error));
+  const lifecycleResult = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "snapshot", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+  assert.ok(Array.isArray(lifecycleResult.result.pane_lifecycles) && lifecycleResult.result.pane_lifecycles.some((event) => event.event === "created"));
+  const subscribeResult = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "events.subscribe", "--since-seq", "0", "--timeout-ms", "1000", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+  assert.equal(subscribeResult.ok, true, JSON.stringify(subscribeResult.error));
+  assert.ok(Array.isArray(subscribeResult.result.events) && subscribeResult.result.events.length >= 1);
+  const startAgent = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "agent.start", "--name", "runtime-agent", "--kind", "codex", "--cwd", root, "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+  assert.equal(startAgent.ok, true, JSON.stringify(startAgent.error));
+  assert.equal(startAgent.result.agent.name, "runtime-agent");
+  assert.equal(startAgent.result.agent.kind, "codex");
+  assert.equal(typeof startAgent.result.agent.generation, "number");
+  const agentGeneration = String(startAgent.result.agent.generation);
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  const agentsList = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "agents.list", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+  assert.equal(agentsList.ok, true, JSON.stringify(agentsList.error));
+  assert.ok(agentsList.result.agents.some((agent) => agent.name === "runtime-agent"));
+  const agentGet = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "agent.get", "--agent", "runtime-agent", "--generation", agentGeneration, "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+  assert.equal(agentGet.ok, true, JSON.stringify(agentGet.error));
+  assert.equal(agentGet.result.agent.name, "runtime-agent");
+  const agentRead = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "agent.read", "--agent", "runtime-agent", "--generation", agentGeneration, "--lines", "20", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+  assert.equal(agentRead.ok, true, JSON.stringify(agentRead.error));
+  const agentWait = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "agent.wait", "--agent", "runtime-agent", "--generation", agentGeneration, "--state", "idle", "--timeout-ms", "5000", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+  assert.equal(agentWait.ok, true, JSON.stringify(agentWait.error));
+  console.log("electron-runtime-orchestrate: named agents, process tree, control keys, waits, and lifecycle events passed");
+  await window.evaluate((paneId) => window.codex.closeTerminal(paneId), startAgent.result.pane_id);
+
   const workflow = {
     steps: [
       { id: "tab_a", op: "new_tab", cwd: root },
@@ -188,6 +230,13 @@ try {
   assert.equal(badReceipt.ok, false);
   assert.equal(badReceipt.error.code, "invalid_params");
   console.log("electron-runtime: runtime control TCP server, CLI describe/orchestrate, and validation passed");
+  const nonZero = spawnSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "pane.run", "--pane", runtimePane.pane_id, "--command", "cmd /c exit 7", "--timeout-ms", "10000", "--endpoint", runtimeEndpointPath], { encoding: "utf8", timeout: 20_000 });
+  assert.notEqual(nonZero.status, 0, nonZero.stdout);
+  const nonZeroReceipt = JSON.parse(nonZero.stdout);
+  assert.equal(nonZeroReceipt.ok, false);
+  assert.equal(nonZeroReceipt.error.code, "command_failed");
+  assert.equal(nonZeroReceipt.error.details.exit_code, 7, JSON.stringify(nonZeroReceipt));
+  console.log("electron-runtime-exit-code: non-zero pane.run exit code preserved");
 
   // The orchestrate workflow created a real tab; close it before the app exits so the
   // session-restore assertion below still sees exactly the one project terminal.

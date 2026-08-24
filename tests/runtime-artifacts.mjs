@@ -1,0 +1,25 @@
+import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const root = join(import.meta.dirname, "..");
+const schemaPath = join(root, "docs", "runtime-api-v1.schema.json");
+const docPath = join(root, "docs", "runtime-control-api.md");
+const skillPath = join(root, "docs", "skills", "nebula-runtime", "SKILL.md");
+assert.ok(existsSync(schemaPath));
+assert.ok(existsSync(docPath));
+assert.ok(existsSync(skillPath));
+const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+const methods = schema.$defs.request.allOf.map((item) => item.if.properties.method.const);
+for (const method of ["runtime.describe", "runtime.snapshot", "runtime.orchestrate", "agents.list", "agent.start", "agent.fork", "agent.wait", "pane.procs", "pane.send_key", "pane.wait", "events.pane_lifecycle", "events.subscribe"]) assert.ok(methods.includes(method), `schema missing ${method}`);
+const doc = readFileSync(docPath, "utf8");
+const skill = readFileSync(skillPath, "utf8");
+for (const method of ["runtime.describe", "runtime.snapshot", "runtime.orchestrate", "agent.fork", "agent.wait", "pane.procs", "pane.send_key", "events.pane_lifecycle", "events.subscribe"]) assert.ok(doc.includes(`\`${method}\``), `docs missing ${method}`);
+assert.match(skill, /name: nebula-runtime/);
+assert.match(skill, /codex-ui-ctl/);
+const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+const resources = packageJson.build.extraResources.map((item) => item.to);
+assert.ok(resources.includes("runtime/runtime-api-v1.schema.json"));
+assert.ok(resources.includes("runtime/runtime-control-api.md"));
+assert.ok(resources.includes("skills/nebula-runtime"));
+console.log("runtime-artifacts: schema, API docs, Skill, and installer resources passed");

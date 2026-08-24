@@ -50,6 +50,46 @@ export interface PaneSnapshot {
   exit_code?: number;
   cols: number;
   rows: number;
+  pid?: number;
+  ai_source?: string;
+  ai_session_id?: string;
+  ai_state?: RuntimeWaitState;
+  state_change_seq?: number;
+}
+
+export type RuntimeWaitState = "idle" | "running" | "waiting_input" | "attention" | "finished" | "failed" | "settled";
+
+export interface RuntimeProcessSnapshot {
+  pid: number;
+  parent_pid?: number;
+  executable: string;
+  display_name: string;
+  depth: number;
+  agent_kind?: string;
+}
+
+export interface RuntimePaneProcesses {
+  window_id: number;
+  pane_id: string;
+  root_pid: number;
+  processes: RuntimeProcessSnapshot[];
+}
+
+export interface RuntimeLifecycleEvent {
+  sequence: number;
+  window_id: number;
+  pane_id: string;
+  event: "created" | "attached" | "detached" | "exited" | "closed";
+  exit_code?: number;
+  timestamp: number;
+}
+
+export interface PaneWaitResult {
+  ok: boolean;
+  pane?: PaneSnapshot;
+  error?: string;
+  observed_state?: string;
+  observed_seq?: number;
 }
 
 export interface RuntimeControlCallbacks {
@@ -57,10 +97,15 @@ export interface RuntimeControlCallbacks {
   createTab(params: { cwd?: string; title?: string; shellId?: string; profileId?: string; seedCommand?: string }): Promise<{ pane_id: string }>;
   listPanes(): PaneSnapshot[];
   focusPane(paneId: string): void;
+  focusWindow?(): void;
   readPane(paneId: string, lines: number): string;
   writeInput(paneId: string, text: string, submit: boolean): boolean;
+  sendKey?(paneId: string, key: string, modifiers: { shift: boolean; alt: boolean; control: boolean }, repeat: number): number | false | Promise<number | false>;
   runCommand(paneId: string, command: string, timeoutMs: number): Promise<{ ok: boolean; exitCode?: number; error?: string }>;
   requestSplit(paneId: string, direction: "columns" | "rows"): Promise<{ ok: boolean; paneId?: string; error?: string }>;
+  listProcesses?(paneId: string): Promise<RuntimePaneProcesses | { error: string; code?: string }>;
+  waitPane?(paneId: string, state: RuntimeWaitState, timeoutMs: number, afterSeq?: number): Promise<PaneWaitResult>;
+  lifecycleEvents?(sinceSequence?: number): RuntimeLifecycleEvent[];
 }
 
 const pendingRuntimeActions = new Map<string, { resolve(result: { ok: boolean; paneId?: string; error?: string }): void; timer: NodeJS.Timeout }>();
@@ -147,6 +192,122 @@ function validateCommandLine(command: string): void {
   }
 }
 
+const RUNTIME_KEYS = new Set([
+  "escape", "enter", "tab", "backspace", "up", "down", "left", "right", "home", "end", "insert", "delete", "page_up", "page_down",
+  "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
+  ..."abcdefghijklmnopqrstuvwxyz".split(""),
+]);
+
+function parseRuntimeWaitState(value: unknown, label = "state"): RuntimeWaitState {
+  const state = stringValue(value, label) as RuntimeWaitState;
+  if (!["idle", "running", "waiting_input", "attention", "finished", "failed", "settled"].includes(state)) {
+    throw invalidParams(label + " must be one of idle, running, waiting_input, attention, finished, failed, settled");
+  }
+  return state;
+}
+
+function parseRuntimeKey(value: unknown): string {
+  const key = stringValue(value, "key").toLowerCase();
+  if (!RUNTIME_KEYS.has(key)) throw invalidParams("key is not a supported runtime control key");
+  return key;
+}
+
+function parseRuntimeModifiers(value: unknown): { shift: boolean; alt: boolean; control: boolean } {
+  if (value === undefined || value === null) return { shift: false, alt: false, control: false };
+  const object = requireObject(value, "modifiers");
+  return {
+    shift: booleanValue(object.shift, "modifiers.shift", false),
+    alt: booleanValue(object.alt, "modifiers.alt", false),
+    control: booleanValue(object.control, "modifiers.control", false),
+  };
+}
+
+function paneTaskState(pane: PaneSnapshot): RuntimeWaitState {
+  if (pane.status === "exited") return pane.exit_code != null && pane.exit_code !== 0 ? "failed" : "finished";
+  if (pane.ai_state) return pane.ai_state;
+  if (pane.activity === "running") return "running";
+  if (pane.activity === "attention") return "waiting_input";
+  return "idle";
+}
+
+interface ManagedAgent {
+  agent_id: string;
+  generation: number;
+  name: string;
+  kind: string;
+  window_id: number;
+  pane_id: string;
+  session_id?: string;
+  created_at: number;
+  worktree?: unknown;
+}
+
+const managedAgents = new Map<string, ManagedAgent>();
+let agentGeneration = 0;
+let runtimeRevision = 0;
+
+function agentIdFor(name: string, paneId: string): string {
+  return `agent-${name}-${paneId.slice(0, 8)}`;
+}
+
+function resolveManagedAgent(selector: string, generation: number | undefined, callbacks: RuntimeControlCallbacks): { agent: ManagedAgent; pane: PaneSnapshot } {
+  const normalized = selector.trim();
+  const agent = managedAgents.get(normalized) ?? [...managedAgents.values()].find((candidate) => candidate.agent_id === normalized || candidate.name === normalized);
+  if (!agent) throw new ApiErrorImpl("agent_not_found", `agent "${selector}" was not found`);
+  if (generation !== undefined && generation !== agent.generation) {
+    throw new ApiErrorImpl("agent_generation_mismatch", `agent "${selector}" generation ${generation} is not active`, { agent_id: agent.agent_id, generation: agent.generation });
+  }
+  const pane = callbacks.listPanes().find((candidate) => candidate.pane_id === agent.pane_id);
+  if (!pane) throw new ApiErrorImpl("agent_closed", `agent "${agent.name}" pane is no longer available`, { agent_id: agent.agent_id, generation: agent.generation });
+  return { agent, pane };
+}
+
+function agentView(agent: ManagedAgent, pane: PaneSnapshot): Record<string, unknown> {
+  const state = paneTaskState(pane);
+  return {
+    agent_id: agent.agent_id,
+    generation: agent.generation,
+    name: agent.name,
+    kind: agent.kind,
+    window_id: agent.window_id,
+    pane_id: agent.pane_id,
+    session_id: agent.session_id ?? pane.ai_session_id,
+    active: pane.status === "running",
+    observed: true,
+    state,
+    state_source: pane.ai_source ? "hook" : "process",
+    hook_seen: Boolean(pane.ai_source),
+    ...(agent.worktree === undefined ? {} : { worktree: agent.worktree }),
+    ...(pane.status === "exited" ? { closed_reason: pane.exit_code == null ? "exited" : `exit_code:${pane.exit_code}` } : {}),
+  };
+}
+
+function listAgentViews(callbacks: RuntimeControlCallbacks, windowId?: number): Record<string, unknown>[] {
+  const panes = callbacks.listPanes();
+  const views: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  for (const agent of managedAgents.values()) {
+    const pane = panes.find((candidate) => candidate.pane_id === agent.pane_id);
+    if (!pane || (windowId !== undefined && pane.window_id !== windowId)) continue;
+    views.push(agentView(agent, pane));
+    seen.add(agent.pane_id);
+  }
+  for (const pane of panes) {
+    if (seen.has(pane.pane_id) || !pane.ai_source || (windowId !== undefined && pane.window_id !== windowId)) continue;
+    const fallback: ManagedAgent = {
+      agent_id: `pane-agent-${pane.pane_id.slice(0, 8)}`,
+      generation: 1,
+      name: pane.title,
+      kind: pane.ai_source,
+      window_id: pane.window_id,
+      pane_id: pane.pane_id,
+      session_id: pane.ai_session_id,
+      created_at: Date.now(),
+    };
+    views.push(agentView(fallback, pane));
+  }
+  return views;
+}
 // ---- orchestrate (ported from orchestrate.rs) ----
 
 interface StepReference {
@@ -416,15 +577,32 @@ async function executeStep(
       const { pane_id } = resolveTarget(step.id, step.target!, actions);
       const result = await callbacks.runCommand(pane_id, step.command ?? "", step.timeout_ms ?? 30_000);
       if (!result.ok) {
-        throw new ApiErrorImpl("command_failed", result.error || "command exited with code " + (result.exitCode ?? "unknown"));
+        throw new ApiErrorImpl("command_failed", result.error || "command exited with code " + (result.exitCode ?? "unknown"), { exit_code: result.exitCode });
       }
       return { window_id: callbacks.windowId(), pane_id };
     }
     case "agent_launch": {
       const { pane_id } = resolveTarget(step.id, step.target!, actions);
-      return { window_id: callbacks.windowId(), pane_id, agent_id: pane_id, generation: 1 };
-    }
-    default:
+      const verified = verifiedAgentLaunch(step.kind ?? "", step.resume_session_id);
+      const ok = callbacks.writeInput(pane_id, verified.command, true);
+      if (!ok) throw new ApiErrorImpl("pane_unavailable", "pane " + pane_id + " is not running or not attached");
+      const existing = [...managedAgents.values()].find((candidate) => candidate.name === step.name);
+      if (existing) throw new ApiErrorImpl("agent_name_in_use", "agent name " + step.name + " is already active");
+      const agent: ManagedAgent = {
+        agent_id: agentIdFor(step.name ?? verified.kind, pane_id),
+        generation: ++agentGeneration,
+        name: step.name ?? verified.kind,
+        kind: verified.kind,
+        window_id: callbacks.windowId(),
+        pane_id,
+        session_id: verified.sessionId,
+        created_at: Date.now(),
+      };
+      managedAgents.set(agent.name, agent);
+      if (step.initial_prompt) setTimeout(() => { callbacks.writeInput(pane_id, step.initial_prompt ?? "", true); }, 500).unref?.();
+      const pane = callbacks.listPanes().find((candidate) => candidate.pane_id === pane_id);
+      return { window_id: callbacks.windowId(), pane_id, agent_id: agent.agent_id, generation: agent.generation, name: agent.name, kind: agent.kind, ...(pane ? { agent: agentView(agent, pane) } : {}) };
+    }    default:
       throw invalidParams("unsupported orchestration op \"" + step.op + "\"");
   }
 }
@@ -520,15 +698,143 @@ async function dispatch(request: ApiRequest, callbacks: RuntimeControlCallbacks)
         return responseFor(request, true, {
           runtime: "codex-cli-ui",
           version: 1,
-          capabilities: ["runtime.describe", "runtime.snapshot", "runtime.orchestrate", "tab.new", "pane.focus", "pane.read", "pane.prompt", "pane.run", "pane.split", "agent.fork"],
-          features: ["agent.fork.transactional_worktree", "agent.worktree.provenance"],
+          protocol_version: 1,
+          capabilities: [
+            "runtime.describe", "runtime.snapshot", "runtime.orchestrate", "tab.new", "window.create", "window.focus",
+            "pane.focus", "pane.read", "pane.prompt", "pane.run", "pane.split", "pane.procs", "pane.send_key", "pane.wait",
+            "events.pane_lifecycle", "events.subscribe", "agents.list", "agent.get", "agent.start", "agent.prompt", "agent.read", "agent.wait", "agent.fork",
+          ],
+          features: [
+            "agent.fork.transactional_worktree", "agent.worktree.provenance", "agent.wait.identity", "pane.wait.after_seq",
+            "pane.wait.lifecycle", "events.pane_lifecycle", "runtime.orchestrate.agent_ready", "pane.procs.process_tree", "pane.send_key.control_keys",
+          ],
           wait_states: ["idle", "running", "waiting_input", "attention", "finished", "failed", "settled"],
         });
       case "runtime.snapshot": {
         const panes = callbacks.listPanes();
-        return responseFor(request, true, { window_id: callbacks.windowId(), panes, pane_count: panes.length });
+        return responseFor(request, true, { window_id: callbacks.windowId(), revision: ++runtimeRevision, panes, pane_count: panes.length, pane_lifecycles: callbacks.lifecycleEvents?.(0) ?? [] });
       }
-      case "runtime.orchestrate": {
+      case "window.create":
+        callbacks.focusWindow?.();
+        return responseFor(request, true, { window_id: callbacks.windowId(), created: false, reused: true });
+      case "window.focus":
+        callbacks.focusWindow?.();
+        return responseFor(request, true, { window_id: callbacks.windowId() });
+      case "events.pane_lifecycle": {
+        const since = optionalNumber(params.since_seq, "since_seq", 0, Number.MAX_SAFE_INTEGER);
+        return responseFor(request, true, { events: callbacks.lifecycleEvents?.(since) ?? [] });
+      }
+      case "events.subscribe": {
+        const since = optionalNumber(params.since_seq, "since_seq", 0, Number.MAX_SAFE_INTEGER);
+        const timeoutMs = validateTimeout(params.timeout_ms ?? 30_000, "timeout_ms");
+        const deadline = Date.now() + timeoutMs;
+        let events = callbacks.lifecycleEvents?.(since) ?? [];
+        while (!events.length && Date.now() < deadline) {
+          await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+          events = callbacks.lifecycleEvents?.(since) ?? [];
+        }
+        return responseFor(request, true, { events, next_seq: events.at(-1)?.sequence ?? since ?? 0, timed_out: events.length === 0 });
+      }
+      case "agents.list": {
+        const windowId = optionalNumber(params.window_id, "window_id", 1, 0xffffffff);
+        return responseFor(request, true, { revision: ++runtimeRevision, agents: listAgentViews(callbacks, windowId) });
+      }
+      case "agent.get": {
+        const selector = stringValue(params.agent, "agent");
+        const generation = optionalNumber(params.generation, "generation", 1, Number.MAX_SAFE_INTEGER);
+        const resolved = resolveManagedAgent(selector, generation, callbacks);
+        return responseFor(request, true, { agent: agentView(resolved.agent, resolved.pane), pane: resolved.pane });
+      }
+      case "agent.start": {
+        const name = stringValue(params.name, "name");
+        validateAgentName(name);
+        if ([...managedAgents.values()].some((candidate) => candidate.name === name && callbacks.listPanes().some((pane) => pane.pane_id === candidate.pane_id && pane.status === "running"))) {
+          throw new ApiErrorImpl("agent_name_in_use", `agent name "${name}" is already active`);
+        }
+        const verified = verifiedAgentLaunch(stringValue(params.kind, "kind"), optionalString(params.resume_session_id, "resume_session_id"));
+        const paneId = optionalString(params.pane_id, "pane_id");
+        const cwd = optionalString(params.cwd, "cwd");
+        if (paneId && cwd) throw invalidParams("agent.start cannot combine pane_id with cwd; an existing pane keeps its shell cwd");
+        let createdPaneId = paneId;
+        if (paneId) {
+          const pane = callbacks.listPanes().find((candidate) => candidate.pane_id === paneId);
+          if (!pane) throw new ApiErrorImpl("pane_not_found", `pane "${paneId}" was not found`);
+          if (!callbacks.writeInput(paneId, verified.command, true)) throw new ApiErrorImpl("pane_unavailable", `pane "${paneId}" is not running`);
+        } else {
+          createdPaneId = (await callbacks.createTab({ cwd, title: name, seedCommand: verified.command })).pane_id;
+        }
+        const agent: ManagedAgent = {
+          agent_id: agentIdFor(name, createdPaneId!),
+          generation: ++agentGeneration,
+          name,
+          kind: verified.kind,
+          window_id: callbacks.windowId(),
+          pane_id: createdPaneId!,
+          session_id: verified.sessionId,
+          created_at: Date.now(),
+        };
+        managedAgents.set(agent.name, agent);
+        const pane = callbacks.listPanes().find((candidate) => candidate.pane_id === agent.pane_id);
+        return responseFor(request, true, { window_id: callbacks.windowId(), pane_id: agent.pane_id, agent: pane ? agentView(agent, pane) : { ...agent } });
+      }
+      case "agent.prompt": {
+        const selector = stringValue(params.agent, "agent");
+        const generation = optionalNumber(params.generation, "generation", 1, Number.MAX_SAFE_INTEGER);
+        const text = stringValue(params.text, "text");
+        validatePrompt(text);
+        const submit = booleanValue(params.submit, "submit", true);
+        const resolved = resolveManagedAgent(selector, generation, callbacks);
+        if (!callbacks.writeInput(resolved.agent.pane_id, text, submit)) throw new ApiErrorImpl("pane_unavailable", `agent "${resolved.agent.name}" is not running`);
+        return responseFor(request, true, { agent: agentView(resolved.agent, callbacks.listPanes().find((pane) => pane.pane_id === resolved.agent.pane_id) ?? resolved.pane), pane_id: resolved.agent.pane_id });
+      }
+      case "agent.read": {
+        const selector = stringValue(params.agent, "agent");
+        const generation = optionalNumber(params.generation, "generation", 1, Number.MAX_SAFE_INTEGER);
+        const lines = numberValue(params.lines ?? 100, "lines", 1, 2000);
+        const resolved = resolveManagedAgent(selector, generation, callbacks);
+        return responseFor(request, true, { agent: agentView(resolved.agent, resolved.pane), pane: resolved.pane, lines: callbacks.readPane(resolved.agent.pane_id, lines) });
+      }
+      case "agent.wait": {
+        const selector = stringValue(params.agent, "agent");
+        const generation = numberValue(params.generation ?? 1, "generation", 1, Number.MAX_SAFE_INTEGER);
+        const state = parseRuntimeWaitState(params.state);
+        const timeoutMs = validateTimeout(params.timeout_ms ?? 30_000, "timeout_ms");
+        const afterSeq = optionalNumber(params.after_seq, "after_seq", 0, Number.MAX_SAFE_INTEGER);
+        const resolved = resolveManagedAgent(selector, generation, callbacks);
+        if (!callbacks.waitPane) throw new ApiErrorImpl("runtime_unavailable", "pane wait is not available");
+        const result = await callbacks.waitPane(resolved.agent.pane_id, state, timeoutMs, afterSeq);
+        if (!result.ok) throw new ApiErrorImpl(result.error === "timeout" ? "timeout" : "agent_closed", result.error || "agent did not reach the requested state", { observed_state: result.observed_state, observed_seq: result.observed_seq, agent_id: resolved.agent.agent_id, generation: resolved.agent.generation, after_seq: afterSeq });
+        const pane = result.pane ?? callbacks.listPanes().find((candidate) => candidate.pane_id === resolved.agent.pane_id) ?? resolved.pane;
+        return responseFor(request, true, { agent: agentView(resolved.agent, pane), snapshot: pane });
+      }
+      case "pane.procs": {
+        const paneId = stringValue(params.pane_id, "pane_id");
+        if (!callbacks.listProcesses) throw new ApiErrorImpl("runtime_unavailable", "process inspection is not available");
+        const result = await callbacks.listProcesses(paneId);
+        if ("error" in result) throw new ApiErrorImpl(result.code || "process_query_failed", result.error);
+        return responseFor(request, true, result);
+      }
+      case "pane.send_key": {
+        const paneId = stringValue(params.pane_id, "pane_id");
+        const key = parseRuntimeKey(params.key);
+        const modifiers = parseRuntimeModifiers(params.modifiers);
+        const repeat = numberValue(params.repeat ?? 1, "repeat", 1, 64);
+        if (key.length === 1 && !modifiers.control) throw invalidParams("letter keys require control=true; use pane.prompt for printable text");
+        if (!callbacks.sendKey) throw new ApiErrorImpl("runtime_unavailable", "control-key injection is not available");
+        const bytes = await callbacks.sendKey(paneId, key, modifiers, repeat);
+        if (bytes === false) throw new ApiErrorImpl("pane_unavailable", `pane "${paneId}" is not running`);
+        return responseFor(request, true, { pane_id: paneId, bytes_sent: bytes, key, repeat });
+      }
+      case "pane.wait": {
+        const paneId = stringValue(params.pane_id, "pane_id");
+        const state = parseRuntimeWaitState(params.state);
+        const timeoutMs = validateTimeout(params.timeout_ms ?? 30_000, "timeout_ms");
+        const afterSeq = optionalNumber(params.after_seq, "after_seq", 0, Number.MAX_SAFE_INTEGER);
+        if (!callbacks.waitPane) throw new ApiErrorImpl("runtime_unavailable", "pane wait is not available");
+        const result = await callbacks.waitPane(paneId, state, timeoutMs, afterSeq);
+        if (!result.ok) throw new ApiErrorImpl(result.error === "timeout" ? "timeout" : "pane_closed", result.error || "pane did not reach the requested state", { observed_state: result.observed_state, observed_seq: result.observed_seq });
+        return responseFor(request, true, { pane: result.pane, observed_state: result.observed_state, observed_seq: result.observed_seq });
+      }      case "runtime.orchestrate": {
         const parsed = parseAndValidate(params);
         const receipt = await executeOrchestrate(parsed, callbacks);
         return responseFor(request, true, receipt);
@@ -570,7 +876,7 @@ async function dispatch(request: ApiRequest, callbacks: RuntimeControlCallbacks)
         }
         const result = await callbacks.runCommand(paneId, command, timeoutMs);
         if (!result.ok) {
-          throw new ApiErrorImpl("command_failed", result.error || "command exited with code " + (result.exitCode ?? "unknown"));
+          throw new ApiErrorImpl("command_failed", result.error || "command exited with code " + (result.exitCode ?? "unknown"), { exit_code: result.exitCode });
         }
         return responseFor(request, true, { pane_id: paneId, exit_code: result.exitCode ?? 0 });
       }
@@ -585,7 +891,9 @@ async function dispatch(request: ApiRequest, callbacks: RuntimeControlCallbacks)
       case "agent.fork": {
         const name = stringValue(params.name, "name");
         validateAgentName(name);
-        const verified = verifiedAgentLaunch(stringValue(params.kind, "kind"), optionalString(params.resume_session_id, "resume_session_id"));
+        if ([...managedAgents.values()].some((candidate) => candidate.name === name && callbacks.listPanes().some((pane) => pane.pane_id === candidate.pane_id && pane.status === "running"))) {
+          throw new ApiErrorImpl("agent_name_in_use", `agent name "${name}" is already active`);
+        }        const verified = verifiedAgentLaunch(stringValue(params.kind, "kind"), optionalString(params.resume_session_id, "resume_session_id"));
         const sourcePane = optionalString(params.source_pane, "source_pane");
         const sourceCwd = optionalString(params.source_cwd, "source_cwd");
         if (!sourcePane && !sourceCwd) throw invalidParams("source_pane or source_cwd is required");
@@ -616,7 +924,20 @@ async function dispatch(request: ApiRequest, callbacks: RuntimeControlCallbacks)
         try {
           const result = await callbacks.createTab({ cwd: transaction.provenance().path, title: name, seedCommand: verified.command });
           const provenance = transaction.commit();
-          return responseFor(request, true, { window_id: callbacks.windowId(), pane_id: result.pane_id, worktree: provenance });
+          const agent: ManagedAgent = {
+            agent_id: agentIdFor(name, result.pane_id),
+            generation: ++agentGeneration,
+            name,
+            kind: verified.kind,
+            window_id: callbacks.windowId(),
+            pane_id: result.pane_id,
+            session_id: verified.sessionId,
+            created_at: Date.now(),
+            worktree: provenance,
+          };
+          managedAgents.set(agent.name, agent);
+          const pane = callbacks.listPanes().find((candidate) => candidate.pane_id === result.pane_id);
+          return responseFor(request, true, { window_id: callbacks.windowId(), pane_id: result.pane_id, worktree: provenance, agent: pane ? agentView(agent, pane) : { ...agent } });
         } catch (error) {
           let rollback;
           try {

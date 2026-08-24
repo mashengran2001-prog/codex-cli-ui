@@ -19,8 +19,8 @@ function readEndpoint(flag) {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8"));
     if (typeof parsed.port === "number" && typeof parsed.token === "string") return parsed;
-  } catch {
-    // fall through
+  } catch (error) {
+    if (process.env.CLI_TRACE) process.stderr.write("[cli] endpoint read failed: " + String(error?.message || error) + "\n");
   }
   return null;
 }
@@ -89,7 +89,15 @@ function usage() {
   process.stdout.write("  codex-ui-ctl pane.prompt --pane <id> --text <text> [--no-submit] [--pretty]\n");
   process.stdout.write("  codex-ui-ctl pane.run --pane <id> --command <command> [--no-wait] [--timeout-ms <n>] [--pretty]\n");
   process.stdout.write("  codex-ui-ctl pane.split --pane <id> --direction <columns|rows> [--pretty]\n");
-  process.stdout.write("  codex-ui-ctl agent.fork --name <name> --kind <claude|codex|...> (--source-cwd <dir> | --source-pane <id>) [--resume-session-id <id>] [--branch <name>] [--base <rev>] [--path <dir>] [--allow-dirty-source] [--pretty]\n\n");
+  process.stdout.write("  codex-ui-ctl pane.procs --pane <id> [--pretty]\n");
+  process.stdout.write("  codex-ui-ctl pane.send_key --pane <id> --key <key> [--control] [--alt] [--shift] [--repeat <n>] [--pretty]\n");
+  process.stdout.write("  codex-ui-ctl pane.wait --pane <id> --state <state> [--after-seq <n>] [--timeout-ms <n>] [--pretty]\n");  process.stdout.write("  codex-ui-ctl events.subscribe [--since-seq <n>] [--timeout-ms <n>] [--pretty]\n");
+  process.stdout.write("  codex-ui-ctl agents.list [--pretty]\n");
+  process.stdout.write("  codex-ui-ctl agent.get --agent <name-or-id> [--generation <n>] [--pretty]\n");
+  process.stdout.write("  codex-ui-ctl agent.start --name <name> --kind <claude|codex|...> [--cwd <dir> | --pane <id>] [--resume-session-id <id>] [--pretty]\n");
+  process.stdout.write("  codex-ui-ctl agent.prompt --agent <name-or-id> --text <text> [--generation <n>] [--no-submit] [--pretty]\n");
+  process.stdout.write("  codex-ui-ctl agent.read --agent <name-or-id> [--generation <n>] [--lines <n>] [--pretty]\n");
+  process.stdout.write("  codex-ui-ctl agent.wait --agent <name-or-id> --generation <n> --state <state> [--after-seq <n>] [--timeout-ms <n>] [--pretty]\n");  process.stdout.write("  codex-ui-ctl agent.fork --name <name> --kind <claude|codex|...> (--source-cwd <dir> | --source-pane <id>) [--resume-session-id <id>] [--branch <name>] [--base <rev>] [--path <dir>] [--allow-dirty-source] [--pretty]\n\n");
   process.stdout.write("Options:\n");
   process.stdout.write("  --endpoint <path>   override the runtime endpoint file\n");
   process.stdout.write("  --pretty            pretty-print the JSON response\n");
@@ -106,6 +114,9 @@ function parseArgs(argv) {
     else if (arg === "--no-submit") flags["no-submit"] = true;
     else if (arg === "--no-wait") flags["no-wait"] = true;
     else if (arg === "--allow-dirty-source") flags["allow-dirty-source"] = true;
+    else if (arg === "--control") flags.control = true;
+    else if (arg === "--alt") flags.alt = true;
+    else if (arg === "--shift") flags.shift = true;
     else if (arg.startsWith("--")) {
       const value = argv[i + 1];
       if (value === undefined) fail("missing value for " + arg);
@@ -190,7 +201,66 @@ async function main() {
       if (flags.direction !== "columns" && flags.direction !== "rows") fail("pane.split requires --direction columns|rows");
       params = { pane_id: flags.pane, direction: flags.direction };
       break;
-    case "agent.fork":
+    case "pane.procs":
+      method = "pane.procs";
+      if (!flags.pane) fail("pane.procs requires --pane");
+      params = { pane_id: flags.pane };
+      break;
+    case "pane.send_key":
+      method = "pane.send_key";
+      if (!flags.pane) fail("pane.send_key requires --pane");
+      if (!flags.key) fail("pane.send_key requires --key");
+      params = { pane_id: flags.pane, key: flags.key, modifiers: { control: !!flags.control, alt: !!flags.alt, shift: !!flags.shift }, repeat: Number(flags.repeat ?? 1) };
+      break;
+    case "pane.wait":
+      method = "pane.wait";
+      if (!flags.pane) fail("pane.wait requires --pane");
+      if (!flags.state) fail("pane.wait requires --state");
+      params = { pane_id: flags.pane, state: flags.state, timeout_ms: timeoutMs };
+      if (flags["after-seq"] !== undefined) params.after_seq = Number(flags["after-seq"]);
+      break;
+    case "events.subscribe":
+      method = "events.subscribe";
+      params = { timeout_ms: timeoutMs };
+      if (flags["since-seq"] !== undefined) params.since_seq = Number(flags["since-seq"]);
+      break;
+    case "agents.list":
+      method = "agents.list";
+      break;
+    case "agent.get":
+      method = "agent.get";
+      if (!flags.agent) fail("agent.get requires --agent");
+      params = { agent: flags.agent };
+      if (flags.generation !== undefined) params.generation = Number(flags.generation);
+      break;
+    case "agent.start":
+      method = "agent.start";
+      if (!flags.name) fail("agent.start requires --name");
+      if (!flags.kind) fail("agent.start requires --kind");
+      if (flags.cwd && flags.pane) fail("agent.start accepts either --cwd or --pane");
+      params = { name: flags.name, kind: flags.kind, cwd: flags.cwd, pane_id: flags.pane, resume_session_id: flags["resume-session-id"] };
+      break;
+    case "agent.prompt":
+      method = "agent.prompt";
+      if (!flags.agent) fail("agent.prompt requires --agent");
+      if (flags.text === undefined) fail("agent.prompt requires --text");
+      params = { agent: flags.agent, text: flags.text, submit: !flags["no-submit"] };
+      if (flags.generation !== undefined) params.generation = Number(flags.generation);
+      break;
+    case "agent.read":
+      method = "agent.read";
+      if (!flags.agent) fail("agent.read requires --agent");
+      params = { agent: flags.agent, lines: Number(flags.lines ?? 100) };
+      if (flags.generation !== undefined) params.generation = Number(flags.generation);
+      break;
+    case "agent.wait":
+      method = "agent.wait";
+      if (!flags.agent) fail("agent.wait requires --agent");
+      if (flags.generation === undefined) fail("agent.wait requires --generation");
+      if (!flags.state) fail("agent.wait requires --state");
+      params = { agent: flags.agent, generation: Number(flags.generation), state: flags.state, timeout_ms: timeoutMs };
+      if (flags["after-seq"] !== undefined) params.after_seq = Number(flags["after-seq"]);
+      break;    case "agent.fork":
       method = "agent.fork";
       if (!flags.name) fail("agent.fork requires --name");
       if (!flags.kind) fail("agent.fork requires --kind");

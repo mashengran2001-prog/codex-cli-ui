@@ -59,7 +59,7 @@ import { DeepSeekProvider } from "./deepseek-provider";
 import { CliLifecycleBridge, type CliLifecycleEvent } from "./cli-lifecycle";
 import { ProviderRegistry, type AgentProvider, type ProviderRunContext } from "./provider-registry";
 import { enumerateSystemFonts } from "./system-fonts";
-import { startRuntimeControl, startRuntimeHeartbeat, settleRuntimeAction, trackRuntimeActionResult } from "./runtime-control";
+import { startRuntimeControl, startRuntimeHeartbeat, settleRuntimeAction, trackRuntimeActionResult, type PaneWaitResult, type RuntimeLifecycleEvent, type RuntimePaneProcesses, type RuntimeProcessSnapshot, type RuntimeWaitState } from "./runtime-control";
 import { terminalShellArguments, terminalTitleFromPath, wslQuickDirectoryEntries } from "./terminal-utils";
 import {
   parseSvnRevision,
@@ -89,6 +89,7 @@ interface TerminalSession {
   profileId?: string;
   aiSource?: "codex" | "claude";
   aiSessionId?: string;
+  aiTaskState?: RuntimeWaitState;
   kind: "local" | "ssh";
   remoteHost?: string;
   sshProfileId?: string;
@@ -112,6 +113,7 @@ interface TerminalSession {
   resizeTimer?: NodeJS.Timeout;
   pendingResize?: { cols: number; rows: number };
   lastBellAt: number;
+  runtimeStateSeq: number;
 }
 
 interface TerminalSnapshot {
@@ -964,6 +966,18 @@ function markTerminalRuntimeClean() {
 
 const runtimePaneWaits = new Map<string, { resolve(result: { ok: boolean; paneId?: string; error?: string }): void; timer: NodeJS.Timeout }>();
 
+const runtimeLifecycleEvents: RuntimeLifecycleEvent[] = [];
+let runtimeLifecycleSequence = 0;
+
+function recordRuntimeLifecycle(session: TerminalSession, event: RuntimeLifecycleEvent["event"], exitCode?: number) {
+  runtimeLifecycleEvents.push({ sequence: ++runtimeLifecycleSequence, window_id: runtimeWindowId(), pane_id: session.id, event, ...(exitCode === undefined ? {} : { exit_code: exitCode }), timestamp: Date.now() });
+  if (runtimeLifecycleEvents.length > 512) runtimeLifecycleEvents.splice(0, runtimeLifecycleEvents.length - 512);
+}
+
+function runtimeLifecycleSince(sinceSequence?: number): RuntimeLifecycleEvent[] {
+  return runtimeLifecycleEvents.filter((event) => sinceSequence === undefined || event.sequence > sinceSequence);
+}
+
 function runtimeWindowId() {
   const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0];
   return window ? window.id : 0;
@@ -999,11 +1013,174 @@ function runtimeWriteInput(paneId: string, text: string, submit: boolean) {
   }
 }
 
+function runtimePaneSnapshot(session: TerminalSession): import("./runtime-control").PaneSnapshot {
+  return {
+    pane_id: session.id,
+    window_id: runtimeWindowId(),
+    title: session.title,
+    cwd: session.cwd,
+    shell: session.shell,
+    kind: session.kind,
+    activity: session.activity,
+    status: session.status,
+    exit_code: session.lastExitCode,
+    cols: session.cols,
+    rows: session.rows,
+    pid: session.pty.pid,
+    ai_source: session.aiSource,
+    ai_session_id: session.aiSessionId,
+    ai_state: session.aiTaskState,
+    state_change_seq: session.runtimeStateSeq,
+  };
+}
+
+function runtimeKeyBytes(key: string, modifiers: { shift: boolean; alt: boolean; control: boolean }): string {
+  const named: Record<string, string> = {
+    escape: "\x1b", enter: "\r", tab: "\t", backspace: "\x7f",
+    up: "\x1b[A", down: "\x1b[B", right: "\x1b[C", left: "\x1b[D",
+    home: "\x1b[H", end: "\x1b[F", insert: "\x1b[2~", delete: "\x1b[3~", page_up: "\x1b[5~", page_down: "\x1b[6~",
+    f1: "\x1bOP", f2: "\x1bOQ", f3: "\x1bOR", f4: "\x1bOS", f5: "\x1b[15~", f6: "\x1b[17~", f7: "\x1b[18~", f8: "\x1b[19~", f9: "\x1b[20~", f10: "\x1b[21~", f11: "\x1b[23~", f12: "\x1b[24~",
+  };
+  let bytes = named[key];
+  if (bytes === undefined && /^[a-z]$/.test(key)) {
+    if (modifiers.control) bytes = String.fromCharCode(key.charCodeAt(0) - 96);
+    else bytes = modifiers.shift ? key.toUpperCase() : key;
+  }
+  if (bytes === undefined) throw new Error("unsupported runtime key");
+  if (modifiers.alt) bytes = "\x1b" + bytes;
+  return bytes;
+}
+
+function runtimeSendKey(paneId: string, key: string, modifiers: { shift: boolean; alt: boolean; control: boolean }, repeat: number): number | false {
+  const session = terminalSessions.get(paneId);
+  if (!session || session.status !== "running") return false;
+  const payload = runtimeKeyBytes(key, modifiers).repeat(repeat);
+  try {
+    trackTerminalInput(session, payload);
+    session.pty.write(payload);
+    return Buffer.byteLength(payload, "utf8");
+  } catch {
+    return false;
+  }
+}
+
+interface ProcessRow {
+  pid: number;
+  parent_pid: number;
+  executable: string;
+}
+
+function runtimeExecFileText(file: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { windowsHide: true, maxBuffer: 2 * 1024 * 1024 }, (error, stdout) => {
+      if (error) reject(error);
+      else resolve(stdout);
+    });
+  });
+}
+
+async function readProcessRows(): Promise<ProcessRow[]> {
+  try {
+    if (process.platform === "win32") {
+      const script = "$ErrorActionPreference='Stop'; Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath | ConvertTo-Json -Compress";
+      const raw = await runtimeExecFileText("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
+      const parsed: unknown = JSON.parse(raw || "[]");
+      const rows = Array.isArray(parsed) ? parsed : [parsed];
+      return rows.flatMap((row) => {
+        if (!row || typeof row !== "object") return [];
+        const value = row as Record<string, unknown>;
+        const pid = Number(value.ProcessId);
+        const parent = Number(value.ParentProcessId);
+        if (!Number.isInteger(pid) || pid <= 0) return [];
+        return [{ pid, parent_pid: Number.isInteger(parent) ? parent : 0, executable: String(value.ExecutablePath || value.Name || "process") }];
+      });
+    }
+    const raw = await runtimeExecFileText("ps", ["-eo", "pid=,ppid=,comm="]);
+    return raw.split(/\r?\n/).flatMap((line) => {
+      const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
+      return match ? [{ pid: Number(match[1]), parent_pid: Number(match[2]), executable: match[3].trim() }] : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
+async function runtimeListProcesses(paneId: string): Promise<RuntimePaneProcesses | { error: string; code?: string }> {
+  const session = terminalSessions.get(paneId);
+  if (!session) return { error: `pane "${paneId}" was not found`, code: "pane_not_found" };
+  if (session.kind === "ssh") return { error: "pane.procs cannot infer a remote process tree from the local SSH transport", code: "remote_process_unavailable" };
+  const rootPid = session.pty.pid;
+  const rows = await readProcessRows();
+  if (!rows.length) return { error: "failed to read the pane process tree", code: "process_query_failed" };
+  const byParent = new Map<number, ProcessRow[]>();
+  for (const row of rows) {
+    const list = byParent.get(row.parent_pid) ?? [];
+    list.push(row);
+    byParent.set(row.parent_pid, list);
+  }
+  const root = rows.find((row) => row.pid === rootPid) ?? { pid: rootPid, parent_pid: 0, executable: session.shell };
+  const processes: RuntimeProcessSnapshot[] = [];
+  const visit = (row: ProcessRow, depth: number) => {
+    const executable = row.executable;
+    const display = executable.split(/[\\/]/).pop() || executable;
+    const lower = display.toLowerCase().replace(/\.(exe|cmd|bat|ps1|com|js)$/i, "");
+    const agentKind = ["claude", "codex", "gemini", "opencode", "amp", "cursor", "copilot", "grok", "pi", "omp"].includes(lower) ? lower : undefined;
+    processes.push({ pid: row.pid, ...(row.pid === rootPid ? {} : { parent_pid: row.parent_pid }), executable, display_name: display, depth, ...(agentKind ? { agent_kind: agentKind } : {}) });
+    for (const child of byParent.get(row.pid) ?? []) visit(child, depth + 1);
+  };
+  visit(root, 0);
+  return { window_id: runtimeWindowId(), pane_id: paneId, root_pid: rootPid, processes };
+}
+
+async function runtimeWaitForPane(paneId: string, state: RuntimeWaitState, timeoutMs: number, afterSeq?: number): Promise<PaneWaitResult> {
+  const deadline = Date.now() + timeoutMs;
+  let observedState = "unknown";
+  let observedSeq: number | undefined;
+  while (Date.now() < deadline) {
+    const session = terminalSessions.get(paneId);
+    if (!session) return { ok: false, error: "pane_closed", observed_state: observedState, observed_seq: observedSeq };
+    const pane = runtimePaneSnapshot(session);
+    observedState = paneTaskStateForRuntime(pane);
+    observedSeq = pane.state_change_seq;
+    const stateMatches = state === "settled" ? observedState !== "running" : observedState === state;
+    const seqMatches = afterSeq === undefined || (pane.state_change_seq ?? 0) > afterSeq;
+    if (stateMatches && seqMatches) return { ok: true, pane, observed_state: observedState, observed_seq: observedSeq };
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  return { ok: false, error: "timeout", observed_state: observedState, observed_seq: observedSeq };
+}
+
+function paneTaskStateForRuntime(pane: import("./runtime-control").PaneSnapshot): RuntimeWaitState {
+  if (pane.status === "exited") return pane.exit_code != null && pane.exit_code !== 0 ? "failed" : "finished";
+  if (pane.ai_state) return pane.ai_state;
+  if (pane.activity === "running") return "running";
+  if (pane.activity === "attention") return "waiting_input";
+  return "idle";
+}
+function runtimeCommandWithExitMarker(session: TerminalSession, command: string, token: string): string {
+  const shellId = session.shellId.toLowerCase();
+  const shell = session.shell.toLowerCase();
+  if (shellId.includes("powershell") || shellId.includes("pwsh") || shell.includes("powershell") || shell.includes("pwsh")) {
+    return `& { ${command.replace(/\r?\n/g, " ")} }; $__codexUiExit = if ($?) { if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 } } else { 1 }; Write-Output "${token}:$__codexUiExit"`;
+  }
+  if (shellId.includes("cmd") || /(^|[\\/])cmd(?:\.exe)?$/i.test(shell)) {
+    return `${command.replace(/\r?\n/g, " ")} & echo ${token}:%ERRORLEVEL%`;
+  }
+  return `${command.replace(/\r?\n/g, " ")}; printf '%s:%s\\n' '${token}' "$?"`;
+}
+
+function runtimeExitCodeFromMarker(history: string, token: string): number | undefined {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = history.match(new RegExp(`${escaped}:(-?\\d+)`));
+  if (!match) return undefined;
+  const code = Number(match[1]);
+  return Number.isInteger(code) ? code : undefined;
+}
 async function runtimeRunCommand(paneId: string, command: string, timeoutMs: number) {
   const session = terminalSessions.get(paneId);
   if (!session || session.status !== "running") return { ok: false, error: "pane is not running" };
   const token = `__CODEX_UI_RUNTIME_${Math.random().toString(16).slice(2, 10)}__`;
-  const markerCommand = `${command.replace(/\r?\n/g, " ")}; echo ${token}`;
+  const markerCommand = runtimeCommandWithExitMarker(session, command, token);
   const payload = markerCommand + "\r";
   trackTerminalInput(session, payload);
   try {
@@ -1014,8 +1191,10 @@ async function runtimeRunCommand(paneId: string, command: string, timeoutMs: num
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if ((session.status as string) === "exited") return { ok: false, exitCode: session.lastExitCode, error: `pane exited with code ${session.lastExitCode ?? "unknown"}` };
-    if (session.history.includes(token)) {
-      return { ok: true, exitCode: session.lastExitCode ?? 0 };
+    const parsedExitCode = runtimeExitCodeFromMarker(session.history, token);
+    if (parsedExitCode !== undefined) {
+      if (parsedExitCode !== 0) return { ok: false, exitCode: parsedExitCode, error: `command exited with code ${parsedExitCode}` };
+      return { ok: true, exitCode: parsedExitCode };
     }
     await new Promise((resolve) => setTimeout(resolve, 120));
   }
@@ -1087,6 +1266,7 @@ function terminalInfo(session: TerminalSession): TerminalInfo {
 }
 
 function sendTerminalMeta(session: TerminalSession) {
+  session.runtimeStateSeq += 1;
   syncTrayAttention();
   sendTerminalEvent(session, { type: "meta", terminal: terminalInfo(session) });
 }
@@ -1162,6 +1342,7 @@ function handleCliLifecycleEvent(event: CliLifecycleEvent) {
     if (session) {
       applyAiSessionIdentity(session, event);
       session.activity = "running";
+      session.aiTaskState = "running";
       session.updatedAt = Date.now();
       sendTerminalMeta(session);
     }
@@ -1173,6 +1354,7 @@ function handleCliLifecycleEvent(event: CliLifecycleEvent) {
   if (session) {
     applyAiSessionIdentity(session, event);
     session.activity = "attention";
+    session.aiTaskState = completion ? "finished" : "waiting_input";
     session.updatedAt = Date.now();
     sendTerminalMeta(session);
     notifyTerminalAttention(session, message, completion);
@@ -1556,16 +1738,20 @@ function createTerminalSession(
     pending: "",
     subscribers: new Set([owner.id]),
     lastBellAt: 0,
+    runtimeStateSeq: 0,
   };
   terminalSessions.set(session.id, session);
+  recordRuntimeLifecycle(session, "created");
   recordSessionDirectory(session);
   terminal.onData((data) => appendTerminalOutput(session, data));
   terminal.onExit(({ exitCode }) => {
     flushTerminalOutput(session);
     session.status = "exited";
     session.lastExitCode = exitCode;
+    if (session.aiSource) session.aiTaskState = exitCode === 0 ? "finished" : "failed";
     session.exitedAt = Date.now();
     session.updatedAt = Date.now();
+    recordRuntimeLifecycle(session, "exited", exitCode);
     sendTerminalEvent(session, { type: "exit", code: exitCode });
     if (!isQuitting) queueTerminalSnapshotSave();
   });
@@ -3028,12 +3214,17 @@ ipcMain.handle("terminal:attach", async (event, id: unknown) => {
   const session = terminalSessions.get(id);
   if (!session) return null;
   session.subscribers.add(event.sender.id);
+  recordRuntimeLifecycle(session, "attached");
   return { terminal: terminalInfo(session), snapshot: session.history };
 });
 
 ipcMain.handle("terminal:detach", (event, id: unknown) => {
   if (typeof id !== "string" || !UUID_PATTERN.test(id)) return false;
-  return terminalSessions.get(id)?.subscribers.delete(event.sender.id) ?? false;
+  const session = terminalSessions.get(id);
+  if (!session) return false;
+  const detached = session.subscribers.delete(event.sender.id);
+  if (detached) recordRuntimeLifecycle(session, "detached");
+  return detached;
 });
 
 ipcMain.handle("terminal:write", (event, id: unknown, data: unknown) => {
@@ -3081,6 +3272,7 @@ ipcMain.handle("terminal:close", (event, id: unknown) => {
   if (session.flushTimer) clearTimeout(session.flushTimer);
   if (session.resizeTimer) clearTimeout(session.resizeTimer);
   session.status = "exited";
+  recordRuntimeLifecycle(session, "closed", session.lastExitCode);
   session.subscribers.clear();
   try { session.pty.kill(); } catch { /* The terminal may already have exited. */ }
   queueTerminalSnapshotSave();
@@ -3273,28 +3465,23 @@ void app.whenReady().then(async () => {
   void startRuntimeControl(app.getPath("userData"), {
     windowId: runtimeWindowId,
     createTab: (params) => runtimeCreateTab(params),
-    listPanes: () => [...terminalSessions.values()].map((session) => ({
-      pane_id: session.id,
-      window_id: runtimeWindowId(),
-      title: session.title,
-      cwd: session.cwd,
-      shell: session.shell,
-      kind: session.kind,
-      activity: session.activity,
-      status: session.status,
-      exit_code: session.lastExitCode,
-      cols: session.cols,
-      rows: session.rows,
-    })),
+    listPanes: () => [...terminalSessions.values()].map((session) => runtimePaneSnapshot(session)),
     focusPane: (paneId) => {
       const session = terminalSessions.get(paneId);
-      if (session) sendTerminalEvent(session, { type: "focus" });
+      if (session) {
+        showMainWindow();
+        sendTerminalEvent(session, { type: "focus" });
+      }
     },
+    focusWindow: () => showMainWindow(),
     readPane: (paneId, lines) => runtimeReadPane(paneId, lines),
     writeInput: (paneId, text, submit) => runtimeWriteInput(paneId, text, submit),
+    sendKey: (paneId, key, modifiers, repeat) => runtimeSendKey(paneId, key, modifiers, repeat),
     runCommand: (paneId, command, timeoutMs) => runtimeRunCommand(paneId, command, timeoutMs),
     requestSplit: (paneId, direction) => runtimeRequestSplit(paneId, direction),
-  }).then((endpoint) => {
+    listProcesses: (paneId) => runtimeListProcesses(paneId),
+    waitPane: (paneId, state, timeoutMs, afterSeq) => runtimeWaitForPane(paneId, state, timeoutMs, afterSeq),
+    lifecycleEvents: (sinceSequence) => runtimeLifecycleSince(sinceSequence),  }).then((endpoint) => {
     bootTrace(`runtime-control:${endpoint.port}`);
   }).catch((reason) => {
     bootTrace(`runtime-control-error:${reason instanceof Error ? reason.message : String(reason)}`);
