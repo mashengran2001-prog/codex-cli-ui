@@ -39,6 +39,10 @@ try {
   assert.deepEqual(initialTabOptions, ["侧边", "顶部"]);
   // 设置是单例标签：侧边标签条先出现设置行，切到顶部后顶部标签条仍有同一设置标签
   assert.equal(await page.locator('.terminal-tab[data-tab-kind="settings"]').count(), 1);
+  // 侧边标签模式：标题栏只留设置齿轮，三点仅侧栏一组，不出现两个三点菜单（对标 Nebula 标题栏齿轮）
+  assert.equal(await page.getByTitle("更多操作").count(), 0);
+  assert.equal(await page.getByTitle("打开设置").count(), 1);
+  assert.equal(await page.locator(".side-heading-actions .lucide-ellipsis-vertical").count(), 1);
   await page.getByLabel("标签栏位置").selectOption("top");
   await page.locator('.terminal-top-tab[data-tab-kind="settings"]').waitFor();
   assert.equal(await page.locator('.terminal-top-tab[data-tab-kind="settings"]').count(), 1);

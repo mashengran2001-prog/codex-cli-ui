@@ -1217,7 +1217,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
             <button title={workbenchCopy.commandPalette} onClick={() => setPaletteOpen(true)}><Command size={14} /></button>
           </>}
           {primaryView && <button title={sidebarCollapsed ? workbenchCopy.showSidebar : workbenchCopy.hideSidebar} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}</button>}
-          {!showTopTabs && !terminalView && <button className={moreMenuOpen ? "active" : ""} title={workbenchCopy.moreActions} onClick={(event) => toggleMoreMenu(event.currentTarget)}><EllipsisVertical size={16} /></button>}
+          {!showTopTabs && <button className={view === "settings" ? "active" : ""} title={workbenchCopy.openSettingsAction} onClick={openSettings}><Settings2 size={15} /></button>}
         </div>
       </header>
       {quarantine?.quarantined && !quarantineDismissed && (

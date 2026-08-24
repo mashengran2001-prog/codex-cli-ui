@@ -50,6 +50,7 @@ try {
   // Nebula 默认侧边：只有侧栏一组 + / 竖三点，顶部没有更多菜单
   assert.equal(await desktop.page.getByTitle("更多操作").count(), 0);
   assert.equal(await desktop.page.locator(".side-heading-actions button").count(), 2);
+  assert.equal(await desktop.page.getByTitle("打开设置").count(), 1);
   await desktop.page.getByTitle("CLI 工具设置").click();
   await desktop.page.locator(".terminal-settings").waitFor();
   await desktop.page.getByLabel("标签栏位置").selectOption("top");
