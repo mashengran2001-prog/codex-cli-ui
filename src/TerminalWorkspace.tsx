@@ -513,6 +513,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     return () => { cancelled = true; window.clearTimeout(timeout); };
   }, [settings.cliProfiles]);
 
+  const splitPaneRef = useRef<(direction: SplitDirection, sessionId?: string, anchorId?: string) => Promise<string | undefined>>(async () => undefined);
   useEffect(() => window.codex.onTerminalEvent((event: TerminalEvent) => {
     const previous = sessionsRef.current.find((item) => item.id === event.sessionId);
     if (event.type === "meta" && event.terminal) {
@@ -527,6 +528,11 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     } else if (event.type === "exit") {
       setSessions((current) => current.map((item) => item.id === event.sessionId ? { ...item, status: "exited", activity: "idle", exitCode: event.code ?? item.exitCode, exitedAt: Date.now(), updatedAt: Date.now() } : item));
       setNotice({ sessionId: event.sessionId, title: previous?.title || workbenchCopy.terminal, message: workbenchCopy.processExited(event.code) });
+    } else if (event.type === "runtime" && event.action?.kind === "split") {
+      const target = event.sessionId;
+      void splitPaneRef.current(event.action.direction, target, target).then((paneId) => {
+        window.codex.resolveRuntimeAction(event.action!.actionId, paneId ? { ok: true, paneId } : { ok: false, error: "split failed" });
+      });
     } else if (event.type === "bell") {
       setNotice({ sessionId: event.sessionId, title: previous?.title || workbenchCopy.terminal, message: previous?.activity === "attention" ? workbenchCopy.inputRequested : workbenchCopy.attentionRequested });
       if (settings.bellMode === "flash" || settings.bellMode === "both") {
@@ -547,15 +553,15 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     return () => window.clearTimeout(timeout);
   }, [notice]);
 
-  const splitPane = useCallback(async (direction: SplitDirection, sessionId?: string, anchorId?: string) => {
-    if (leafCount(treeRef.current) >= 4) { onError(workbenchCopy.maxPanes); return; }
+  const splitPane = useCallback(async (direction: SplitDirection, sessionId?: string, anchorId?: string): Promise<string | undefined> => {
+    if (leafCount(treeRef.current) >= 4) { onError(workbenchCopy.maxPanes); return undefined; }
     let id = sessionId;
     if (!id || containsLeaf(treeRef.current, id)) {
       const current = sessionsRef.current.find((item) => item.id === activeSessionIdRef.current);
       const created = await createTerminal(current?.cwd || projectPath, { reuseExisting: false, shellId: settings.defaultShellId, activate: false });
       id = created?.id;
     }
-    if (!id) return;
+    if (!id) return undefined;
     setPaneTree((current) => {
       if (!current) return { type: "leaf", sessionId: id! };
       if (containsLeaf(current, id!)) return current;
@@ -566,6 +572,8 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     setView("terminal");
     onWorkspaceModeChange("terminal");
   }, [createTerminal, onError, onWorkspaceModeChange, projectPath, settings.defaultShellId, workbenchCopy]);
+
+  splitPaneRef.current = splitPane;
 
   const focusPane = useCallback((offset: number) => {
     const ids = collectLeafIds(treeRef.current);

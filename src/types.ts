@@ -271,11 +271,13 @@ export interface AiForkRequest {
 
 export interface TerminalEvent {
   sessionId: string;
-  type: "data" | "exit" | "error" | "bell" | "focus" | "meta";
+  type: "data" | "exit" | "error" | "bell" | "focus" | "meta" | "runtime";
   data?: string;
   code?: number;
   message?: string;
   terminal?: TerminalInfo;
+  /** Runtime control action (type "runtime"). */
+  action?: { kind: "split"; direction: "columns" | "rows"; actionId: string };
 }
 
 export interface ShellProfile {
@@ -464,6 +466,7 @@ export interface CodexBridge {
   setCliLifecycleEnabled(enabled: boolean): Promise<CliLifecycleStatus>;
   onRunEvent(listener: (event: RunEvent) => void): () => void;
   onTerminalEvent(listener: (event: TerminalEvent) => void): () => void;
+  resolveRuntimeAction(id: string, result: { ok: boolean; paneId?: string; error?: string }): void;
   onShellsChanged(listener: (shells: ShellProfile[]) => void): () => void;
   onQuickTerminal(listener: () => void): () => void;
   pullLauncherRequest(): Promise<LauncherRequest | null>;

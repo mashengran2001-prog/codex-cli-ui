@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { _electron as electron } from "playwright";
 import electronPath from "electron";
@@ -135,7 +136,56 @@ try {
   await window.getByLabel("代理地址").fill("");
   await window.getByLabel("不走代理的地址").fill("");
   await window.waitForFunction(async () => (await window.codex.getAppSettings()).proxyUrl === "", undefined, { timeout: 15_000 });
-  console.log("electron-workflow: Codex IPC, session persistence, real ConPTY terminal, and per-window proxy passed");
+  // Runtime control server: endpoint file + TCP describe + orchestrate workflow
+  const runtimeEndpointPath = join(userData, "runtime-endpoint.json");
+  await new Promise((resolve, reject) => {
+    const deadline = Date.now() + 15_000;
+    const poll = () => {
+      if (existsSync(runtimeEndpointPath)) return resolve();
+      if (Date.now() > deadline) return reject(new Error("runtime endpoint file was not written"));
+      setTimeout(poll, 200);
+    };
+    poll();
+  });
+  const endpoint = JSON.parse(readFileSync(runtimeEndpointPath, "utf8"));
+  assert.equal(typeof endpoint.port, "number");
+  assert.equal(typeof endpoint.token, "string");
+  const describe = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "describe", "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+  assert.equal(describe.ok, true);
+  assert.ok(describe.result.capabilities.includes("runtime.orchestrate"));
+  const workflow = {
+    steps: [
+      { id: "tab_a", op: "new_tab", cwd: root },
+      { id: "say_hi", op: "run", target: { step: "tab_a", field: "pane_id" }, command: "echo RUNTIME_CTL_OK", wait: true, timeout_ms: 20000 },
+      { id: "focus_back", op: "focus", target: { step: "tab_a", field: "pane_id" } },
+    ],
+    on_error: "stop",
+  };
+  const workflowPath = join(testRoot, "runtime-workflow.json");
+  writeFileSync(workflowPath, JSON.stringify(workflow));
+  const receipt = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "orchestrate", "--file", workflowPath, "--endpoint", runtimeEndpointPath], { encoding: "utf8" }));
+  assert.equal(receipt.ok, true, JSON.stringify(receipt.error || receipt.result));
+  assert.equal(receipt.result.ok, true, JSON.stringify(receipt.result));
+  assert.equal(receipt.result.completed, 3);
+  assert.equal(receipt.result.failed_step, null);
+  assert.ok(receipt.result.steps.every((step) => step.ok));
+  assert.equal(receipt.result.steps[0].op, "new_tab");
+  assert.ok(typeof receipt.result.steps[0].action.pane_id === "string" && receipt.result.steps[0].action.pane_id.length > 0);
+  // validation: forward reference must be rejected
+  const badWorkflow = { steps: [{ id: "later", op: "focus", target: { step: "tab_a", field: "pane_id" } }] };
+  const badResult = spawnSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "orchestrate", "--spec", JSON.stringify(badWorkflow), "--endpoint", runtimeEndpointPath], { encoding: "utf8", timeout: 10_000 });
+  assert.notEqual(badResult.status, 0, badResult.stdout);
+  const badReceipt = JSON.parse(badResult.stdout);
+  assert.equal(badReceipt.ok, false);
+  assert.equal(badReceipt.error.code, "invalid_params");
+  console.log("electron-runtime: runtime control TCP server, CLI describe/orchestrate, and validation passed");
+
+  // The orchestrate workflow created a real tab; close it before the app exits so the
+  // session-restore assertion below still sees exactly the one project terminal.
+  const createdPane = receipt.result.steps.find((step) => step.id === "tab_a")?.action?.pane_id;
+  assert.ok(typeof createdPane === "string" && createdPane.length > 0, "workflow did not report a created pane");
+  assert.equal(await window.evaluate((paneId) => window.codex.closeTerminal(paneId), createdPane), true);
+
 } finally {
   await app.close();
 }

@@ -70,6 +70,9 @@ const bridge: CodexBridge = {
     ipcRenderer.on("terminal:event", handler);
     return () => ipcRenderer.removeListener("terminal:event", handler);
   },
+  resolveRuntimeAction: (id: string, result: { ok: boolean; paneId?: string; error?: string }) => {
+    ipcRenderer.send("terminal:runtime-action-result", id, result);
+  },
   onShellsChanged: (listener: (shells: ShellProfile[]) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, value: ShellProfile[]) => listener(value);
     ipcRenderer.on("terminal:shells-changed", handler);

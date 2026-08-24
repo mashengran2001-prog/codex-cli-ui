@@ -486,6 +486,7 @@ export class CliLifecycleBridge {
     this.server = createServer((socket) => {
       const chunks: Buffer[] = [];
       let bytes = 0;
+      socket.on("error", (reason) => { this.error = reason.message; });
       socket.on("data", (chunk: Buffer) => {
         bytes += chunk.length;
         if (bytes <= MAX_PIPE_MESSAGE) chunks.push(chunk);

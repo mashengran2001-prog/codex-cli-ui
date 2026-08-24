@@ -59,6 +59,7 @@ import { DeepSeekProvider } from "./deepseek-provider";
 import { CliLifecycleBridge, type CliLifecycleEvent } from "./cli-lifecycle";
 import { ProviderRegistry, type AgentProvider, type ProviderRunContext } from "./provider-registry";
 import { enumerateSystemFonts } from "./system-fonts";
+import { startRuntimeControl, startRuntimeHeartbeat, settleRuntimeAction, trackRuntimeActionResult } from "./runtime-control";
 import { terminalShellArguments, terminalTitleFromPath, wslQuickDirectoryEntries } from "./terminal-utils";
 import {
   parseSvnRevision,
@@ -224,6 +225,13 @@ let terminalIntegrationReady: Promise<void> = Promise.resolve();
 let sshProfilesReady: Promise<void> = Promise.resolve();
 let cliLifecycleReady: Promise<void> = Promise.resolve();
 const bootStartedAt = Date.now();
+
+process.on("uncaughtException", (error) => {
+  try { console.error("[main] uncaught exception:", error?.stack || String(error)); } catch { /* ignore */ }
+});
+process.on("unhandledRejection", (reason) => {
+  try { console.error("[main] unhandled rejection:", reason instanceof Error ? reason.stack : String(reason)); } catch { /* ignore */ }
+});
 
 app.setName("Codex CLI UI");
 process.env.CODEX_UI_SHELL_STARTUP_GUARD = "1";
@@ -950,6 +958,105 @@ function markTerminalRuntimeClean() {
     // Shutdown must continue even when the state file is locked.
   }
 }
+
+const runtimePaneWaits = new Map<string, { resolve(result: { ok: boolean; paneId?: string; error?: string }): void; timer: NodeJS.Timeout }>();
+
+function runtimeWindowId() {
+  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0];
+  return window ? window.id : 0;
+}
+
+function runtimeOwner() {
+  const window = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed()) || mainWindow;
+  return window ? window.webContents : undefined;
+}
+
+function stripAnsi(value: string) {
+  return value.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+}
+
+function runtimeReadPane(paneId: string, lines: number) {
+  const session = terminalSessions.get(paneId);
+  if (!session) return "";
+  const plain = stripAnsi(session.history).replace(/\r/g, "");
+  const parts = plain.split("\n").filter((line) => line.length > 0);
+  return parts.slice(-lines).join("\n");
+}
+
+function runtimeWriteInput(paneId: string, text: string, submit: boolean) {
+  const session = terminalSessions.get(paneId);
+  if (!session || session.status !== "running") return false;
+  const payload = submit ? text.replace(/\r?\n/g, "") + "\r" : text;
+  trackTerminalInput(session, payload);
+  try {
+    session.pty.write(payload);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function runtimeRunCommand(paneId: string, command: string, timeoutMs: number) {
+  const session = terminalSessions.get(paneId);
+  if (!session || session.status !== "running") return { ok: false, error: "pane is not running" };
+  const token = `__CODEX_UI_RUNTIME_${Math.random().toString(16).slice(2, 10)}__`;
+  const markerCommand = `${command.replace(/\r?\n/g, " ")}; echo ${token}`;
+  const payload = markerCommand + "\r";
+  trackTerminalInput(session, payload);
+  try {
+    session.pty.write(payload);
+  } catch {
+    return { ok: false, error: "failed to write to pane" };
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((session.status as string) === "exited") return { ok: false, exitCode: session.lastExitCode, error: `pane exited with code ${session.lastExitCode ?? "unknown"}` };
+    if (session.history.includes(token)) {
+      return { ok: true, exitCode: session.lastExitCode ?? 0 };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+  return { ok: false, error: `command timed out after ${Math.round(timeoutMs / 1000)}s` };
+}
+
+async function runtimeCreateTab(params: { cwd?: string; title?: string; shellId?: string; profileId?: string }) {
+  await terminalIntegrationReady;
+  bootTrace("runtime-newtab:integration-ready");
+  const owner = runtimeOwner();
+  if (!owner) throw new Error("no app window is available to host the terminal");
+  const cwd = params.cwd && isDirectory(params.cwd) ? resolve(params.cwd) : app.getPath("home");
+  bootTrace("runtime-newtab:creating-session");
+  const session = createTerminalSession(owner, {
+    cwd,
+    cols: 100,
+    rows: 30,
+    reuseExisting: false,
+    shellId: params.shellId,
+    profileId: params.profileId && PROVIDER_ID_PATTERN.test(params.profileId) ? params.profileId : undefined,
+    title: params.title,
+  });
+  bootTrace("runtime-newtab:created:" + session.id);
+  return { pane_id: session.id };
+}
+
+async function runtimeRequestSplit(paneId: string, direction: "columns" | "rows") {
+  const session = terminalSessions.get(paneId);
+  if (!session || session.status !== "running") return { ok: false, error: "pane is not running" };
+  const actionId = `split-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const pending = trackRuntimeActionResult(actionId, 8_000);
+  const timer = setTimeout(() => settleRuntimeAction(actionId, { ok: false, error: "renderer did not confirm the split" }), 8_000);
+  runtimePaneWaits.set(actionId, {
+    resolve: (result) => {
+      clearTimeout(timer);
+      runtimePaneWaits.delete(actionId);
+      settleRuntimeAction(actionId, result);
+    },
+    timer,
+  });
+  sendTerminalEvent(session, { type: "runtime", action: { kind: "split", direction, actionId } });
+  return pending;
+}
+
 
 function terminalInfo(session: TerminalSession): TerminalInfo {
   return {
@@ -3154,6 +3261,36 @@ void app.whenReady().then(async () => {
   queuedLauncherRequest = parseLauncherRequest(process.argv);
   createWindow();
   bootTrace("window-created");
+  startRuntimeHeartbeat();
+  void startRuntimeControl(app.getPath("userData"), {
+    windowId: runtimeWindowId,
+    createTab: (params) => runtimeCreateTab(params),
+    listPanes: () => [...terminalSessions.values()].map((session) => ({
+      pane_id: session.id,
+      window_id: runtimeWindowId(),
+      title: session.title,
+      cwd: session.cwd,
+      shell: session.shell,
+      kind: session.kind,
+      activity: session.activity,
+      status: session.status,
+      exit_code: session.lastExitCode,
+      cols: session.cols,
+      rows: session.rows,
+    })),
+    focusPane: (paneId) => {
+      const session = terminalSessions.get(paneId);
+      if (session) sendTerminalEvent(session, { type: "focus" });
+    },
+    readPane: (paneId, lines) => runtimeReadPane(paneId, lines),
+    writeInput: (paneId, text, submit) => runtimeWriteInput(paneId, text, submit),
+    runCommand: (paneId, command, timeoutMs) => runtimeRunCommand(paneId, command, timeoutMs),
+    requestSplit: (paneId, direction) => runtimeRequestSplit(paneId, direction),
+  }).then((endpoint) => {
+    bootTrace(`runtime-control:${endpoint.port}`);
+  }).catch((reason) => {
+    bootTrace(`runtime-control-error:${reason instanceof Error ? reason.message : String(reason)}`);
+  });
   if (appSettings.shellStartupIntegration) {
     void runShellStartupAction("Install").then((status) => {
       if (status.error) bootTrace(`shell-startup-repair-error:${status.error}`);
