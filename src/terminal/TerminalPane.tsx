@@ -208,10 +208,15 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
           () => finish(""),
         );
       });
-      void readClipboard().then((text) => {
+      // 优先走主进程剪贴板（Electron 渲染进程的 navigator.clipboard.readText 常因权限拿不到文本），
+      // 拿不到再退回浏览器 API，最后才是剪贴板截图粘贴 —— 修复 SSH/普通会话右键粘贴失效（Nebula #65）。
+      void window.codex.readClipboardText().then((text) => {
         if (text) { terminal.paste(text); return; }
-        void window.codex.pasteClipboardImage(session.kind === "ssh" ? session.sshProfileId : undefined).then((path) => {
-          if (path) return window.codex.writeTerminal(session.id, quotePath(path, session));
+        void readClipboard().then((fallback) => {
+          if (fallback) { terminal.paste(fallback); return; }
+          void window.codex.pasteClipboardImage(session.kind === "ssh" ? session.sshProfileId : undefined).then((path) => {
+            if (path) return window.codex.writeTerminal(session.id, quotePath(path, session));
+          });
         });
       });
     };

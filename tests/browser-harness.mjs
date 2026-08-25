@@ -149,7 +149,7 @@ export async function installMockBridge(page) {
       window.setTimeout(() => emit({ providerId: request.providerId, runId: request.runId, type: "exit", code: 0, stopped: false }), 115);
     };
 
-    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null, lastPasteProfileId: null, lastResumeId: null, lastFork: null, svnMode: false, lastGitAction: null, lastOpenedPath: null, $$callLog: { readDocument: [], readDocumentImage: [], exportTerminalSession: [] } };
+    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null, clipboardText: null, lastPasteProfileId: null, lastResumeId: null, lastFork: null, svnMode: false, lastGitAction: null, lastOpenedPath: null, lastOpenedShellProfile: null, shellProfilePaths: null, updateResult: null, $$callLog: { readDocument: [], readDocumentImage: [], exportTerminalSession: [] } };
     window.codex = {
       getInfo: async () => codexProvider,
       listProviders: async () => [codexProvider, deepseekProvider],
@@ -167,6 +167,10 @@ export async function installMockBridge(page) {
       openPath: async (path) => { window.__mock.lastOpenedPath = path ?? null; return !!path; },
       copyText: async () => true,
       pasteClipboardImage: async (sshProfileId) => { window.__mock.lastPasteProfileId = sshProfileId ?? null; return window.__mock.clipboardImage; },
+      readClipboardText: async () => window.__mock.clipboardText || "",
+      checkForUpdates: async () => window.__mock.updateResult || { latest: "v1.3.0", url: "https://github.com/mashengran2001-prog/codex-cli-ui/releases/tag/v1.3.0", name: "Nebula Terminal 1.3.0", publishedAt: "2026-08-24T00:00:00Z" },
+      getShellProfilePath: async (shellId) => (window.__mock.shellProfilePaths ? (window.__mock.shellProfilePaths[shellId] ?? null) : (shellId === "powershell" || shellId === "pwsh" ? "C:\\Users\\test\\Documents\\PowerShell\\profile.ps1" : null)),
+      openShellProfile: async (shellId) => { window.__mock.lastOpenedShellProfile = shellId; return true; },
       openTerminal: async () => true,
       listShells: async () => [
         { id: "powershell", label: "Windows PowerShell", command: "powershell.exe", kind: "powershell" },

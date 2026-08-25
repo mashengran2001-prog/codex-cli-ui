@@ -68,6 +68,18 @@ try {
   const detectedShells = await window.evaluate(async () => window.codex.listShells());
   assert.ok(detectedShells.some((shell) => shell.id === "nu" && shell.kind === "nushell" && shell.label === "Nushell"), JSON.stringify(detectedShells.map((shell) => ({ id: shell.id, kind: shell.kind }))));
   console.log("electron-shells: Nushell detected via PATH (Nebula v1.2 shell 分类注入)");
+  // #65/#47/#31 新增 IPC：剪贴板文本读取、GitHub 更新检查、shell 配置文件路径
+  const clipboardText = await window.evaluate(async () => window.codex.readClipboardText());
+  assert.equal(typeof clipboardText, "string");
+  const pwshProfile = await window.evaluate(async () => window.codex.getShellProfilePath("powershell"));
+  assert.ok(typeof pwshProfile === "string" && /profile\.ps1$/i.test(pwshProfile), `powershell profile path: ${pwshProfile}`);
+  const cmdProfile = await window.evaluate(async () => window.codex.getShellProfilePath("cmd"));
+  assert.equal(cmdProfile, null);
+  const updateCheck = await window.evaluate(async () => window.codex.checkForUpdates());
+  assert.ok(updateCheck && (typeof updateCheck.latest === "string" || typeof updateCheck.error === "string"), JSON.stringify(updateCheck));
+  const openCmdProfile = await window.evaluate(async () => window.codex.openShellProfile("cmd"));
+  assert.equal(openCmdProfile, false);
+  console.log("electron-issue-ipc: clipboard/profile/update-check channels answered");
 
   await window.getByText("Fix the parser from CLI").first().click();
   const textarea = window.locator("textarea");

@@ -3170,6 +3170,64 @@ ipcMain.handle("clipboard:paste-image", async (_event, sshProfileId: unknown) =>
   }
 });
 
+ipcMain.handle("clipboard:read-text", () => {
+  const text = clipboard.readText();
+  return typeof text === "string" && text.length <= 10_000_000 ? text : "";
+});
+
+ipcMain.handle("updates:check", async () => {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const response = await fetch("https://api.github.com/repos/mashengran2001-prog/codex-cli-ui/releases/latest", {
+      signal: controller.signal,
+      headers: { "User-Agent": "codex-cli-ui", Accept: "application/vnd.github+json" },
+    });
+    clearTimeout(timer);
+    if (!response.ok) return { error: `GitHub API ${response.status}` };
+    const release = await response.json() as { tag_name?: unknown; name?: unknown; published_at?: unknown; html_url?: unknown };
+    return {
+      latest: typeof release.tag_name === "string" ? release.tag_name : "",
+      name: typeof release.name === "string" ? release.name : "",
+      publishedAt: typeof release.published_at === "string" ? release.published_at : "",
+      url: typeof release.html_url === "string" ? release.html_url : "",
+    };
+  } catch (reason) {
+    return { error: reason instanceof Error ? reason.message : "网络请求失败" };
+  }
+});
+
+function shellProfilePath(shellId: string): string | null {
+  const id = shellId.toLowerCase();
+  if (id.includes("powershell") || id.includes("pwsh")) {
+    const windowsPowerShell = id === "powershell" || id === "powershell.exe" || id.startsWith("powershell");
+    return join(app.getPath("documents"), windowsPowerShell ? "WindowsPowerShell" : "PowerShell", "profile.ps1");
+  }
+  if (id === "nu" || id === "nu.exe" || id === "nushell") return join(process.env.APPDATA || homedir(), "nushell", "config.nu");
+  if (id === "bash" || id === "bash.exe" || id.includes("git") || id === "sh") return join(homedir(), ".bashrc");
+  if (id === "zsh" || id === "zsh.exe") return join(homedir(), ".zshrc");
+  return null;
+}
+
+ipcMain.handle("shell:profile-path", (_event, shellId: unknown) => {
+  if (typeof shellId !== "string" || !shellId) return null;
+  return shellProfilePath(shellId);
+});
+
+ipcMain.handle("shell:open-profile", async (_event, shellId: unknown) => {
+  if (typeof shellId !== "string" || !shellId) return false;
+  const profilePath = shellProfilePath(shellId);
+  if (!profilePath) return false;
+  try {
+    await mkdir(dirname(profilePath), { recursive: true });
+    if (!existsSync(profilePath)) writeFileSync(profilePath, "", "utf8");
+    const error = await shell.openPath(profilePath);
+    return error === "";
+  } catch {
+    return false;
+  }
+});
+
 ipcMain.handle("path:terminal", async (_event, value: unknown) => {
   if (!isDirectory(value)) return false;
   const escaped = value.replace(/'/g, "''");

@@ -1378,6 +1378,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-ssh-main { display: flex; min-width: 0; flex: 1; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; padding: 0; border: 0; background: transparent; color: var(--t-text); text-align: left; cursor: pointer; }
 .settings-ssh-main strong { overflow: hidden; max-width: 100%; font-size: 11px; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
 .settings-ssh-main small { overflow: hidden; max-width: 100%; color: var(--t-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.shell-profile-row { gap: 6px; flex-wrap: wrap; }
+.shell-profile-row select { min-width: 0; flex: 1 1 auto; }
+.shell-profile-row > button { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid var(--t-border); border-radius: 4px; background: var(--t-accent-soft); color: var(--t-accent); font-size: 9px; cursor: pointer; }
+.shell-profile-row > button:disabled { opacity: .45; cursor: default; }
+.settings-update-row { align-items: flex-start; flex-direction: column; gap: 8px; }
+.settings-update-button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--t-border); border-radius: 5px; background: var(--t-accent-soft); color: var(--t-accent); font-size: 9.5px; cursor: pointer; }
+.settings-update-button:disabled { opacity: .5; cursor: default; }
+.settings-update-result { display: inline-flex; align-items: center; gap: 8px; color: var(--t-text); font-size: 10px; flex-wrap: wrap; }
+.settings-update-result.error { color: var(--t-danger); }
+.settings-update-result button { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border: 1px solid var(--t-border); border-radius: 4px; background: var(--t-panel-2); color: var(--t-accent); font-size: 9px; cursor: pointer; }
+.pane-divider::before { position: absolute; inset: -3px; content: ""; }
 .settings-ssh-actions { display: flex; flex: 0 0 auto; gap: 2px; opacity: 0; }
 .settings-ssh-row:hover .settings-ssh-actions, .settings-ssh-row.confirm .settings-ssh-actions { opacity: 1; }
 .settings-ssh-actions button { display: grid; width: 26px; height: 26px; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--t-muted); cursor: pointer; }

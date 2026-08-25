@@ -411,6 +411,15 @@ export interface PersistedState {
   activeProviderId: AgentProviderId;
 }
 
+export interface UpdateCheckResult {
+  /** 最新发布 tag，例如 v1.3.0。 */
+  latest?: string;
+  name?: string;
+  publishedAt?: string;
+  url?: string;
+  error?: string;
+}
+
 export interface CodexBridge {
   /** 终端渲染器模式：webgl（默认，几何绘制制表符）或 dom（测试环境。 */
   rendererMode: "webgl" | "dom";
@@ -430,6 +439,10 @@ export interface CodexBridge {
   openPath(path: string): Promise<boolean>;
   copyText(text: string): Promise<boolean>;
   pasteClipboardImage(sshProfileId?: string): Promise<string | null>;
+  readClipboardText(): Promise<string>;
+  checkForUpdates(): Promise<UpdateCheckResult>;
+  getShellProfilePath(shellId: string): Promise<string | null>;
+  openShellProfile(shellId: string): Promise<boolean>;
   openTerminal(path: string): Promise<boolean>;
   listShells(): Promise<ShellProfile[]>;
   listCliTools(): Promise<CliToolInfo[]>;

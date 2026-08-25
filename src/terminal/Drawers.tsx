@@ -173,7 +173,7 @@ export function DirectoriesDrawer({ onClose, onNewTerminal, onCd, onError }: {
       <div className="drawer-heading"><div><History size={15} /><strong>{copy.title}</strong><span>{visibleEntries.length}</span></div><button title={copy.close} onClick={onClose}><X size={14} /></button></div>
       <label className="drawer-search"><Search size={13} /><input value={query} placeholder={copy.search} onChange={(event) => setQuery(event.target.value)} /></label>
       <div className="file-list">
-        {visibleEntries.map((entry) => <div className="file-row directories-row" key={entry.path} title={entry.path}>
+        {visibleEntries.map((entry) => <div className="file-row directories-row" key={entry.path} title={entry.path} onClick={(event) => { if (!(event.target as HTMLElement).closest("button")) onCd(entry.path); }}>
           <span className={`file-kind ${entry.source === "wsl" ? "wsl" : entry.pinned ? "pinned" : "directory"}`}>{entry.source === "wsl" ? <TerminalSquare size={13} /> : entry.pinned ? <Pin size={13} /> : <Folder size={14} />}</span>
           <button className="directories-jump" title={copy.jump} onClick={() => onCd(entry.path)}><strong>{baseName(entry.path)}</strong><small>{entry.path}</small></button>
           <span className="drawer-row-actions">

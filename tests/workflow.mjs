@@ -329,6 +329,18 @@ try {
   await page.locator(".terminal-settings").waitFor();
   // 再次打开仍是同一个单例标签
   assert.equal(await page.locator('.terminal-top-tab[data-tab-kind="settings"]').count(), 1);
+  // #31 打开 Shell 配置文件：默认 shell 有 profile 时按钮可用并调用 IPC
+  const profileButton = page.getByRole("button", { name: "打开配置文件" });
+  await profileButton.waitFor();
+  assert.equal(await profileButton.isDisabled(), false);
+  await profileButton.click();
+  await page.waitForFunction(() => window.__mock.lastOpenedShellProfile != null);
+  // #47 检查更新：点击后展示最新版本与下载入口
+  await page.evaluate(() => { window.__mock.updateResult = { latest: "v9.9.9", url: "https://github.com/mashengran2001-prog/codex-cli-ui/releases/tag/v9.9.9", name: "Nebula Terminal 9.9.9", publishedAt: "2026-08-25T00:00:00Z" }; });
+  await page.getByRole("button", { name: "检查更新" }).click();
+  await page.getByText(/发现新版本 v9\.9\.9/).waitFor();
+  await page.getByRole("button", { name: "打开下载页" }).click();
+  await page.waitForFunction(() => window.__mock.lastOpenedPath === "https://github.com/mashengran2001-prog/codex-cli-ui/releases/tag/v9.9.9");
   await page.getByLabel("补全样式").selectOption("inline");
   await page.getByLabel("字符宽度").selectOption("compact");
   await page.locator('.terminal-top-tab[data-tab-kind="settings"] .terminal-tab-close').click();
@@ -439,6 +451,9 @@ try {
   const docsRow = page.locator(".directories-row", { hasText: "docs" });
   await docsRow.locator(".directories-jump").click();
   await page.waitForFunction(() => window.__mock.terminalWrites.some((write) => String(write.data).startsWith("Set-Location -LiteralPath 'F:\\demo\\docs'")));
+  // #62 目录行左键：点击行内非按钮区域同样切换目录（不再只有名字区域可点）
+  await docsRow.locator(".file-kind").click();
+  await page.waitForFunction(() => window.__mock.terminalWrites.filter((write) => String(write.data).startsWith("Set-Location -LiteralPath 'F:\\demo\\docs'")).length >= 2);
   await docsRow.locator(".drawer-row-actions button").nth(1).click();
   await page.waitForFunction(() => window.__mock.directoryEntries.find((entry) => entry.path === "F:\\demo\\docs")?.pinned === true);
   await docsRow.locator(".drawer-row-actions button").nth(1).click();
@@ -457,6 +472,12 @@ try {
   await page.keyboard.press("Control+v");
   await page.waitForFunction(() => window.__mock.terminalWrites.some((write) => write.data === "'F:\\demo\\clipboard.png'"));
   await page.evaluate(() => { window.__mock.clipboardImage = null; });
+  // #65 文本粘贴：剪贴板有文本时走主进程 IPC 读取并写入终端（普通会话）
+  await page.evaluate(() => { window.__mock.clipboardText = "echo pasted-text"; });
+  await page.locator(".terminal-pane-leaf").first().locator(".xterm-screen").click();
+  await page.keyboard.press("Control+v");
+  await page.waitForFunction(() => window.__mock.terminalWrites.some((write) => write.data === "echo pasted-text"));
+  await page.evaluate(() => { window.__mock.clipboardText = null; });
   // SSH 截图粘贴：SSH 会话粘贴时应把 sshProfileId 传给 bridge，远端图片路径写入终端
   await page.evaluate(() => { window.__mock.clipboardImage = "/tmp/codex-ui-paste-123.png"; });
   await page.getByTitle("连接 Dev server").click();
@@ -465,6 +486,13 @@ try {
   await page.keyboard.press("Control+v");
   await page.waitForFunction(() => window.__mock.terminalWrites.some((write) => String(write.data).includes("codex-ui-paste-123.png")));
   assert.equal(await page.evaluate(() => window.__mock.lastPasteProfileId), "ssh-mock");
+  // #65 SSH 文本粘贴：文本优先于截图路径，粘贴内容写入 SSH pane
+  const sshPasteBefore = await page.evaluate(() => window.__mock.terminalWrites.length);
+  await page.evaluate(() => { window.__mock.clipboardText = "echo ssh-pasted"; window.__mock.clipboardImage = null; });
+  await page.locator(".terminal-pane-shell").last().locator(".xterm-screen").click();
+  await page.keyboard.press("Control+v");
+  await page.waitForFunction((before) => window.__mock.terminalWrites.slice(before).some((write) => write.data === "echo ssh-pasted"), sshPasteBefore);
+  await page.evaluate(() => { window.__mock.clipboardText = null; });
   // SSH pane 退出后出现重试按钮，点击后旧会话关闭并重建 SSH 会话
   const sshSessionId = await page.evaluate(() => {
     const session = window.__mock.terminalSessions.find((item) => item.kind === "ssh");

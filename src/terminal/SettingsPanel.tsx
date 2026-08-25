@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { BellRing, Brain, Check, ChevronDown, Command, Download, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Pencil, Plug, Plus, RotateCcw, Search, Server, TerminalSquare, Trash2, Undo2, X, type LucideIcon } from "lucide-react";
+import { BellRing, Brain, Check, ChevronDown, Command, Download, ExternalLink, FileCode2, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Pencil, Plug, Plus, RotateCcw, Search, Server, TerminalSquare, Trash2, Undo2, X, type LucideIcon } from "lucide-react";
 import BrandIcon, { type BrandIconName } from "../BrandIcon";
 import { chordFromEvent, isModifierOnly, modifierPrefix, setKeybindingCaptureActive } from "../keybindings";
-import type { AppSettings, CliLifecycleStatus, CliProfile, CliToolInfo, KeybindingAction, ShellProfile, SshProfile, TerminalThemeName } from "../types";
+import type { AppSettings, CliLifecycleStatus, CliProfile, CliToolInfo, KeybindingAction, ShellProfile, SshProfile, TerminalThemeName, UpdateCheckResult } from "../types";
 import { DEFAULT_KEYBINDINGS } from "../types";
 import { getSettingsCopy } from "../i18n";
 import { terminalThemes } from "./themes";
@@ -65,12 +65,35 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
   const [sshDeleteConfirm, setSshDeleteConfirm] = useState<string>();
   const [sshUndo, setSshUndo] = useState<{ host: SshProfile; seq: number }>();
   const [sshStatus, setSshStatus] = useState<{ message: string; error?: boolean }>();
+  const [profilePath, setProfilePath] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState(false);
+  const [updateState, setUpdateState] = useState<"idle" | "checking" | "done" | "error">("idle");
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
   const refreshSshHosts = useCallback(() => {
     void window.codex.listSshProfiles()
       .then(setSshHosts)
       .catch(() => setSshStatus({ message: copy.loadSshFailed, error: true }));
   }, [copy.loadSshFailed]);
   useEffect(() => { refreshSshHosts(); }, [refreshSshHosts]);
+  useEffect(() => {
+    let cancelled = false;
+    void window.codex.getShellProfilePath(settings.defaultShellId)
+      .then((path) => { if (!cancelled) { setProfilePath(path); setProfileError(false); } })
+      .catch(() => { if (!cancelled) { setProfilePath(null); setProfileError(false); } });
+    return () => { cancelled = true; };
+  }, [settings.defaultShellId]);
+  const openShellProfile = async (shellId: string) => {
+    setProfileError(false);
+    const ok = await window.codex.openShellProfile(shellId).catch(() => false);
+    setProfileError(!ok);
+  };
+  const checkForUpdates = async () => {
+    setUpdateState("checking");
+    setUpdateResult(null);
+    const result = await window.codex.checkForUpdates().catch<UpdateCheckResult>(() => ({ error: copy.updateCheckFailed }));
+    setUpdateResult(result);
+    setUpdateState(result.error ? "error" : "done");
+  };
   useEffect(() => {
     if (!sshUndo) return;
     const timer = window.setTimeout(() => {
@@ -277,7 +300,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <div className="settings-group-divider" />
         <section id="settings-terminal">
           <h2>{copy.terminal}</h2>
-          <div className="settings-row"><label>{copy.defaultShell}</label><select value={settings.defaultShellId} onChange={(event) => update("defaultShellId", event.target.value)}>{shells.map((shell) => <option value={shell.id} key={shell.id}>{shell.label}</option>)}</select></div>
+          <div className="settings-row shell-profile-row"><label>{copy.defaultShell}</label><select aria-label={copy.defaultShell} value={settings.defaultShellId} onChange={(event) => update("defaultShellId", event.target.value)}>{shells.map((shell) => <option value={shell.id} key={shell.id}>{shell.label}</option>)}</select><button title={profilePath || copy.profileUnavailable} disabled={!profilePath} onClick={() => void openShellProfile(settings.defaultShellId)}><FileCode2 size={12} />{copy.openProfile}</button>{profileError && <small className="settings-update-result error">{copy.profileOpenFailed}</small>}</div>
           <div className="settings-row"><label>{copy.newTabPlacement}</label><select aria-label={copy.newTabPlacement} value={settings.newTabPlacement} onChange={(event) => update("newTabPlacement", event.target.value as AppSettings["newTabPlacement"])}><option value="after-active">{copy.afterActiveTab}</option><option value="end">{copy.appendToEnd}</option></select></div>
           <div className="settings-row"><label>{copy.tabPosition}</label><select aria-label={copy.tabPosition} value={settings.tabPosition} onChange={(event) => update("tabPosition", event.target.value as AppSettings["tabPosition"])}><option value="side">{copy.tabPositionSide}</option><option value="top">{copy.tabPositionTop}</option></select></div>
           <div className="settings-row"><label>{copy.cursorShape}</label><select aria-label={copy.cursorShape} value={settings.cursorStyle} onChange={(event) => update("cursorStyle", event.target.value as AppSettings["cursorStyle"])}><option value="bar">{copy.cursorBar}</option><option value="block">{copy.cursorBlock}</option><option value="underline">{copy.cursorUnderline}</option></select></div>
@@ -428,6 +451,19 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
             {keymapVisible.size === 0 && <div className="keymap-empty">{copy.keymapNoMatches}</div>}
           </div>
           <p className="keymap-footer-hint">{copy.keymapFooterHint}</p>
+        </section>
+          <div className="settings-group-divider" />
+        <section id="settings-about">
+          <h2>{copy.about}</h2>
+          <div className="settings-row settings-update-row">
+            <button className="settings-update-button" disabled={updateState === "checking"} onClick={() => void checkForUpdates()}>
+              {updateState === "checking" ? <LoaderCircle className="spin" size={12} /> : <Download size={12} />}
+              {updateState === "checking" ? copy.checkingUpdates : copy.checkForUpdates}
+            </button>
+            {updateState === "done" && updateResult?.latest ? <span className="settings-update-result"><strong>{copy.updateAvailable(updateResult.latest)}</strong>{updateResult.url ? <button title={copy.updateOpenDownload} onClick={() => void window.codex.openPath(updateResult.url as string)}><ExternalLink size={12} />{copy.updateOpenDownload}</button> : null}</span> : null}
+            {updateState === "done" && !updateResult?.latest ? <span className="settings-update-result">{copy.updateNone}</span> : null}
+            {updateState === "error" ? <span className="settings-update-result error">{updateResult?.error || copy.updateCheckFailed}</span> : null}
+          </div>
         </section>
           </div>
         </div>
