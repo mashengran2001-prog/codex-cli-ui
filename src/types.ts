@@ -440,6 +440,8 @@ export interface CodexBridge {
   copyText(text: string): Promise<boolean>;
   pasteClipboardImage(sshProfileId?: string): Promise<string | null>;
   readClipboardText(): Promise<string>;
+  getAppUserModelId(): Promise<string>;
+  getWindowIconSize(): Promise<{ width: number; height: number } | null>;
   checkForUpdates(): Promise<UpdateCheckResult>;
   getShellProfilePath(shellId: string): Promise<string | null>;
   openShellProfile(shellId: string): Promise<boolean>;

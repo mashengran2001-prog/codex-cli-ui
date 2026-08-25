@@ -79,6 +79,10 @@ try {
   assert.ok(updateCheck && (typeof updateCheck.latest === "string" || typeof updateCheck.error === "string"), JSON.stringify(updateCheck));
   const openCmdProfile = await window.evaluate(async () => window.codex.openShellProfile("cmd"));
   assert.equal(openCmdProfile, false);
+    const userModelId = await window.evaluate(async () => window.codex.getAppUserModelId());
+  assert.equal(userModelId, "com.local.codexcliui");
+  const windowIcon = await window.evaluate(async () => window.codex.getWindowIconSize());
+  assert.ok(windowIcon && windowIcon.width >= 16 && windowIcon.height >= 16, JSON.stringify(windowIcon));
   console.log("electron-issue-ipc: clipboard/profile/update-check channels answered");
 
   await window.getByText("Fix the parser from CLI").first().click();
