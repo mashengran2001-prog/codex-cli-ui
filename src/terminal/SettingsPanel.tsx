@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { Activity, BellRing, Brain, Check, ChevronDown, Command, Download, ExternalLink, FileCode2, FolderOpen, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Pencil, Plug, Plus, RotateCcw, Search, Server, Shield, TerminalSquare, Trash2, Undo2, X, type LucideIcon } from "lucide-react";
+import { Activity, BellRing, Brain, Check, CheckCircle2, ChevronDown, Command, Download, ExternalLink, FileCode2, FolderOpen, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Pencil, Plug, Plus, RotateCcw, Search, Server, Shield, TerminalSquare, Trash2, Undo2, X, type LucideIcon } from "lucide-react";
 import BrandIcon, { type BrandIconName } from "../BrandIcon";
 import { chordFromEvent, isModifierOnly, modifierPrefix, setKeybindingCaptureActive } from "../keybindings";
-import type { AppSettings, BackupResult, BackupSelection, CliLifecycleStatus, CliProfile, CliToolInfo, DiagnosticsInfo, KeybindingAction, LatencyProbeResult, ShellProfile, SshProfile, TerminalThemeName, ImportedFontInfo, ImportFontResult, UpdateCheckResult, UpdateDownloadResult, UpdateProgress } from "../types";
+import type { AppSettings, BackupPreview, BackupResult, BackupSelection, CliLifecycleStatus, CliProfile, CliToolInfo, DiagnosticsInfo, KeybindingAction, LatencyProbeResult, ShellProfile, SshProfile, TerminalThemeName, ImportedFontInfo, ImportFontResult, UpdateCheckResult, UpdateDownloadResult, UpdateProgress } from "../types";
 import { DEFAULT_KEYBINDINGS } from "../types";
 import { getSettingsCopy } from "../i18n";
 import { registerImportedFontFaces } from "../importedFonts";
@@ -118,6 +118,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
   const [backupPassphrase, setBackupPassphrase] = useState("");
   const [backupBusy, setBackupBusy] = useState(false);
   const [backupStatus, setBackupStatus] = useState<{ message: string; error?: boolean }>();
+  const [backupPreview, setBackupPreview] = useState<BackupPreview | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsInfo | null>(null);
   const [latency, setLatency] = useState<LatencyProbeResult | null>(null);
   const [latencyBusy, setLatencyBusy] = useState(false);
@@ -222,19 +223,30 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
     if (result.ok) setBackupStatus({ message: result.message || copy.backupExportSuccess });
     else setBackupStatus({ message: result.error || result.message || copy.backupCanceled, error: true });
   };
-  const restoreBackup = async () => {
+  const previewBackupFile = async () => {
     if (backupBusy) return;
     if (backupPassphrase.length < 8) { setBackupStatus({ message: copy.backupPassphraseTooShort, error: true }); return; }
     setBackupBusy(true);
     setBackupStatus(undefined);
-    const result = await window.codex.restoreBackup(backupPassphrase).catch<BackupResult>(() => ({ ok: false, message: copy.backupCanceled, error: copy.backupCanceled }));
+    setBackupPreview(null);
+    const result = await window.codex.previewBackup(backupPassphrase).catch<BackupPreview>(() => ({ ok: false, error: copy.backupCanceled }));
     setBackupBusy(false);
+    if (result.ok) setBackupPreview(result);
+    else setBackupStatus({ message: result.error || result.message || copy.backupCanceled, error: true });
+  };
+  const confirmRestore = async () => {
+    if (backupBusy || !backupPreview?.filePath) return;
+    setBackupBusy(true);
+    setBackupStatus(undefined);
+    const result = await window.codex.restoreBackup(backupPassphrase, backupPreview.filePath).catch<BackupResult>(() => ({ ok: false, message: copy.backupCanceled, error: copy.backupCanceled }));
+    setBackupBusy(false);
+    setBackupPreview(null);
     if (result.ok) {
       setBackupStatus({ message: result.message || copy.backupRestoreSuccess });
       const restored = await window.codex.getAppSettings().catch(() => null);
       if (restored) onChange(restored);
     } else {
-      setBackupStatus({ message: result.error || result.message || copy.backupCanceled, error: true });
+      setBackupStatus({ message: result.error || result.message || copy.backupRestoreFailed, error: true });
     }
   };
   const removeImportedFont = async (fileName: string) => {
@@ -637,9 +649,28 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           </div>
           <div className="settings-row settings-update-row">
             <button className="settings-update-button" disabled={backupBusy} onClick={() => void exportBackup()}><Download size={12} />{backupBusy ? copy.backupBusy : copy.backupExport}</button>
-            <button className="settings-update-button" disabled={backupBusy} onClick={() => void restoreBackup()}><Undo2 size={12} />{backupBusy ? copy.backupBusy : copy.backupRestore}</button>
+            <button className="settings-update-button" disabled={backupBusy} onClick={() => void previewBackupFile()}><Undo2 size={12} />{backupBusy ? copy.backupBusy : copy.backupRestore}</button>
             {backupStatus ? <span className={`settings-update-result ${backupStatus.error ? "error" : ""}`}>{backupStatus.message}</span> : null}
           </div>
+          {backupPreview?.ok && backupPreview.entries ? (
+            <div className="settings-backup-preview">
+              <h4>{copy.backupPreviewTitle}</h4>
+              <ul>
+                {backupPreview.entries.map((entry) => (
+                  <li key={entry.name} title={entry.name}>
+                    <span className="settings-backup-preview-name">{entry.name}</span>
+                    <span className={`settings-backup-preview-badge${entry.exists ? " overwrite" : ""}`}>{entry.exists ? copy.backupOverwrite : copy.backupNewFile}</span>
+                    <span className="settings-backup-preview-size">{formatBytes(entry.size)}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="keymap-footer-hint">{copy.backupPreviewHint}</p>
+              <div className="settings-backup-preview-actions">
+                <button className="settings-update-button" disabled={backupBusy} onClick={() => void confirmRestore()}>{backupBusy ? <LoaderCircle className="spin" size={12} /> : <CheckCircle2 size={12} />}{copy.backupConfirmRestore}</button>
+                <button className="settings-update-button" disabled={backupBusy} onClick={() => setBackupPreview(null)}>{copy.backupCancel}</button>
+              </div>
+            </div>
+          ) : null}
         </section>
           <div className="settings-group-divider" />
         <section id="settings-about">

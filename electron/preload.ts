@@ -18,7 +18,8 @@ const bridge: CodexBridge = {
   importFont: () => ipcRenderer.invoke("fonts:import"),
   deleteImportedFont: (fileName: string) => ipcRenderer.invoke("fonts:delete", fileName),
   exportBackup: (selection: BackupSelection, passphrase: string) => ipcRenderer.invoke("backup:export", selection, passphrase),
-  restoreBackup: (passphrase: string) => ipcRenderer.invoke("backup:restore", passphrase),
+  previewBackup: (passphrase: string) => ipcRenderer.invoke("backup:preview", passphrase),
+  restoreBackup: (passphrase: string, filePath?: string) => ipcRenderer.invoke("backup:restore", passphrase, filePath),
   onBackupRestored: (listener: () => void) => {
     const handler = () => listener();
     ipcRenderer.on("backup:restored", handler);

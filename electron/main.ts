@@ -22,7 +22,7 @@ import { access, appendFile, lstat, mkdir, readFile, readdir, realpath, rename, 
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
-import { decodeWindowsText } from "../src/text-encoding";
+import { createWindowsTextDecoder, decodeWindowsText } from "../src/text-encoding";
 import type { IPty } from "node-pty";
 import type {
   Activity,
@@ -80,8 +80,10 @@ import {
 import {
   DEFAULT_BACKUP_SELECTION,
   exportBackup,
+  previewBackup,
   restoreBackup,
   type BackupCategory,
+  type BackupPreview,
   type BackupResult,
   type BackupSelection,
 } from "./encrypted-backup";
@@ -2429,12 +2431,18 @@ function runSftpBatch(profile: SshProfile, commands: string[], timeout = 60_000)
     const child = spawn(sftpExecutable(), args, { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    const stdoutDecoder = createWindowsTextDecoder();
+    const stderrDecoder = createWindowsTextDecoder();
     const timer = setTimeout(() => child.kill(), timeout);
-    child.stdout?.on("data", (chunk: Buffer) => { stdout = `${stdout}${decodeWindowsText(chunk)}`.slice(-4 * 1024 * 1024); });
-    child.stderr?.on("data", (chunk: Buffer) => { stderr = `${stderr}${decodeWindowsText(chunk)}`.slice(-4 * 1024 * 1024); });
+    child.stdout?.on("data", (chunk: Buffer) => { stdout = `${stdout}${stdoutDecoder.push(chunk)}`.slice(-4 * 1024 * 1024); });
+    child.stderr?.on("data", (chunk: Buffer) => { stderr = `${stderr}${stderrDecoder.push(chunk)}`.slice(-4 * 1024 * 1024); });
     child.on("error", (error) => { clearTimeout(timer); reject(error); });
     child.on("close", (code) => {
       clearTimeout(timer);
+      const tailOut = stdoutDecoder.flush();
+      const tailErr = stderrDecoder.flush();
+      if (tailOut) stdout = `${stdout}${tailOut}`.slice(-4 * 1024 * 1024);
+      if (tailErr) stderr = `${stderr}${tailErr}`.slice(-4 * 1024 * 1024);
       if (code === 0) resolveResult({ stdout, stderr });
       else reject(Object.assign(new Error(stderr.trim() || `sftp exited ${code}`), { stdout, stderr }));
     });
@@ -2899,8 +2907,10 @@ async function getCodexInfo(): Promise<CodexInfo> {
     const child = spawn(executable, [...codexPrefixArgs(), "--version"], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     let errorOutput = "";
-    child.stdout?.on("data", (chunk: Buffer) => { output += decodeWindowsText(chunk); });
-    child.stderr?.on("data", (chunk: Buffer) => { errorOutput += decodeWindowsText(chunk); });
+    const stdoutDecoder = createWindowsTextDecoder();
+    const stderrDecoder = createWindowsTextDecoder();
+    child.stdout?.on("data", (chunk: Buffer) => { output += stdoutDecoder.push(chunk); });
+    child.stderr?.on("data", (chunk: Buffer) => { errorOutput += stderrDecoder.push(chunk); });
     child.on("error", (error) => resolveInfo({
       id: "codex",
       name: "OpenAI Codex",
@@ -2915,6 +2925,8 @@ async function getCodexInfo(): Promise<CodexInfo> {
       capabilities: codexCapabilities(),
     }));
     child.on("close", (code) => {
+      output += stdoutDecoder.flush();
+      errorOutput += stderrDecoder.flush();
       const available = code === 0;
       resolveInfo({
         id: "codex",
@@ -2977,9 +2989,12 @@ function createCodexProvider(): AgentProvider {
           context.emit({ providerId: "codex", runId: value.runId, type: "stderr", text: line });
         }
       });
-      child.stderr?.on("data", (chunk: Buffer) => context.emit({ providerId: "codex", runId: value.runId, type: "stderr", text: decodeWindowsText(chunk) }));
+      const stderrDecoder = createWindowsTextDecoder();
+      child.stderr?.on("data", (chunk: Buffer) => context.emit({ providerId: "codex", runId: value.runId, type: "stderr", text: stderrDecoder.push(chunk) }));
       child.on("error", (error) => context.emit({ providerId: "codex", runId: value.runId, type: "error", text: error.message }));
       child.on("close", (code) => {
+        const stderrTail = stderrDecoder.flush();
+        if (stderrTail) context.emit({ providerId: "codex", runId: value.runId, type: "stderr", text: stderrTail });
         activeRuns.delete(value.runId);
         context.emit({ providerId: "codex", runId: value.runId, type: "exit", code, stopped: run.stopped });
         if (code === 0 && !run.stopped) context.notify("Codex 已完成", basename(value.cwd));
@@ -3188,8 +3203,8 @@ ipcMain.handle("backup:export", async (_event, selectionValue: unknown, passphra
   return exportBackup(app.getPath("userData"), selection, passphrase, result.filePath);
 });
 
-ipcMain.handle("backup:restore", async (_event, passphrase: unknown) => {
-  if (typeof passphrase !== "string" || passphrase.length < 8) return { ok: false, error: "备份密码至少 8 位" } satisfies BackupResult;
+ipcMain.handle("backup:preview", async (_event, passphrase: unknown) => {
+  if (typeof passphrase !== "string" || passphrase.length < 8) return { ok: false, error: "备份密码至少 8 位" } satisfies BackupPreview;
   const options: Electron.OpenDialogOptions = {
     title: "选择加密备份文件",
     properties: ["openFile"],
@@ -3199,6 +3214,30 @@ ipcMain.handle("backup:restore", async (_event, passphrase: unknown) => {
     ? await dialog.showOpenDialog(mainWindow, options)
     : await dialog.showOpenDialog(options);
   const file = picked.canceled ? null : picked.filePaths[0] ?? null;
+  if (!file) return { ok: false, error: "已取消" } satisfies BackupPreview;
+  try {
+    const entries = await previewBackup(app.getPath("userData"), passphrase, file);
+    return { ok: true, filePath: file, entries } satisfies BackupPreview;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: message } satisfies BackupPreview;
+  }
+});
+
+ipcMain.handle("backup:restore", async (_event, passphrase: unknown, filePathValue: unknown) => {
+  if (typeof passphrase !== "string" || passphrase.length < 8) return { ok: false, error: "备份密码至少 8 位" } satisfies BackupResult;
+  let file: string | null = typeof filePathValue === "string" && filePathValue.length > 0 ? filePathValue : null;
+  if (!file) {
+    const options: Electron.OpenDialogOptions = {
+      title: "选择加密备份文件",
+      properties: ["openFile"],
+      filters: [{ name: "Nebula Backup", extensions: ["nebula-backup", "bak"] }],
+    };
+    const picked = mainWindow && !mainWindow.isDestroyed()
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options);
+    file = picked.canceled ? null : picked.filePaths[0] ?? null;
+  }
   if (!file) return { ok: false, error: "已取消" } satisfies BackupResult;
   const result = await restoreBackup(app.getPath("userData"), passphrase, file);
   if (result.ok) {

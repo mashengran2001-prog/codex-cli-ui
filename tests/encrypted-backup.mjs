@@ -7,6 +7,7 @@ import {
   collect,
   exportBackup,
   open,
+  previewBackup,
   restoreBackup,
   safeArchivePath,
   seal,
@@ -223,6 +224,67 @@ await checkAsync("restoreBackup reports errors without throwing", async () => {
     assert.equal(result.ok, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+await checkAsync("previewBackup lists entries with overwrite flags", async () => {
+  const root = makeUserData();
+  const outDir = mkdtempSync(join(tmpdir(), "codex-ui-backup-preview-"));
+  try {
+    const outPath = join(outDir, "preview.nebula-backup");
+    writeFileSync(join(root, "settings.json"), JSON.stringify({ theme: "silver" }), "utf8");
+    const result = await exportBackup(root, { appearance: true, config: false, ssh: false, session: false, directory_history: false, command_history: false, fonts: false }, PASS, outPath);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    writeFileSync(join(root, "settings.json"), JSON.stringify({ theme: "coal" }), "utf8");
+    const entries = await previewBackup(root, PASS, outPath);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].name, "settings.json");
+    assert.equal(entries[0].exists, true);
+    assert.equal(entries[0].size > 0, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+await checkAsync("restore keeps safety copies and rolls back on failure", async () => {
+  const root = makeUserData();
+  const outDir = mkdtempSync(join(tmpdir(), "codex-ui-backup-rollback-"));
+  try {
+    const outPath = join(outDir, "rollback.nebula-backup");
+    mkdirSync(join(root, "fonts"), { recursive: true });
+    writeFileSync(join(root, "fonts", "Cascadia.ttf"), Buffer.from("fake-font-bytes"));
+    writeFileSync(join(root, "settings.json"), JSON.stringify({ theme: "silver" }), "utf8");
+    const result = await exportBackup(root, { appearance: true, config: false, ssh: false, session: false, directory_history: false, command_history: false, fonts: true }, PASS, outPath);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    // 成功路径：settings.json 与字体都在包内，恢复后安全副本保留原文件
+    writeFileSync(join(root, "settings.json"), JSON.stringify({ theme: "coal" }), "utf8");
+    const restored = await restoreBackup(root, PASS, outPath);
+    assert.equal(restored.ok, true, JSON.stringify(restored));
+    assert.equal(JSON.parse(readFileSync(join(root, "settings.json"), "utf8")).theme, "silver");
+    const safetyDirs = readdirSync(root).filter((name) => name.startsWith(".codex-cli-ui-backup-"));
+    assert.equal(safetyDirs.length >= 1, true);
+    const safetyRoot = join(root, safetyDirs[0]);
+    assert.equal(JSON.parse(readFileSync(join(safetyRoot, "settings.json"), "utf8")).theme, "coal");
+    assert.equal(readFileSync(join(safetyRoot, "fonts", "Cascadia.ttf")).toString(), "fake-font-bytes");
+
+    // 失败路径：把 fonts 目录替换成同名文件，恢复中途失败应自动回滚 settings.json
+    rmSync(join(root, "fonts"), { recursive: true, force: true });
+    writeFileSync(join(root, "fonts"), "not a directory", "utf8");
+    writeFileSync(join(root, "settings.json"), JSON.stringify({ theme: "linen" }), "utf8");
+    const failed = await restoreBackup(root, PASS, outPath);
+    assert.equal(failed.ok, false);
+    assert.equal(failed.message.includes("回滚"), true, JSON.stringify(failed));
+    assert.equal(JSON.parse(readFileSync(join(root, "settings.json"), "utf8")).theme, "linen");
+    const leftovers = readdirSync(root).filter((name) => name.endsWith(".tmp"));
+    assert.deepEqual(leftovers, []);
+    // 回滚成功后不应残留安全副本目录（已原样放回）
+    const remainingSafety = readdirSync(root).filter((name) => name.startsWith(".codex-cli-ui-backup-") && name !== safetyDirs[0]);
+    assert.deepEqual(remainingSafety, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
   }
 });
 

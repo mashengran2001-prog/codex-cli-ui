@@ -1487,3 +1487,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   line-height: 1.6;
   text-align: center;
 }
+
+
+/* 备份恢复预览（Nebula 对照：恢复前预览 + 冲突保护） */
+.settings-backup-preview { display: grid; gap: 8px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line-strong, #2b303a); border-radius: 10px; background: var(--panel, rgba(28, 32, 40, 0.62)); }
+.settings-backup-preview h4 { margin: 0; font-size: 12px; color: var(--text, #d8dee9); }
+.settings-backup-preview ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; max-height: 190px; overflow: auto; }
+.settings-backup-preview li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.settings-backup-preview-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace); font-size: 11px; color: var(--text, #d8dee9); }
+.settings-backup-preview-badge { flex: 0 0 auto; padding: 1px 7px; border-radius: 999px; font-size: 10px; color: #79b994; background: rgba(121, 185, 148, 0.13); }
+.settings-backup-preview-badge.overwrite { color: #e7b86e; background: rgba(231, 184, 110, 0.13); }
+.settings-backup-preview-size { flex: 0 0 auto; font-size: 10px; color: var(--muted, #8791a1); }
+.settings-backup-preview-actions { display: flex; gap: 8px; flex-wrap: wrap; }

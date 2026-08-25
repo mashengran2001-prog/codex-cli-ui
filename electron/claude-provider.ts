@@ -4,7 +4,7 @@ import { existsSync, readdirSync, statSync, type Dirent } from "node:fs";
 import { readFileSync } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
-import { decodeWindowsText } from "../src/text-encoding";
+import { createWindowsTextDecoder, decodeWindowsText } from "../src/text-encoding";
 import { connect } from "node:net";
 import { homedir } from "node:os";
 import { basename, join, normalize, resolve, sep } from "node:path";
@@ -192,10 +192,12 @@ function runClaudeVersion(executable: string) {
     const child = spawnClaudeProcess(executable, ["--version"], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     let errorOutput = "";
-    child.stdout?.on("data", (chunk: Buffer) => { output += decodeWindowsText(chunk); });
-    child.stderr?.on("data", (chunk: Buffer) => { errorOutput += decodeWindowsText(chunk); });
+    const stdoutDecoder = createWindowsTextDecoder();
+    const stderrDecoder = createWindowsTextDecoder();
+    child.stdout?.on("data", (chunk: Buffer) => { output += stdoutDecoder.push(chunk); });
+    child.stderr?.on("data", (chunk: Buffer) => { errorOutput += stderrDecoder.push(chunk); });
     child.on("error", (error) => resolveRun({ code: 1, output: "", errorOutput: error.message }));
-    child.on("close", (code) => resolveRun({ code, output: output.trim(), errorOutput: errorOutput.trim() }));
+    child.on("close", (code) => resolveRun({ code, output: `${output}${stdoutDecoder.flush()}`.trim(), errorOutput: `${errorOutput}${stderrDecoder.flush()}`.trim() }));
   });
 }
 
@@ -638,9 +640,12 @@ export class ClaudeProvider implements AgentProvider {
       }
     });
 
-    child.stderr?.on("data", (chunk: Buffer) => context.emit({ providerId: PROVIDER_ID, runId: value.runId, type: "stderr", text: decodeWindowsText(chunk) }));
+    const stderrDecoder = createWindowsTextDecoder();
+    child.stderr?.on("data", (chunk: Buffer) => context.emit({ providerId: PROVIDER_ID, runId: value.runId, type: "stderr", text: stderrDecoder.push(chunk) }));
     child.on("error", (error) => context.emit({ providerId: PROVIDER_ID, runId: value.runId, type: "error", text: error.message }));
     child.on("close", (code) => {
+      const stderrTail = stderrDecoder.flush();
+      if (stderrTail) context.emit({ providerId: PROVIDER_ID, runId: value.runId, type: "stderr", text: stderrTail });
       this.activeRuns.delete(value.runId);
       context.emit({ providerId: PROVIDER_ID, runId: value.runId, type: "exit", code, stopped: run.stopped });
       if (code === 0 && !run.stopped) context.notify("Claude 已完成", basename(value.cwd));

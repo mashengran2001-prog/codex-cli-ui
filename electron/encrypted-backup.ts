@@ -7,7 +7,7 @@
  */
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync, type Stats } from "node:fs";
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rmdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 
@@ -68,6 +68,22 @@ export interface BackupResult {
   ok: boolean;
   message?: string;
   path?: string;
+  error?: string;
+}
+
+export interface BackupPreviewEntry {
+  category: BackupCategory;
+  name: string;
+  size: number;
+  /** 目标位置当前已存在（恢复时会覆盖）。 */
+  exists: boolean;
+}
+
+export interface BackupPreview {
+  ok: boolean;
+  filePath?: string;
+  entries?: BackupPreviewEntry[];
+  message?: string;
   error?: string;
 }
 
@@ -317,30 +333,88 @@ export async function exportBackup(userData: string, selection: BackupSelection,
   }
 }
 
-/** 恢复：解密 + 全量校验，全部通过后逐文件原子写。 */
+/** 恢复前预览：解密并列出将写入的文件（含是否已存在，即是否会覆盖）。 */
+export async function previewArchive(packet: Buffer, passphrase: string, userData: string): Promise<BackupPreviewEntry[]> {
+  const archive = await open(packet, passphrase);
+  return archive.entries.map((entry) => {
+    const path = safeArchivePath(userData, entry.name);
+    return {
+      category: entry.category,
+      name: entry.name,
+      size: entry.bytes.byteLength,
+      exists: existsSync(path),
+    };
+  });
+}
+
+export async function previewBackup(userData: string, passphrase: string, inputPath: string): Promise<BackupPreviewEntry[]> {
+  const packet = await readFile(resolve(inputPath));
+  return previewArchive(packet, passphrase, userData);
+}
+
+/** 恢复：解密 + 全量校验，写前把将被覆盖的原文件挪到安全副本目录，失败自动回滚。 */
 export async function restoreBackup(userData: string, passphrase: string, inputPath: string): Promise<BackupResult> {
   try {
     const packet = await readFile(resolve(inputPath));
     const archive = await open(packet, passphrase);
     const paths = archive.entries.map((entry) => safeArchivePath(userData, entry.name));
-    for (let index = 0; index < archive.entries.length; index += 1) {
-      const entry = archive.entries[index];
-      const path = paths[index];
-      await mkdir(dirname(path), { recursive: true });
-      // 防止通过符号链接把文件写到 data 目录之外。
-      let current = userData;
-      const parts = entry.name.split("/");
-      for (let i = 0; i < parts.length - 1; i += 1) {
-        current = join(current, parts[i]);
-        if (!existsSync(current)) break;
-        const stats = lstatSync(current);
-        if (stats.isSymbolicLink() || !stats.isDirectory()) {
-          throw new Error(`备份目标路径不安全：${entry.name}`);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const safetyRoot = join(userData, `.codex-cli-ui-backup-${stamp}`);
+    await mkdir(safetyRoot, { recursive: true });
+    const written: Array<{ path: string; safetyPath?: string; existed: boolean }> = [];
+    try {
+      for (let index = 0; index < archive.entries.length; index += 1) {
+        const entry = archive.entries[index];
+        const path = paths[index];
+        await mkdir(dirname(path), { recursive: true });
+        // 防止通过符号链接把文件写到 data 目录之外。
+        let current = userData;
+        const parts = entry.name.split("/");
+        for (let i = 0; i < parts.length - 1; i += 1) {
+          current = join(current, parts[i]);
+          if (!existsSync(current)) break;
+          const stats = lstatSync(current);
+          if (stats.isSymbolicLink() || !stats.isDirectory()) {
+            throw new Error(`备份目标路径不安全：${entry.name}`);
+          }
+        }
+        let safetyPath: string | undefined;
+        const existed = existsSync(path);
+        if (existed) {
+          const targetStats = lstatSync(path);
+          if (targetStats.isSymbolicLink() || targetStats.isDirectory()) {
+            throw new Error(`备份目标不安全：${entry.name}`);
+          }
+          const partsForSafety = entry.name.split("/");
+          safetyPath = join(safetyRoot, ...partsForSafety.slice(0, -1).filter(Boolean), partsForSafety[partsForSafety.length - 1]!);
+          await mkdir(dirname(safetyPath), { recursive: true });
+          await rename(path, safetyPath);
+        }
+        written.push({ path, safetyPath, existed });
+        await atomicWrite(path, entry.bytes);
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      // 回滚：覆盖过的文件原样放回，新增的文件删除，尽量恢复原状。
+      let rollbackFailed = false;
+      for (let i = written.length - 1; i >= 0; i -= 1) {
+        const item = written[i]!;
+        try {
+          if (item.existed && item.safetyPath) {
+            try { await unlink(item.path); } catch { /* 文件可能尚未写入 */ }
+            await rename(item.safetyPath, item.path);
+          } else {
+            try { await unlink(item.path); } catch { /* 文件可能尚未写入 */ }
+          }
+        } catch {
+          rollbackFailed = true;
         }
       }
-      await atomicWrite(path, entry.bytes);
+      try { await rmdir(safetyRoot); } catch { /* 回滚后非空则保留，便于人工处理 */ }
+      const message = rollbackFailed ? `恢复失败，部分回滚未完成：${detail}` : `恢复失败，已回滚：${detail}`;
+      return { ok: false, message, error: detail };
     }
-    return { ok: true, message: "已从备份恢复（部分设置重启后完全生效）" };
+    return { ok: true, message: `已从备份恢复；被覆盖的原文件保留在 ${safetyRoot}（部分设置重启后完全生效）`, path: safetyRoot };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, message, error: message };

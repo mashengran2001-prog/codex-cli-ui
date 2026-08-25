@@ -822,6 +822,13 @@ const settingsCopies = {
     backupExportSuccess: "已导出加密备份",
     backupRestoreSuccess: "已从备份恢复（部分设置重启后完全生效）",
     backupCanceled: "已取消",
+    backupPreviewTitle: "将恢复以下文件",
+    backupPreviewHint: "恢复前先把将被覆盖的原文件挪到 .codex-cli-ui-backup-<时间戳> 文件夹；一旦失败会自动回滚，不会留下半套设置。",
+    backupOverwrite: "将覆盖",
+    backupNewFile: "新建",
+    backupConfirmRestore: "确认恢复",
+    backupRestoreFailed: "恢复失败，已回滚",
+    backupCancel: "取消",
   },
   "en-US": {
     title: "Settings",
@@ -1037,6 +1044,13 @@ const settingsCopies = {
     backupExportSuccess: "Encrypted backup exported",
     backupRestoreSuccess: "Restored from backup (some settings fully apply after restart)",
     backupCanceled: "Canceled",
+    backupPreviewTitle: "The following files will be restored",
+    backupPreviewHint: "Files that would be overwritten are first moved to a .codex-cli-ui-backup-<timestamp> folder; if anything fails, the restore is rolled back automatically.",
+    backupOverwrite: "Will overwrite",
+    backupNewFile: "New file",
+    backupConfirmRestore: "Confirm restore",
+    backupRestoreFailed: "Restore failed and was rolled back",
+    backupCancel: "Cancel",
   },
 } as const;
 

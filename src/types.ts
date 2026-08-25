@@ -34,6 +34,22 @@ export interface BackupResult {
   error?: string;
 }
 
+export interface BackupPreviewEntry {
+  category: BackupCategory;
+  name: string;
+  size: number;
+  /** 目标位置当前已存在（恢复时会覆盖）。 */
+  exists: boolean;
+}
+
+export interface BackupPreview {
+  ok: boolean;
+  filePath?: string;
+  entries?: BackupPreviewEntry[];
+  message?: string;
+  error?: string;
+}
+
 export const DEFAULT_KEYBINDINGS: Record<KeybindingAction, string> = {
   "command-palette": "Ctrl+Shift+P",
   "new-terminal": "Ctrl+Shift+T",
@@ -567,7 +583,8 @@ export interface CodexBridge {
   readDocumentImage(root: string, path: string): Promise<string | null>;
   exportTerminalSession(sessionId: string, content: string): Promise<string | null>;
   exportBackup(selection: BackupSelection, passphrase: string): Promise<BackupResult>;
-  restoreBackup(passphrase: string): Promise<BackupResult>;
+  previewBackup(passphrase: string): Promise<BackupPreview>;
+  restoreBackup(passphrase: string, filePath?: string): Promise<BackupResult>;
   onBackupRestored(listener: () => void): () => void;
   getGitStatus(path: string): Promise<GitStatus>;
   runGitAction(request: GitActionRequest): Promise<OperationResult>;
