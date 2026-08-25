@@ -1411,6 +1411,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-update-download > span { color: var(--t-muted); font-size: 9.5px; }
 .settings-update-install { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border: 1px solid var(--t-accent); border-radius: 5px; background: var(--t-accent-soft); color: var(--t-accent); font-size: 9.5px; cursor: pointer; }
 .settings-update-install:hover { background: var(--t-accent); color: var(--t-panel); }
+.settings-imported-fonts { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 0 16px; }
+.settings-imported-fonts-title { width: 100%; color: var(--t-muted); font-size: 9px; }
+.settings-imported-font { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 1px solid var(--t-border); border-radius: 5px; background: var(--t-panel-2); font-size: 10px; }
+.settings-imported-font-name { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-imported-font small { color: var(--t-muted); }
+.settings-imported-font button { display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--t-muted); cursor: pointer; }
+.settings-imported-font button:hover { color: var(--t-danger); }
+.settings-import-font-status { margin: 0 0 0 16px; font-size: 10px; color: var(--t-text); }
+.settings-import-font-status.error { color: var(--t-danger); }
+.font-picker-list button em.imported { color: var(--t-accent); font-style: normal; font-size: 9px; }
 .pane-divider::before { position: absolute; inset: -3px; content: ""; }
 .settings-ssh-actions { display: flex; flex: 0 0 auto; gap: 2px; opacity: 0; }
 .settings-ssh-row:hover .settings-ssh-actions, .settings-ssh-row.confirm .settings-ssh-actions { opacity: 1; }

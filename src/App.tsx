@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { AlertTriangle, CheckCircle2, LoaderCircle, ShieldAlert, X } from "lucide-react";
 import Composer from "./Composer";
 import { sanitizeDisplayText } from "./text-encoding";
+import { loadImportedFonts } from "./importedFonts";
 import ConversationView from "./ConversationView";
 import Sidebar from "./Sidebar";
 import { getUiCopy, UiLocaleContext, useResolvedAppLocale } from "./i18n";
@@ -250,6 +251,10 @@ export default function App() {
       });
     }
   }, [activeProviderId, aliases]);
+
+  useEffect(() => {
+    void loadImportedFonts();
+  }, []);
 
   useEffect(() => {
     void Promise.all([

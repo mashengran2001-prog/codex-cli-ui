@@ -439,6 +439,19 @@ export interface LatencyProbeResult {
   error?: string;
 }
 
+export interface ImportedFontInfo {
+  fileName: string;
+  family: string;
+  size: number;
+}
+
+export interface ImportFontResult {
+  ok: boolean;
+  family?: string;
+  fileName?: string;
+  error?: string;
+}
+
 export interface UpdateAssetInfo {
   name: string;
   size: number;
@@ -481,6 +494,9 @@ export interface CodexBridge {
   getAppSettings(): Promise<AppSettings>;
   setAppSettings(settings: AppSettings): Promise<AppSettings>;
   listSystemFonts(): Promise<string[]>;
+  listImportedFonts(): Promise<ImportedFontInfo[]>;
+  importFont(): Promise<ImportFontResult>;
+  deleteImportedFont(fileName: string): Promise<boolean>;
   chooseDirectory(): Promise<string | null>;
   chooseImages(): Promise<string[]>;
   chooseBackgroundImage(): Promise<string | null>;

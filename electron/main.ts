@@ -8,6 +8,7 @@ import {
   Menu,
   nativeImage,
   Notification,
+  protocol,
   safeStorage,
   screen,
   shell,
@@ -69,6 +70,13 @@ import {
   verifyInstallerFile,
   type UpdateAsset,
 } from "./update-manager";
+import {
+  deleteImportedFont,
+  importFontFile,
+  listImportedFonts,
+  parseFontFamilyNames,
+  supportedFontExtension,
+} from "./font-import";
 import { CliLifecycleBridge, type CliLifecycleEvent } from "./cli-lifecycle";
 import { ProviderRegistry, type AgentProvider, type ProviderRunContext } from "./provider-registry";
 import { enumerateSystemFonts } from "./system-fonts";
@@ -3105,6 +3113,44 @@ ipcMain.handle("fonts:list", () => {
   return systemFontsPromise;
 });
 
+function registerFontProtocol() {
+  protocol.handle("font", async (request) => {
+    try {
+      const url = new URL(request.url);
+      const fileName = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
+      if (!supportedFontExtension(fileName)) return new Response("forbidden", { status: 403 });
+      const root = join(app.getPath("userData"), "fonts");
+      const target = resolve(root, fileName);
+      if (target !== root && !target.startsWith(root + sep)) return new Response("forbidden", { status: 403 });
+      const data = await readFile(target);
+      const mime = /\.ttf$/i.test(fileName) ? "font/ttf" : /\.otf$/i.test(fileName) ? "font/otf" : "font/collection";
+      return new Response(data, { headers: { "Content-Type": mime } });
+    } catch {
+      return new Response("not found", { status: 404 });
+    }
+  });
+}
+
+ipcMain.handle("fonts:import", async () => {
+  const options: Electron.OpenDialogOptions = {
+    properties: ["openFile"],
+    filters: [{ name: "Fonts", extensions: ["ttf", "otf", "ttc", "otc"] }],
+  };
+  const result = mainWindow && !mainWindow.isDestroyed()
+    ? await dialog.showOpenDialog(mainWindow, options)
+    : await dialog.showOpenDialog(options);
+  const file = result.canceled ? null : result.filePaths[0] ?? null;
+  if (!file) return { ok: false, error: "已取消" };
+  return importFontFile(file, app.getPath("userData"));
+});
+
+ipcMain.handle("fonts:imported", () => listImportedFonts(app.getPath("userData")));
+
+ipcMain.handle("fonts:delete", (_event, fileName: unknown) => {
+  if (typeof fileName !== "string" || !fileName) return false;
+  return deleteImportedFont(app.getPath("userData"), fileName);
+});
+
 ipcMain.handle("dialog:directory", async () => {
   const options: Electron.OpenDialogOptions = { properties: ["openDirectory", "createDirectory"] };
   const result = mainWindow && !mainWindow.isDestroyed()
@@ -3929,6 +3975,7 @@ void app.whenReady().then(async () => {
   await detectTerminalShells();
   bootTrace("shells-detected");
   updateQuickTerminalShortcut();
+  registerFontProtocol();
   queuedLauncherRequest = parseLauncherRequest(process.argv);
   createWindow();
   bootTrace("window-created");

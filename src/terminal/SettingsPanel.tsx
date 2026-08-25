@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { Activity, BellRing, Brain, Check, ChevronDown, Command, Download, ExternalLink, FileCode2, FolderOpen, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Pencil, Plug, Plus, RotateCcw, Search, Server, TerminalSquare, Trash2, Undo2, X, type LucideIcon } from "lucide-react";
 import BrandIcon, { type BrandIconName } from "../BrandIcon";
 import { chordFromEvent, isModifierOnly, modifierPrefix, setKeybindingCaptureActive } from "../keybindings";
-import type { AppSettings, CliLifecycleStatus, CliProfile, CliToolInfo, DiagnosticsInfo, KeybindingAction, LatencyProbeResult, ShellProfile, SshProfile, TerminalThemeName, UpdateCheckResult, UpdateDownloadResult, UpdateProgress } from "../types";
+import type { AppSettings, CliLifecycleStatus, CliProfile, CliToolInfo, DiagnosticsInfo, KeybindingAction, LatencyProbeResult, ShellProfile, SshProfile, TerminalThemeName, ImportedFontInfo, ImportFontResult, UpdateCheckResult, UpdateDownloadResult, UpdateProgress } from "../types";
 import { DEFAULT_KEYBINDINGS } from "../types";
 import { getSettingsCopy } from "../i18n";
+import { registerImportedFontFaces } from "../importedFonts";
 import { terminalThemes } from "./themes";
 import SshEditor from "./SshEditor";
 
@@ -110,6 +111,9 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
   const [updateDownload, setUpdateDownload] = useState<{ phase: "downloading" | "verifying" | "done" | "error"; received?: number; total?: number; path?: string; error?: string } | null>(null);
   const updateBusy = updateDownload?.phase === "downloading" || updateDownload?.phase === "verifying";
+  const [importedFonts, setImportedFonts] = useState<ImportedFontInfo[]>([]);
+  const [fontImportStatus, setFontImportStatus] = useState<{ message: string; error?: boolean }>();
+  const [fontImportBusy, setFontImportBusy] = useState(false);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsInfo | null>(null);
   const [latency, setLatency] = useState<LatencyProbeResult | null>(null);
   const [latencyBusy, setLatencyBusy] = useState(false);
@@ -175,6 +179,28 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
     if (!window.confirm(copy.updateConfirmInstall)) return;
     const result = await window.codex.launchUpdateInstaller(updateDownload.path).catch<UpdateDownloadResult>(() => ({ ok: false, error: copy.updateLaunchFailed }));
     if (!result.ok) setUpdateDownload((prev) => ({ ...(prev ?? { phase: "error" }), phase: "error", error: result.error || copy.updateLaunchFailed }));
+  };
+  const refreshImportedFonts = useCallback(async () => {
+    const fonts = await window.codex.listImportedFonts().catch<ImportedFontInfo[]>(() => []);
+    setImportedFonts(fonts);
+    registerImportedFontFaces(fonts);
+  }, []);
+  useEffect(() => { void refreshImportedFonts(); }, [refreshImportedFonts]);
+  const importFont = async () => {
+    setFontImportBusy(true);
+    setFontImportStatus(undefined);
+    const result = await window.codex.importFont().catch<ImportFontResult>(() => ({ ok: false, error: copy.importFontFailed }));
+    if (result.ok && result.family) {
+      await refreshImportedFonts();
+      setFontImportStatus({ message: copy.importFontSuccess(result.family) });
+    } else {
+      setFontImportStatus({ message: result.error || copy.importFontFailed, error: true });
+    }
+    setFontImportBusy(false);
+  };
+  const removeImportedFont = async (fileName: string) => {
+    const removed = await window.codex.deleteImportedFont(fileName).catch(() => false);
+    if (removed) await refreshImportedFonts();
   };
   useEffect(() => {
     if (!sshUndo) return;
@@ -389,8 +415,22 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <Toggle label={copy.cursorBlink} checked={settings.cursorBlink} onChange={(value) => update("cursorBlink", value)} modified={isModified("cursorBlink")} />
           <div className="settings-row font-family-row">
             <label>{copy.fontFamily}</label><Mod k="fontFamily" />
-            <FontPicker copy={copy} value={settings.fontFamily} onChange={(value) => update("fontFamily", value)} />
+            <FontPicker copy={copy} imported={importedFonts.map((font) => font.family)} value={settings.fontFamily} onChange={(value) => update("fontFamily", value)} />
+            <button className="settings-update-button" disabled={fontImportBusy} onClick={() => void importFont()}><Plus size={12} />{copy.importFont}</button>
           </div>
+          {importedFonts.length > 0 ? (
+            <div className="settings-imported-fonts">
+              <span className="settings-imported-fonts-title">{copy.importedFonts}</span>
+              {importedFonts.map((font) => (
+                <div className="settings-imported-font" key={font.fileName}>
+                  <span className="settings-imported-font-name" style={{ fontFamily: font.family }}>{font.family}</span>
+                  <small>{formatBytes(font.size)}</small>
+                  <button title={copy.removeImportedFont} aria-label={copy.removeImportedFont} onClick={() => void removeImportedFont(font.fileName)}><Trash2 size={12} /></button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {fontImportStatus ? <p className={`settings-import-font-status ${fontImportStatus.error ? "error" : ""}`}>{fontImportStatus.message}</p> : null}
           <div className="settings-row"><label>{copy.bellMode}</label><Mod k="bellMode" /><select aria-label={copy.bellMode} value={settings.bellMode} onChange={(event) => update("bellMode", event.target.value as AppSettings["bellMode"])}><option value="off">{copy.bellModeOff}</option><option value="flash">{copy.bellModeFlash}</option><option value="sound">{copy.bellModeSound}</option><option value="both">{copy.bellModeBoth}</option></select></div>
           <Toggle label={copy.renderTerminalMath} checked={settings.renderTerminalMath} onChange={(value) => update("renderTerminalMath", value)} modified={isModified("renderTerminalMath")} />
           <p className="settings-hint">{copy.renderTerminalMathHint}</p>
@@ -623,10 +663,11 @@ function replacePrimaryFont(value: string, family: string) {
   return [family, ...rest].join(", ");
 }
 
-function FontPicker({ value, onChange, copy }: {
+function FontPicker({ value, onChange, copy, imported }: {
   value: string;
   onChange(value: string): void;
   copy: ReturnType<typeof getSettingsCopy>;
+  imported?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -702,17 +743,21 @@ function FontPicker({ value, onChange, copy }: {
   }, [fonts, loading, open, query, showAll]);
 
   const catalog = useMemo(() => {
+    const importedKeys = new Set((imported ?? []).map((name) => name.toLocaleLowerCase()));
     const unique = new Map<string, string>();
-    for (const family of [primary, ...(fonts ?? [])]) {
+    for (const family of [...(imported ?? []), primary, ...(fonts ?? [])]) {
       const normalized = family.trim();
       if (normalized) unique.set(normalized.toLocaleLowerCase(), normalized);
     }
     const needle = query.trim().toLocaleLowerCase();
     return [...unique.values()]
-      .map((family) => ({ family, monospaced: isMonospacedFont(family), current: family.toLocaleLowerCase() === primary.toLocaleLowerCase() }))
+      .map((family) => {
+        const importedEntry = importedKeys.has(family.toLocaleLowerCase());
+        return { family, monospaced: importedEntry || isMonospacedFont(family), imported: importedEntry, current: family.toLocaleLowerCase() === primary.toLocaleLowerCase() };
+      })
       .filter((entry) => entry.current || ((showAll || entry.monospaced) && (!needle || entry.family.toLocaleLowerCase().includes(needle))))
       .sort((left, right) => Number(right.current) - Number(left.current) || left.family.localeCompare(right.family, undefined, { sensitivity: "base" }));
-  }, [fonts, primary, query, showAll]);
+  }, [fonts, imported, primary, query, showAll]);
 
   const panel = open ? (
     <div className="font-picker-panel" ref={panelRef} style={panelPosition} role="dialog" aria-label={copy.fontFamily}>
@@ -736,6 +781,7 @@ function FontPicker({ value, onChange, copy }: {
               onClick={() => { onChange(replacePrimaryFont(value, entry.family)); setOpen(false); }}
             >
               <span>{entry.family}</span>
+              {entry.imported ? <em className="imported">{copy.importedBadge}</em> : null}
               {entry.current && <em>{copy.currentFont}</em>}
               {!entry.monospaced && <em className="warning">{copy.proportionalFont}</em>}
               {entry.current && <Check size={13} />}
