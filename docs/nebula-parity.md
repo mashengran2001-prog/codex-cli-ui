@@ -1,6 +1,6 @@
 # Nebula 功能对照
 
-本项目以 `Kuddev/nebula` v1.3.0（main 提交 `1960e4ae`，2026-08-24 发布）作为行为对照，覆盖 v1.2.0（提交 `74f19d8`，2026-08-21）与 v1.3.0 的全部功能；2026-08-25 复查上游发布与 main 分支，无更新版本。Nebula 使用 GPL-3.0；本项目只分析公开功能和交互，并把其 GPUI 界面当作"设计图纸"做数值对标（间距、圆角、阴影、动效时长、配色 token），全部在 React/CSS 中独立实现，不复制其 Rust 源码、图片或其他 GPL 资产。
+本项目以 `Kuddev/nebula` v1.3.0（main 提交 `1960e4ae`，2026-08-24 发布）作为行为对照，覆盖 v1.2.0（提交 `74f19d8`，2026-08-21）与 v1.3.0 的全部功能；2026-08-25 复查上游发布与 main 分支，v1.3.1 已发布（头号新增：应用内验证更新）。Nebula 使用 GPL-3.0；本项目只分析公开功能和交互，并把其 GPUI 界面当作"设计图纸"做数值对标（间距、圆角、阴影、动效时长、配色 token），全部在 React/CSS 中独立实现，不复制其 Rust 源码、图片或其他 GPL 资产。
 
 ## 当前覆盖
 
@@ -56,7 +56,8 @@
 | SSH 旧格式探测（v1.2） | 已实现 | `user@host:port` 仅在 `ssh -G` 探测时规范化为 `ssh://user@host:port`，避免 Windows 探测报 11001（electron-ssh-format 测试） |
 | Runtime 控制与编排（v1.2） | 已实现 | 主进程 Runtime 控制：命名 agent、进程/控制键命令、真实退出码与 pane 生命周期事件；随包附带 runtime schema（docs/runtime-api-v1.schema.json）、API 文档与 `nebula-runtime` Skill |
 | 事务式托管 agent worktree（v1.2） | 已实现 | agent fork 保留稳定分支/路径身份，prepare/commit/rollback 事务式创建，dirty-source 拒绝提交（git-worktree + electron-agent-fork 测试） |
-| 更新检查（#47） | 已实现 | 设置页"关于"区提供检查更新按钮（GitHub releases API、8s 超时）、显示最新版本并一键打开下载页 |
+| 更新检查（#47） | 已实现 | 设置页"关于"区提供检查更新按钮（GitHub releases API、8s 超时），显示最新版本、安装包清单与发布说明声明的 SHA-256 |
+| 应用内验证更新（v1.3.1） | 已实现 | 应用内后台下载官方 Windows 安装包（优先 Setup→Portable→任意 exe），流式上报进度条；校验大小、PE 头（MZ+PE）与 SHA-256（发布体或 .sha256 资产），校验失败自动删除并报错；通过后才显示"确认安装"，且只允许启动 userData/updates 目录内的 exe；update-manager 单元测试覆盖 |
 | 外观与交互设置 | 已实现 | 七套主题、背景图片、透明度、模糊、光标、可配置字体族（含中文回退链）、面板宽度、补全、Powerline、三档界面密度 |
 | 七主题色板数值 | 已实现 | 七主题 shell/term/panel/pill/ink/accent/语义色与 Nebula `display/ui/theme.rs` 的 palette+skin 数值一一对应（独立实现）；浅色主题 ANSI-16 用 GitHub Primer Light 色表，窗口标题栏覆盖层同步 shell 色 |
 | 控件几何与动效 | 已实现 | 开关 48×26 / 旋钮 20 / 位移 24（400ms 液态 + 250ms 拉伸 + 300ms 变色）、菜单与补全浮层圆角 8、浮层阴影 4/12、侧栏标签行 34/42 |
@@ -109,7 +110,7 @@
 | #54 | 命令执行莫名中断 | 已实现：AI 状态看门狗 + PTY 读取唤醒重臂 |
 | #53 | 打开的文件在终端分屏里显示 | 已实现：非图片文档在终端 pane 内分屏打开，图片单独开标签 |
 | #50 | SSH 连接闪退并导致连不上 | 已提供失败重试与原位替换；真实 SSH 环境下的闪退需进一步验证 |
-| #47 | 自动更新或 scoop/winget 更新 | 已实现：应用内更新检查 + 下载页；scoop/winget 分发暂未接入 |
+| #47 | 自动更新或 scoop/winget 更新 | 已实现：应用内下载官方安装包、大小/PE 头/SHA-256 校验、确认后启动安装；scoop/winget 分发暂未接入 |
 | #45 | SSH TUI/断连问题 | 已提供失败重试与原位替换；依赖真实 SSH 环境的 TUI 行为需进一步验证 |
 | #42 | 检测命令是否结束需要特判 | 已实现：进程树看门狗 3s 探测 |
 | #40 | 换行错误 | 未复现；如遇具体场景请提供复现步骤 |

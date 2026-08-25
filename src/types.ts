@@ -439,12 +439,34 @@ export interface LatencyProbeResult {
   error?: string;
 }
 
+export interface UpdateAssetInfo {
+  name: string;
+  size: number;
+  url: string;
+}
+
+export interface UpdateProgress {
+  phase: "downloading" | "verifying" | "done" | "error";
+  received?: number;
+  total?: number;
+  message?: string;
+}
+
+export interface UpdateDownloadResult {
+  ok: boolean;
+  path?: string;
+  sha256?: string;
+  error?: string;
+}
+
 export interface UpdateCheckResult {
   /** 最新发布 tag，例如 v1.3.0。 */
   latest?: string;
   name?: string;
   publishedAt?: string;
   url?: string;
+  assets?: UpdateAssetInfo[];
+  sha256?: string;
   error?: string;
 }
 
@@ -472,6 +494,9 @@ export interface CodexBridge {
   getWindowIconSize(): Promise<{ width: number; height: number } | null>;
   getDefaultSettings(): Promise<Partial<AppSettings>>;
   checkForUpdates(): Promise<UpdateCheckResult>;
+  downloadUpdate(): Promise<UpdateDownloadResult>;
+  launchUpdateInstaller(installerPath: string): Promise<UpdateDownloadResult>;
+  onUpdateProgress(listener: (progress: UpdateProgress) => void): () => void;
   getDiagnosticsInfo(): Promise<DiagnosticsInfo>;
   probeInputLatency(paneId?: string): Promise<LatencyProbeResult>;
   getShellProfilePath(shellId: string): Promise<string | null>;

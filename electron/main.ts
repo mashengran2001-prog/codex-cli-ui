@@ -17,7 +17,7 @@ import {
 import { spawn, execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync, type Dirent, type Stats } from "node:fs";
-import { access, appendFile, lstat, mkdir, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { access, appendFile, lstat, mkdir, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
@@ -54,10 +54,21 @@ import type {
   TerminalCreateRequest,
   TerminalEvent,
   TerminalInfo,
+  UpdateDownloadResult,
+  UpdateProgress,
 } from "../src/types";
 import { DEFAULT_KEYBINDINGS, normalizeKeybindings } from "../src/types";
 import { DeepSeekProvider } from "./deepseek-provider";
 import { ClaudeProvider } from "./claude-provider";
+import {
+  downloadToFile,
+  parseSha256AssetContent,
+  parseSha256Checksum,
+  pickInstallerAsset,
+  sanitizeFileName,
+  verifyInstallerFile,
+  type UpdateAsset,
+} from "./update-manager";
 import { CliLifecycleBridge, type CliLifecycleEvent } from "./cli-lifecycle";
 import { ProviderRegistry, type AgentProvider, type ProviderRunContext } from "./provider-registry";
 import { enumerateSystemFonts } from "./system-fonts";
@@ -3216,25 +3227,132 @@ ipcMain.handle("settings:defaults", () => {
   return scalars;
 });
 
-ipcMain.handle("updates:check", async () => {
+interface FetchedRelease {
+  tag: string;
+  name: string;
+  publishedAt: string;
+  url: string;
+  body: string;
+  assets: UpdateAsset[];
+}
+
+async function fetchLatestRelease(): Promise<FetchedRelease | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
     const response = await fetch("https://api.github.com/repos/mashengran2001-prog/codex-cli-ui/releases/latest", {
       signal: controller.signal,
       headers: { "User-Agent": "codex-cli-ui", Accept: "application/vnd.github+json" },
     });
-    clearTimeout(timer);
-    if (!response.ok) return { error: `GitHub API ${response.status}` };
-    const release = await response.json() as { tag_name?: unknown; name?: unknown; published_at?: unknown; html_url?: unknown };
+    if (!response.ok) return null;
+    const release = await response.json() as {
+      tag_name?: unknown;
+      name?: unknown;
+      published_at?: unknown;
+      html_url?: unknown;
+      body?: unknown;
+      assets?: Array<{ name?: unknown; size?: unknown; browser_download_url?: unknown }>;
+    };
+    const assets: UpdateAsset[] = [];
+    if (Array.isArray(release.assets)) {
+      for (const asset of release.assets) {
+        if (asset && typeof asset.name === "string" && typeof asset.browser_download_url === "string") {
+          assets.push({
+            name: asset.name,
+            size: typeof asset.size === "number" ? asset.size : 0,
+            url: asset.browser_download_url,
+          });
+        }
+      }
+    }
     return {
-      latest: typeof release.tag_name === "string" ? release.tag_name : "",
+      tag: typeof release.tag_name === "string" ? release.tag_name : "",
       name: typeof release.name === "string" ? release.name : "",
       publishedAt: typeof release.published_at === "string" ? release.published_at : "",
       url: typeof release.html_url === "string" ? release.html_url : "",
+      body: typeof release.body === "string" ? release.body : "",
+      assets,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+ipcMain.handle("updates:check", async () => {
+  try {
+    const release = await fetchLatestRelease();
+    if (!release) return { error: "GitHub API 请求失败" };
+    return {
+      latest: release.tag,
+      name: release.name,
+      publishedAt: release.publishedAt,
+      url: release.url,
+      assets: release.assets,
+      sha256: parseSha256Checksum(release.body),
     };
   } catch (reason) {
     return { error: reason instanceof Error ? reason.message : "网络请求失败" };
+  }
+});
+
+ipcMain.handle("updates:download", async (event) => {
+  const sendProgress = (progress: UpdateProgress) => {
+    if (!event.sender.isDestroyed()) event.sender.send("update-progress", progress);
+  };
+  try {
+    const release = await fetchLatestRelease();
+    if (!release) return { ok: false, error: "检查更新失败" };
+    const installer = pickInstallerAsset(release.assets);
+    if (!installer) return { ok: false, error: "发布中没有可用的 Windows 安装包" };
+    const updateDir = join(app.getPath("userData"), "updates");
+    await mkdir(updateDir, { recursive: true });
+    const dest = join(updateDir, sanitizeFileName(installer.name));
+    sendProgress({ phase: "downloading", received: 0, total: installer.size });
+    await downloadToFile(installer.url, dest, (received, total) => {
+      sendProgress({ phase: "downloading", received, total });
+    });
+    sendProgress({ phase: "verifying" });
+    let expectedSha256 = parseSha256Checksum(release.body);
+    if (!expectedSha256) {
+      const shaAsset = release.assets.find((asset) => /.sha256$/i.test(asset.name));
+      if (shaAsset) {
+        try {
+          const response = await fetch(shaAsset.url, { headers: { "User-Agent": "codex-cli-ui" } });
+          if (response.ok) expectedSha256 = parseSha256AssetContent(await response.text());
+        } catch {
+          // 校验和资产不可用时仅做大小 + PE 头校验。
+        }
+      }
+    }
+    const verified = await verifyInstallerFile(dest, installer.size, expectedSha256);
+    if (!verified.ok) {
+      await unlink(dest).catch(() => {});
+      const error = verified.error ?? "安装包校验失败";
+      sendProgress({ phase: "error", message: error });
+      return { ok: false, error };
+    }
+    sendProgress({ phase: "done", received: installer.size, total: installer.size });
+    return { ok: true, path: dest, sha256: verified.sha256 };
+  } catch (reason) {
+    const error = reason instanceof Error ? reason.message : "下载更新失败";
+    sendProgress({ phase: "error", message: error });
+    return { ok: false, error };
+  }
+});
+
+ipcMain.handle("updates:launch-installer", async (_event, installerPath: unknown) => {
+  if (typeof installerPath !== "string" || !installerPath) return { ok: false, error: "无效的安装包路径" };
+  const updateDir = resolve(app.getPath("userData"), "updates");
+  const target = resolve(installerPath);
+  if (target !== updateDir && !target.startsWith(updateDir + sep)) {
+    return { ok: false, error: "安装包路径不在更新目录内" };
+  }
+  if (!existsSync(target) || !/\.exe$/i.test(target)) return { ok: false, error: "安装包不存在或不是可执行文件" };
+  try {
+    const error = await shell.openPath(target);
+    return error ? { ok: false, error } : { ok: true };
+  } catch (reason) {
+    return { ok: false, error: reason instanceof Error ? reason.message : "启动安装程序失败" };
   }
 });
 

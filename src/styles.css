@@ -1405,6 +1405,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-update-result { display: inline-flex; align-items: center; gap: 8px; color: var(--t-text); font-size: 10px; flex-wrap: wrap; }
 .settings-update-result.error { color: var(--t-danger); }
 .settings-update-result button { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border: 1px solid var(--t-border); border-radius: 4px; background: var(--t-panel-2); color: var(--t-accent); font-size: 9px; cursor: pointer; }
+.settings-update-download { display: flex; flex-direction: column; gap: 5px; width: 100%; }
+.settings-update-progress { position: relative; width: 100%; max-width: 320px; height: 6px; overflow: hidden; border-radius: 3px; background: var(--t-panel-2); }
+.settings-update-progress > i { position: absolute; inset: 0 auto 0 0; display: block; border-radius: 3px; background: var(--t-accent); transition: width .15s ease; }
+.settings-update-download > span { color: var(--t-muted); font-size: 9.5px; }
+.settings-update-install { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border: 1px solid var(--t-accent); border-radius: 5px; background: var(--t-accent-soft); color: var(--t-accent); font-size: 9.5px; cursor: pointer; }
+.settings-update-install:hover { background: var(--t-accent); color: var(--t-panel); }
 .pane-divider::before { position: absolute; inset: -3px; content: ""; }
 .settings-ssh-actions { display: flex; flex: 0 0 auto; gap: 2px; opacity: 0; }
 .settings-ssh-row:hover .settings-ssh-actions, .settings-ssh-row.confirm .settings-ssh-actions { opacity: 1; }

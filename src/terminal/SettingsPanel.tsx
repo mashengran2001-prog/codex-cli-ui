@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { Activity, BellRing, Brain, Check, ChevronDown, Command, Download, ExternalLink, FileCode2, FolderOpen, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Pencil, Plug, Plus, RotateCcw, Search, Server, TerminalSquare, Trash2, Undo2, X, type LucideIcon } from "lucide-react";
 import BrandIcon, { type BrandIconName } from "../BrandIcon";
 import { chordFromEvent, isModifierOnly, modifierPrefix, setKeybindingCaptureActive } from "../keybindings";
-import type { AppSettings, CliLifecycleStatus, CliProfile, CliToolInfo, DiagnosticsInfo, KeybindingAction, LatencyProbeResult, ShellProfile, SshProfile, TerminalThemeName, UpdateCheckResult } from "../types";
+import type { AppSettings, CliLifecycleStatus, CliProfile, CliToolInfo, DiagnosticsInfo, KeybindingAction, LatencyProbeResult, ShellProfile, SshProfile, TerminalThemeName, UpdateCheckResult, UpdateDownloadResult, UpdateProgress } from "../types";
 import { DEFAULT_KEYBINDINGS } from "../types";
 import { getSettingsCopy } from "../i18n";
 import { terminalThemes } from "./themes";
@@ -59,6 +59,14 @@ function formatDuration(ms: number) {
   return `${seconds}s`;
 }
 
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  const value = bytes / 1024 ** index;
+  return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${units[index]}`;
+}
+
 export default function SettingsPanel({ settings, shells, cliTools, cliLifecycleStatus, cliLifecycleBusy, onChange, onCliLifecycleToggle, onConnectSsh, onClose }: SettingsPanelProps) {
   const [newName, setNewName] = useState("");
   const [newCommand, setNewCommand] = useState("");
@@ -100,6 +108,8 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
   const [profileError, setProfileError] = useState(false);
   const [updateState, setUpdateState] = useState<"idle" | "checking" | "done" | "error">("idle");
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [updateDownload, setUpdateDownload] = useState<{ phase: "downloading" | "verifying" | "done" | "error"; received?: number; total?: number; path?: string; error?: string } | null>(null);
+  const updateBusy = updateDownload?.phase === "downloading" || updateDownload?.phase === "verifying";
   const [diagnostics, setDiagnostics] = useState<DiagnosticsInfo | null>(null);
   const [latency, setLatency] = useState<LatencyProbeResult | null>(null);
   const [latencyBusy, setLatencyBusy] = useState(false);
@@ -145,6 +155,26 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
     const result = await window.codex.checkForUpdates().catch<UpdateCheckResult>(() => ({ error: copy.updateCheckFailed }));
     setUpdateResult(result);
     setUpdateState(result.error ? "error" : "done");
+  };
+  useEffect(() => {
+    return window.codex.onUpdateProgress?.((progress: UpdateProgress) => {
+      setUpdateDownload((prev) => ({ ...(prev ?? { phase: progress.phase }), phase: progress.phase, received: progress.received, total: progress.total, error: progress.message }));
+    });
+  }, []);
+  const downloadUpdate = async () => {
+    setUpdateDownload({ phase: "downloading", received: 0 });
+    const result = await window.codex.downloadUpdate().catch<UpdateDownloadResult>(() => ({ ok: false, error: copy.updateDownloadFailed }));
+    if (result.ok) {
+      setUpdateDownload((prev) => ({ ...(prev ?? { phase: "done" }), phase: "done", path: result.path, error: undefined }));
+    } else {
+      setUpdateDownload((prev) => ({ ...(prev ?? { phase: "error" }), phase: "error", error: result.error || copy.updateDownloadFailed }));
+    }
+  };
+  const launchInstaller = async () => {
+    if (!updateDownload?.path) return;
+    if (!window.confirm(copy.updateConfirmInstall)) return;
+    const result = await window.codex.launchUpdateInstaller(updateDownload.path).catch<UpdateDownloadResult>(() => ({ ok: false, error: copy.updateLaunchFailed }));
+    if (!result.ok) setUpdateDownload((prev) => ({ ...(prev ?? { phase: "error" }), phase: "error", error: result.error || copy.updateLaunchFailed }));
   };
   useEffect(() => {
     if (!sshUndo) return;
@@ -510,13 +540,29 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
         <section id="settings-about">
           <h2>{copy.about}</h2>
           <div className="settings-row settings-update-row">
-            <button className="settings-update-button" disabled={updateState === "checking"} onClick={() => void checkForUpdates()}>
+            <button className="settings-update-button" disabled={updateState === "checking" || updateBusy} onClick={() => void checkForUpdates()}>
               {updateState === "checking" ? <LoaderCircle className="spin" size={12} /> : <Download size={12} />}
               {updateState === "checking" ? copy.checkingUpdates : copy.checkForUpdates}
             </button>
-            {updateState === "done" && updateResult?.latest ? <span className="settings-update-result"><strong>{copy.updateAvailable(updateResult.latest)}</strong>{updateResult.url ? <button title={copy.updateOpenDownload} onClick={() => void window.codex.openPath(updateResult.url as string)}><ExternalLink size={12} />{copy.updateOpenDownload}</button> : null}</span> : null}
+            {updateState === "done" && updateResult?.latest ? (
+              <span className="settings-update-result">
+                <strong>{copy.updateAvailable(updateResult.latest)}</strong>
+                {updateResult.url ? <button title={copy.updateOpenDownload} onClick={() => void window.codex.openPath(updateResult.url as string)}><ExternalLink size={12} />{copy.updateOpenDownload}</button> : null}
+                {updateResult.assets?.length ? <button disabled={updateBusy} onClick={() => void downloadUpdate()}><Download size={12} />{copy.updateDownloadInstall}</button> : null}
+              </span>
+            ) : null}
             {updateState === "done" && !updateResult?.latest ? <span className="settings-update-result">{copy.updateNone}</span> : null}
             {updateState === "error" ? <span className="settings-update-result error">{updateResult?.error || copy.updateCheckFailed}</span> : null}
+            {updateDownload?.phase === "downloading" || updateDownload?.phase === "verifying" ? (
+              <div className="settings-update-download">
+                <div className="settings-update-progress"><i style={{ width: updateDownload.phase === "verifying" ? "100%" : `${updateDownload.total ? Math.min(100, Math.round(((updateDownload.received ?? 0) / updateDownload.total) * 100)) : 6}%` }} /></div>
+                <span>{updateDownload.phase === "verifying" ? copy.updateVerifying : `${copy.updateDownloading}${updateDownload.total ? ` ${formatBytes(updateDownload.received ?? 0)} / ${formatBytes(updateDownload.total)}` : ""}`}</span>
+              </div>
+            ) : null}
+            {updateDownload?.phase === "done" && updateDownload.path ? (
+              <button className="settings-update-install" onClick={() => void launchInstaller()}><Download size={12} />{copy.updateInstallNow}</button>
+            ) : null}
+            {updateDownload?.phase === "error" ? <span className="settings-update-result error">{updateDownload.error || copy.updateDownloadFailed}</span> : null}
           </div>
           <div className="settings-group-divider" />
           <h3>{copy.diagnostics}</h3>

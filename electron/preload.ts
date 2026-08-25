@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AgentProviderId, AiForkRequest, AppSettings, CodexBridge, GitActionRequest, LauncherRequest, RunEvent, RunRequest, SftpActionRequest, ShellProfile, SshProfile, TerminalCreateRequest, TerminalEvent } from "../src/types";
+import type { AgentProviderId, AiForkRequest, AppSettings, CodexBridge, GitActionRequest, LauncherRequest, RunEvent, RunRequest, SftpActionRequest, ShellProfile, SshProfile, TerminalCreateRequest, TerminalEvent, UpdateProgress } from "../src/types";
 
 const rendererMode: "webgl" | "dom" =
   typeof process !== "undefined" && process.argv?.includes("--codex-ui-dom-renderer") ? "dom" : "webgl";
@@ -27,6 +27,13 @@ const bridge: CodexBridge = {
   getWindowIconSize: () => ipcRenderer.invoke("app:window-icon"),
   getDefaultSettings: () => ipcRenderer.invoke("settings:defaults"),
   checkForUpdates: () => ipcRenderer.invoke("updates:check"),
+  downloadUpdate: () => ipcRenderer.invoke("updates:download"),
+  launchUpdateInstaller: (installerPath: string) => ipcRenderer.invoke("updates:launch-installer", installerPath),
+  onUpdateProgress: (listener: (progress: UpdateProgress) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: UpdateProgress) => listener(value);
+    ipcRenderer.on("update-progress", handler);
+    return () => ipcRenderer.removeListener("update-progress", handler);
+  },
   getDiagnosticsInfo: () => ipcRenderer.invoke("diagnostics:info"),
   probeInputLatency: (paneId?: string) => ipcRenderer.invoke("terminal:latency-probe", paneId),
   getShellProfilePath: (shellId: string) => ipcRenderer.invoke("shell:profile-path", shellId),
