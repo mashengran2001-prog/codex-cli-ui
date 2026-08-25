@@ -209,6 +209,25 @@ try {
   assert.equal(await page.locator('.terminal-top-tab[data-tab-kind="settings"]').count(), 1);
   assert.equal(await page.locator('.terminal-top-tab[data-tab-kind="settings"].active').count(), 0);
   await page.locator('.terminal-top-tab[data-tab-kind="settings"] .terminal-tab-main').click();
+  // 非默认值标记（Nebula v1.3 设置页）：修改设置出现圆点，还原后消失
+  const densitySelect = page.locator('select[aria-label="界面密度"]');
+  await densitySelect.waitFor();
+  assert.equal(await page.locator('.settings-modified-dot[data-key="density"]').count(), 0);
+  await densitySelect.selectOption("comfortable");
+  await page.locator('.settings-modified-dot[data-key="density"]').waitFor();
+  await densitySelect.selectOption("normal");
+  await page.waitForFunction(() => !document.querySelector('.settings-modified-dot[data-key="density"]'));
+  const blinkLabel = page.locator('.settings-toggle', { hasText: "光标闪烁" });
+  assert.equal(await blinkLabel.locator('.settings-modified-dot').count(), 0);
+  await blinkLabel.click();
+  await blinkLabel.locator('.settings-modified-dot').waitFor();
+  await blinkLabel.click();
+  await page.waitForFunction(() => {
+    const labels = Array.from(document.querySelectorAll('.settings-toggle'));
+    const target = labels.find((el) => el.textContent && el.textContent.includes("光标闪烁"));
+    return !(target && target.querySelector('.settings-modified-dot'));
+  });
+  console.log("workflow-settings-modified: 非默认值标记出现/还原通过");
   await page.locator(".terminal-settings").waitFor();
   assert.equal(await page.locator('.terminal-top-tab[data-tab-kind="settings"].active').count(), 1);
   assert.equal(await page.locator(".terminal-side-panel").count(), 0);

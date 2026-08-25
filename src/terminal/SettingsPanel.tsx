@@ -54,6 +54,27 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
   const [newCommand, setNewCommand] = useState("");
   const copy = getSettingsCopy(settings.language);
   const update = <Key extends keyof AppSettings>(key: Key, value: AppSettings[Key]) => onChange({ ...settings, [key]: value });
+  const [defaultSettings, setDefaultSettings] = useState<Partial<AppSettings> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void window.codex.getDefaultSettings().then((next) => { if (!cancelled) setDefaultSettings(next); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const modifiedKeys = useMemo(() => {
+    const changed = new Set<string>();
+    if (!defaultSettings) return changed;
+    const allKeys = new Set<string>([...Object.keys(defaultSettings), ...Object.keys(settings as unknown as Record<string, unknown>)]);
+    const norm = (value: unknown) => (value === undefined ? null : value);
+    for (const key of allKeys) {
+      if (key === "cliProfiles" || key === "keybindings") continue;
+      const current = (settings as unknown as Record<string, unknown>)[key];
+      const def = (defaultSettings as Record<string, unknown>)[key];
+      if (JSON.stringify(norm(current)) !== JSON.stringify(norm(def))) changed.add(key);
+    }
+    return changed;
+  }, [defaultSettings, settings]);
+  const isModified = (key: string) => modifiedKeys.has(key);
+  const Mod = ({ k }: { k: string }) => (isModified(k) ? <span className="settings-modified-dot" data-key={k} title={copy.settingModified} /> : null);
   const saveProfile = (next: CliProfile) => update("cliProfiles", settings.cliProfiles.map((profile) => profile.id === next.id ? next : profile));
   const recordKeybinding = (action: KeybindingAction, chord: string) => update("keybindings", { ...settings.keybindings, [action]: chord });
   const resetKeybinding = (action: KeybindingAction) => update("keybindings", { ...settings.keybindings, [action]: DEFAULT_KEYBINDINGS[action] });
@@ -265,7 +286,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           </header>
           <div className="settings-scroll" ref={settingsScrollRef} onScroll={updateActiveSection}>
         <section id="settings-appearance">
-          <h2>{copy.appearance}</h2>
+          <h2>{copy.appearance}</h2><Mod k="theme" />
           <div className="theme-grid">
             {(Object.keys(terminalThemes) as TerminalThemeName[]).map((name) => {
               const item = terminalThemes[name];
@@ -277,47 +298,47 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
               );
             })}
           </div>
-          <div className="settings-row color-picker-row"><label>{copy.backgroundCustomColor}</label><HsvPicker copy={copy} value={settings.backgroundColor} onChange={(color) => update("backgroundColor", color)} onReset={() => update("backgroundColor", undefined)} /></div>
-          <div className="settings-row color-picker-row"><label>{copy.accentColor}</label><HsvPicker copy={copy} value={settings.accentColor} onChange={(color) => update("accentColor", color)} onReset={() => update("accentColor", undefined)} /></div>
+          <div className="settings-row color-picker-row"><label>{copy.backgroundCustomColor}</label><Mod k="backgroundColor" /><HsvPicker copy={copy} value={settings.backgroundColor} onChange={(color) => update("backgroundColor", color)} onReset={() => update("backgroundColor", undefined)} /></div>
+          <div className="settings-row color-picker-row"><label>{copy.accentColor}</label><Mod k="accentColor" /><HsvPicker copy={copy} value={settings.accentColor} onChange={(color) => update("accentColor", color)} onReset={() => update("accentColor", undefined)} /></div>
           <div className="settings-row">
-            <label>{copy.language}</label>
+            <label>{copy.language}</label><Mod k="language" />
             <select aria-label={copy.language} value={settings.language} onChange={(event) => update("language", event.target.value as AppSettings["language"])}><option value="system">{copy.followSystem}</option><option value="zh-CN">简体中文</option><option value="en-US">English</option></select>
           </div>
           <div className="settings-row">
-            <label>{copy.density}</label>
+            <label>{copy.density}</label><Mod k="density" />
             <select aria-label={copy.density} value={settings.density} onChange={(event) => update("density", event.target.value as AppSettings["density"])}><option value="compact">{copy.densityCompact}</option><option value="normal">{copy.densityNormal}</option><option value="comfortable">{copy.densityComfortable}</option></select>
           </div>
           <div className="settings-row">
-            <label>{copy.backgroundImage}</label>
+            <label>{copy.backgroundImage}</label><Mod k="backgroundImage" />
             <div className="settings-inline-actions">
               <button onClick={() => void window.codex.chooseBackgroundImage().then((path) => { if (path) update("backgroundImage", path); })}><Image size={13} />{copy.choose}</button>
               {settings.backgroundImage && <button title={copy.clearBackground} onClick={() => update("backgroundImage", undefined)}><RotateCcw size={13} /></button>}
             </div>
           </div>
-          <div className="settings-row range-row"><label>{copy.opacity} <output>{Math.round(settings.backgroundOpacity * 100)}%</output></label><input type="range" min="35" max="100" value={Math.round(settings.backgroundOpacity * 100)} onChange={(event) => update("backgroundOpacity", Number(event.target.value) / 100)} /></div>
-          <Toggle label={copy.backgroundBlur} checked={settings.backgroundBlur} onChange={(value) => update("backgroundBlur", value)} />
+          <div className="settings-row range-row"><label>{copy.opacity} <output>{Math.round(settings.backgroundOpacity * 100)}%</output></label><Mod k="backgroundOpacity" /><input type="range" min="35" max="100" value={Math.round(settings.backgroundOpacity * 100)} onChange={(event) => update("backgroundOpacity", Number(event.target.value) / 100)} /></div>
+          <Toggle label={copy.backgroundBlur} checked={settings.backgroundBlur} onChange={(value) => update("backgroundBlur", value)} modified={isModified("backgroundBlur")} />
         </section>
           <div className="settings-group-divider" />
         <section id="settings-terminal">
           <h2>{copy.terminal}</h2>
-          <div className="settings-row shell-profile-row"><label>{copy.defaultShell}</label><select aria-label={copy.defaultShell} value={settings.defaultShellId} onChange={(event) => update("defaultShellId", event.target.value)}>{shells.map((shell) => <option value={shell.id} key={shell.id}>{shell.label}</option>)}</select><button title={profilePath || copy.profileUnavailable} disabled={!profilePath} onClick={() => void openShellProfile(settings.defaultShellId)}><FileCode2 size={12} />{copy.openProfile}</button>{profileError && <small className="settings-update-result error">{copy.profileOpenFailed}</small>}</div>
-          <div className="settings-row"><label>{copy.newTabPlacement}</label><select aria-label={copy.newTabPlacement} value={settings.newTabPlacement} onChange={(event) => update("newTabPlacement", event.target.value as AppSettings["newTabPlacement"])}><option value="after-active">{copy.afterActiveTab}</option><option value="end">{copy.appendToEnd}</option></select></div>
-          <div className="settings-row"><label>{copy.tabPosition}</label><select aria-label={copy.tabPosition} value={settings.tabPosition} onChange={(event) => update("tabPosition", event.target.value as AppSettings["tabPosition"])}><option value="side">{copy.tabPositionSide}</option><option value="top">{copy.tabPositionTop}</option></select></div>
-          <div className="settings-row"><label>{copy.cursorShape}</label><select aria-label={copy.cursorShape} value={settings.cursorStyle} onChange={(event) => update("cursorStyle", event.target.value as AppSettings["cursorStyle"])}><option value="bar">{copy.cursorBar}</option><option value="block">{copy.cursorBlock}</option><option value="underline">{copy.cursorUnderline}</option></select></div>
-          <Toggle label={copy.cursorBlink} checked={settings.cursorBlink} onChange={(value) => update("cursorBlink", value)} />
+          <div className="settings-row shell-profile-row"><label>{copy.defaultShell}</label><Mod k="defaultShellId" /><select aria-label={copy.defaultShell} value={settings.defaultShellId} onChange={(event) => update("defaultShellId", event.target.value)}>{shells.map((shell) => <option value={shell.id} key={shell.id}>{shell.label}</option>)}</select><button title={profilePath || copy.profileUnavailable} disabled={!profilePath} onClick={() => void openShellProfile(settings.defaultShellId)}><FileCode2 size={12} />{copy.openProfile}</button>{profileError && <small className="settings-update-result error">{copy.profileOpenFailed}</small>}</div>
+          <div className="settings-row"><label>{copy.newTabPlacement}</label><Mod k="newTabPlacement" /><select aria-label={copy.newTabPlacement} value={settings.newTabPlacement} onChange={(event) => update("newTabPlacement", event.target.value as AppSettings["newTabPlacement"])}><option value="after-active">{copy.afterActiveTab}</option><option value="end">{copy.appendToEnd}</option></select></div>
+          <div className="settings-row"><label>{copy.tabPosition}</label><Mod k="tabPosition" /><select aria-label={copy.tabPosition} value={settings.tabPosition} onChange={(event) => update("tabPosition", event.target.value as AppSettings["tabPosition"])}><option value="side">{copy.tabPositionSide}</option><option value="top">{copy.tabPositionTop}</option></select></div>
+          <div className="settings-row"><label>{copy.cursorShape}</label><Mod k="cursorStyle" /><select aria-label={copy.cursorShape} value={settings.cursorStyle} onChange={(event) => update("cursorStyle", event.target.value as AppSettings["cursorStyle"])}><option value="bar">{copy.cursorBar}</option><option value="block">{copy.cursorBlock}</option><option value="underline">{copy.cursorUnderline}</option></select></div>
+          <Toggle label={copy.cursorBlink} checked={settings.cursorBlink} onChange={(value) => update("cursorBlink", value)} modified={isModified("cursorBlink")} />
           <div className="settings-row font-family-row">
-            <label>{copy.fontFamily}</label>
+            <label>{copy.fontFamily}</label><Mod k="fontFamily" />
             <FontPicker copy={copy} value={settings.fontFamily} onChange={(value) => update("fontFamily", value)} />
           </div>
-          <div className="settings-row"><label>{copy.bellMode}</label><select aria-label={copy.bellMode} value={settings.bellMode} onChange={(event) => update("bellMode", event.target.value as AppSettings["bellMode"])}><option value="off">{copy.bellModeOff}</option><option value="flash">{copy.bellModeFlash}</option><option value="sound">{copy.bellModeSound}</option><option value="both">{copy.bellModeBoth}</option></select></div>
-          <Toggle label={copy.loadPowerShellProfile} checked={settings.loadShellProfile} onChange={(value) => update("loadShellProfile", value)} />
-          <Toggle label={copy.completions} checked={settings.completionEnabled} onChange={(value) => update("completionEnabled", value)} />
-          <div className="settings-row"><label>{copy.completionStyle}</label><select aria-label={copy.completionStyle} value={settings.completionStyle} onChange={(event) => update("completionStyle", event.target.value as AppSettings["completionStyle"])}><option value="inline">{copy.completionInline}</option><option value="popup">{copy.completionPopup}</option></select></div>
-          <div className="settings-row"><label>{copy.cellWidth}</label><select aria-label={copy.cellWidth} value={settings.cellWidth} onChange={(event) => update("cellWidth", event.target.value as AppSettings["cellWidth"])}><option value="compact">{copy.cellWidthCompact}</option><option value="relaxed">{copy.cellWidthRelaxed}</option></select></div>
-          <Toggle label={copy.copyOnSelect} checked={settings.copyOnSelect} onChange={(value) => update("copyOnSelect", value)} />
-          <Toggle label={copy.powerlinePrompt} checked={settings.powerlinePrompt} onChange={(value) => update("powerlinePrompt", value)} />
-          <Toggle label={copy.restoreTabs} checked={settings.restoreTerminalTabs} onChange={(value) => update("restoreTerminalTabs", value)} />
-          <Toggle label={copy.resumeAiSessions} checked={settings.resumeAiSessions} onChange={(value) => update("resumeAiSessions", value)} />
+          <div className="settings-row"><label>{copy.bellMode}</label><Mod k="bellMode" /><select aria-label={copy.bellMode} value={settings.bellMode} onChange={(event) => update("bellMode", event.target.value as AppSettings["bellMode"])}><option value="off">{copy.bellModeOff}</option><option value="flash">{copy.bellModeFlash}</option><option value="sound">{copy.bellModeSound}</option><option value="both">{copy.bellModeBoth}</option></select></div>
+          <Toggle label={copy.loadPowerShellProfile} checked={settings.loadShellProfile} onChange={(value) => update("loadShellProfile", value)} modified={isModified("loadShellProfile")} />
+          <Toggle label={copy.completions} checked={settings.completionEnabled} onChange={(value) => update("completionEnabled", value)} modified={isModified("completionEnabled")} />
+          <div className="settings-row"><label>{copy.completionStyle}</label><Mod k="completionStyle" /><select aria-label={copy.completionStyle} value={settings.completionStyle} onChange={(event) => update("completionStyle", event.target.value as AppSettings["completionStyle"])}><option value="inline">{copy.completionInline}</option><option value="popup">{copy.completionPopup}</option></select></div>
+          <div className="settings-row"><label>{copy.cellWidth}</label><Mod k="cellWidth" /><select aria-label={copy.cellWidth} value={settings.cellWidth} onChange={(event) => update("cellWidth", event.target.value as AppSettings["cellWidth"])}><option value="compact">{copy.cellWidthCompact}</option><option value="relaxed">{copy.cellWidthRelaxed}</option></select></div>
+          <Toggle label={copy.copyOnSelect} checked={settings.copyOnSelect} onChange={(value) => update("copyOnSelect", value)} modified={isModified("copyOnSelect")} />
+          <Toggle label={copy.powerlinePrompt} checked={settings.powerlinePrompt} onChange={(value) => update("powerlinePrompt", value)} modified={isModified("powerlinePrompt")} />
+          <Toggle label={copy.restoreTabs} checked={settings.restoreTerminalTabs} onChange={(value) => update("restoreTerminalTabs", value)} modified={isModified("restoreTerminalTabs")} />
+          <Toggle label={copy.resumeAiSessions} checked={settings.resumeAiSessions} onChange={(value) => update("resumeAiSessions", value)} modified={isModified("resumeAiSessions")} />
         </section>
           <div className="settings-group-divider" />
         <section id="settings-cli">
@@ -395,17 +416,17 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
           <div className="settings-group-divider" />
         <section id="settings-interaction">
           <h2>{copy.interaction}</h2>
-          <Toggle label={copy.resizablePanels} checked={settings.resizablePanels} onChange={(value) => update("resizablePanels", value)} />
-          <Toggle label={copy.quickTerminal} checked={settings.quickTerminal} onChange={(value) => update("quickTerminal", value)} />
-          <Toggle label={copy.shellStartupIntegration} checked={settings.shellStartupIntegration} onChange={(value) => update("shellStartupIntegration", value)} />
-          <Toggle label={copy.completionNotifications} checked={settings.notifyOnCompletion} onChange={(value) => update("notifyOnCompletion", value)} />
-          <div className="settings-row"><label>{copy.closeWindow}</label><select value={settings.closeBehavior} onChange={(event) => update("closeBehavior", event.target.value as AppSettings["closeBehavior"])}><option value="tray">{copy.keepRunning}</option><option value="quit">{copy.quitApplication}</option></select></div>
+          <Toggle label={copy.resizablePanels} checked={settings.resizablePanels} onChange={(value) => update("resizablePanels", value)} modified={isModified("resizablePanels")} />
+          <Toggle label={copy.quickTerminal} checked={settings.quickTerminal} onChange={(value) => update("quickTerminal", value)} modified={isModified("quickTerminal")} />
+          <Toggle label={copy.shellStartupIntegration} checked={settings.shellStartupIntegration} onChange={(value) => update("shellStartupIntegration", value)} modified={isModified("shellStartupIntegration")} />
+          <Toggle label={copy.completionNotifications} checked={settings.notifyOnCompletion} onChange={(value) => update("notifyOnCompletion", value)} modified={isModified("notifyOnCompletion")} />
+          <div className="settings-row"><label>{copy.closeWindow}</label><Mod k="closeBehavior" /><select value={settings.closeBehavior} onChange={(event) => update("closeBehavior", event.target.value as AppSettings["closeBehavior"])}><option value="tray">{copy.keepRunning}</option><option value="quit">{copy.quitApplication}</option></select></div>
         </section>
           <div className="settings-group-divider" />
         <section id="settings-proxy">
           <h2>{copy.proxy}</h2>
-          <div className="settings-row"><label>{copy.proxyUrl}</label><input aria-label={copy.proxyUrl} type="text" value={settings.proxyUrl} placeholder={copy.proxyUrlPlaceholder} onChange={(event) => update("proxyUrl", event.target.value)} /></div>
-          <div className="settings-row"><label>{copy.proxyBypass}</label><input aria-label={copy.proxyBypass} type="text" value={settings.proxyBypass} placeholder={copy.proxyBypassPlaceholder} onChange={(event) => update("proxyBypass", event.target.value)} /></div>
+          <div className="settings-row"><label>{copy.proxyUrl}</label><Mod k="proxyUrl" /><input aria-label={copy.proxyUrl} type="text" value={settings.proxyUrl} placeholder={copy.proxyUrlPlaceholder} onChange={(event) => update("proxyUrl", event.target.value)} /></div>
+          <div className="settings-row"><label>{copy.proxyBypass}</label><Mod k="proxyBypass" /><input aria-label={copy.proxyBypass} type="text" value={settings.proxyBypass} placeholder={copy.proxyBypassPlaceholder} onChange={(event) => update("proxyBypass", event.target.value)} /></div>
           <p className="settings-hint">{copy.proxyHint}</p>
         </section>
           <div className="settings-group-divider" />
@@ -813,6 +834,6 @@ function CliProfileEditor({ copy, profile, onSave, onDelete }: { copy: ReturnTyp
   </div>;
 }
 
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange(value: boolean): void }) {
-  return <label className="settings-toggle"><span>{label}</span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><i /></label>;
+function Toggle({ label, checked, modified, onChange }: { label: string; checked: boolean; modified?: boolean; onChange(value: boolean): void }) {
+  return <label className="settings-toggle"><span>{label}{modified ? <span className="settings-modified-dot" /> : null}</span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><i /></label>;
 }

@@ -65,6 +65,7 @@ export async function installMockBridge(page) {
         "quick-terminal": "Ctrl+`", "open-settings": "Ctrl+,"
       },
     };
+    const defaultSettings = { ...settings };
     try {
       const saved = localStorage.getItem("codex-cli-ui:test-app-settings");
       if (saved) settings = { ...settings, ...JSON.parse(saved) };
@@ -158,6 +159,7 @@ export async function installMockBridge(page) {
       setProviderCredential: async () => ({ ...deepseekProvider, configured: true }),
       getAppSettings: async () => settings,
       setAppSettings: async (value) => { settings = value; try { localStorage.setItem("codex-cli-ui:test-app-settings", JSON.stringify(value)); } catch { /* ignore */ } return settings; },
+      getDefaultSettings: async () => { const { cliProfiles: _cliProfiles, keybindings: _keybindings, ...scalars } = defaultSettings; return scalars; },
       listSystemFonts: async () => ["Cascadia Mono", "Consolas", "JetBrains Mono", "Microsoft YaHei", "Segoe UI"],
       chooseDirectory: async () => "F:\\demo\\atlas-workspace",
       chooseImages: async () => ["F:\\demo\\ui-reference.png"],

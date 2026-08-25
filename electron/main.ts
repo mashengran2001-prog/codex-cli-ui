@@ -3187,6 +3187,11 @@ ipcMain.handle("app:window-icon", () => {
   return image.getSize();
 });
 
+ipcMain.handle("settings:defaults", () => {
+  const { cliProfiles: _cliProfiles, keybindings: _keybindings, ...scalars } = DEFAULT_SETTINGS;
+  return scalars;
+});
+
 ipcMain.handle("updates:check", async () => {
   try {
     const controller = new AbortController();

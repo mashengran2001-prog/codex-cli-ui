@@ -442,6 +442,7 @@ export interface CodexBridge {
   readClipboardText(): Promise<string>;
   getAppUserModelId(): Promise<string>;
   getWindowIconSize(): Promise<{ width: number; height: number } | null>;
+  getDefaultSettings(): Promise<Partial<AppSettings>>;
   checkForUpdates(): Promise<UpdateCheckResult>;
   getShellProfilePath(shellId: string): Promise<string | null>;
   openShellProfile(shellId: string): Promise<boolean>;

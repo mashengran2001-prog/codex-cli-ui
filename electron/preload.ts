@@ -25,6 +25,7 @@ const bridge: CodexBridge = {
   readClipboardText: () => ipcRenderer.invoke("clipboard:read-text"),
   getAppUserModelId: () => ipcRenderer.invoke("app:user-model-id"),
   getWindowIconSize: () => ipcRenderer.invoke("app:window-icon"),
+  getDefaultSettings: () => ipcRenderer.invoke("settings:defaults"),
   checkForUpdates: () => ipcRenderer.invoke("updates:check"),
   getShellProfilePath: (shellId: string) => ipcRenderer.invoke("shell:profile-path", shellId),
   openShellProfile: (shellId: string) => ipcRenderer.invoke("shell:open-profile", shellId),
