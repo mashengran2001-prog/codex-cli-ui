@@ -1499,3 +1499,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-backup-preview-badge.overwrite { color: #e7b86e; background: rgba(231, 184, 110, 0.13); }
 .settings-backup-preview-size { flex: 0 0 auto; font-size: 10px; color: var(--muted, #8791a1); }
 .settings-backup-preview-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+
+/* SSH 高级设置（Nebula 对照：代理/跳板/keepalive/认证偏好） */
+.ssh-advanced { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line-strong, #2b303a); border-radius: 10px; }
+.ssh-advanced-title { font-size: 11px; font-weight: 600; color: var(--text, #d8dee9); }
+.ssh-advanced > label { display: grid; gap: 4px; }
+.ssh-advanced select { width: 100%; }

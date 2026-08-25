@@ -348,11 +348,22 @@ export interface SshProfile {
   /** 多个私钥文件（对标 Nebula 私钥列表，最多 4 个）。 */
   identityFiles?: string[];
   remotePath?: string;
+  /** 跳板机（单跳 ProxyJump，形如 user@host:port）。 */
+  jumpHost?: string;
+  /** 自定义代理命令（ProxyCommand，与跳板机互斥，跳板机优先）。 */
+  proxyCommand?: string;
+  /** 保活间隔秒（0=关闭；不设置则沿用本机 ssh_config）。 */
+  keepAliveInterval?: number;
+  /** 保活最大失败次数（仅 keepAliveInterval>0 时生效，默认 6）。 */
+  keepAliveMax?: number;
+  /** 首选认证方式（不设置或 auto=自动）。 */
+  preferredAuth?: SshPreferredAuth;
   createdAt: number;
   updatedAt: number;
   source?: "saved" | "ssh-config";
 }
 
+export type SshPreferredAuth = "auto" | "publickey" | "password" | "keyboard-interactive";
 export type SshStageName = "resolve" | "tcp" | "authenticate" | "session";
 
 export interface SshConnectionStage {

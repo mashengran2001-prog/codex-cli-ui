@@ -23,6 +23,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { createWindowsTextDecoder, decodeWindowsText } from "../src/text-encoding";
+import { normalizeJumpHost, normalizePreferredAuth, normalizeProxyCommand, normalizeKeepAliveInterval, normalizeKeepAliveMax, sshProfileTarget, sshTransportOptions } from "./ssh-utils";
 import type { IPty } from "node-pty";
 import type {
   Activity,
@@ -1793,9 +1794,8 @@ function sshExecutable() {
 function sshArguments(profile: SshProfile, batchMode = false) {
   const args = ["-p", String(profile.port || 22)];
   if (batchMode) args.push("-o", "BatchMode=yes", "-o", "ConnectTimeout=8");
-  const identities = profile.identityFiles?.length ? profile.identityFiles : profile.identityFile ? [profile.identityFile] : [];
-  for (const identity of identities) args.push("-i", identity);
-  args.push(`${profile.username ? `${profile.username}@` : ""}${profile.host}`);
+  args.push(...sshTransportOptions(profile));
+  args.push(sshProfileTarget(profile));
   return args;
 }
 
@@ -2181,6 +2181,11 @@ function normalizeSshProfile(value: Partial<SshProfile>, preserveId = true): Ssh
     ...(Array.isArray(value.identityFiles) ? value.identityFiles : []).filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => resolve(item.trim().replace(/^~(?=[\\/])/, homedir()))),
   ])].slice(0, 4);
   const remotePath = typeof value.remotePath === "string" && value.remotePath.trim() ? value.remotePath.trim().slice(0, 4096) : undefined;
+  const jumpHost = normalizeJumpHost(value.jumpHost);
+  const proxyCommand = normalizeProxyCommand(value.proxyCommand);
+  const keepAliveInterval = normalizeKeepAliveInterval(value.keepAliveInterval);
+  const keepAliveMax = normalizeKeepAliveMax(value.keepAliveMax);
+  const preferredAuth = normalizePreferredAuth(value.preferredAuth);
   const now = Date.now();
   return {
     id: preserveId && typeof value.id === "string" && /^[a-zA-Z0-9:_-]{1,180}$/.test(value.id) ? value.id : randomUUID(),
@@ -2191,6 +2196,11 @@ function normalizeSshProfile(value: Partial<SshProfile>, preserveId = true): Ssh
     identityFile,
     identityFiles: identityFiles.length ? identityFiles : undefined,
     remotePath,
+    jumpHost,
+    proxyCommand,
+    keepAliveInterval,
+    keepAliveMax,
+    preferredAuth,
     createdAt: typeof value.createdAt === "number" ? value.createdAt : now,
     updatedAt: now,
     source: value.source === "ssh-config" ? "ssh-config" : "saved",
@@ -2424,10 +2434,8 @@ function quoteSftpPath(value: string) {
 
 function runSftpBatch(profile: SshProfile, commands: string[], timeout = 60_000) {
   return new Promise<{ stdout: string; stderr: string }>((resolveResult, reject) => {
-    const args = ["-b", "-", "-P", String(profile.port || 22), "-o", "BatchMode=yes"];
-    const identities = profile.identityFiles?.length ? profile.identityFiles : profile.identityFile ? [profile.identityFile] : [];
-    for (const identity of identities) args.push("-i", identity);
-    args.push(`${profile.username ? `${profile.username}@` : ""}${profile.host}`);
+    const args = ["-b", "-", "-P", String(profile.port || 22), "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", ...sshTransportOptions(profile)];
+    args.push(sshProfileTarget(profile));
     const child = spawn(sftpExecutable(), args, { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";

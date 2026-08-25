@@ -236,6 +236,7 @@ export function sanitizeSshBytes(bytes: Uint8Array): Uint8Array {
       delete copy.identityFiles;
       delete copy.identityFile;
       delete copy.proxy;
+      delete copy.proxyCommand;
       delete copy.password;
       delete copy.passphrase;
       return copy;

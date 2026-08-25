@@ -23,7 +23,11 @@ export default function SshEditor({ profile, onSave, onDelete, onClose, onError 
   const [testing, setTesting] = useState(false);
   const [testStatus, setTestStatus] = useState<{ message: string; error?: boolean }>();
   const [stages, setStages] = useState<SshConnectionStage[]>([]);
-  const update = (field: keyof SshProfile, next: string | number) => setValue((current) => ({ ...current, [field]: next }));
+  const update = (field: keyof SshProfile, next: string | number | undefined) => setValue((current) => ({ ...current, [field]: next }));
+  const updateKeepAlive = (field: "keepAliveInterval" | "keepAliveMax", raw: string) => {
+    const digits = raw.replace(/[^0-9]/g, "");
+    update(field, digits === "" ? undefined : Number(digits));
+  };
   const updatePort = (raw: string) => {
     // 端口只接受至多 5 位数字（对标 Nebula 键入即过滤）。
     const digits = raw.replace(/[^0-9]/g, "").slice(0, 5);
@@ -49,14 +53,18 @@ export default function SshEditor({ profile, onSave, onDelete, onClose, onError 
       setTesting(false);
     }
   };
-  const submit = () => {
+  const submit = async () => {
     const port = value.port || 22;
     if (port < 1 || port > 65535) { setTestStatus({ message: copy.portRange, error: true }); return; }
-    void onSave({ ...value, port, identityFiles: keys.length ? keys : undefined, identityFile: keys[0] });
+    try {
+      await onSave({ ...value, port, identityFiles: keys.length ? keys : undefined, identityFile: keys[0] });
+    } catch (reason) {
+      setTestStatus({ message: reason instanceof Error ? reason.message : copy.testFailed, error: true });
+    }
   };
   return (
     <div className="modal-overlay ssh-overlay" role="dialog" aria-modal="true" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <form className="ssh-editor" onSubmit={(event) => { event.preventDefault(); submit(); }}>
+      <form className="ssh-editor" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
         <header><span><Server size={17} /><strong>{profile ? copy.edit : copy.create}</strong></span><button type="button" title={copy.close} onClick={onClose}><X size={14} /></button></header>
         <div className="ssh-fields">
           <label><span>{copy.name}</span><input value={value.name} required onChange={(event) => update("name", event.target.value)} /></label>
@@ -68,6 +76,21 @@ export default function SshEditor({ profile, onSave, onDelete, onClose, onError 
             {keys.length < MAX_PRIVATE_KEYS && <button type="button" className="ssh-key-add" onClick={() => void addKeys()}><Plus size={12} />{copy.addKey}</button>}
           </div></div>
           <label><span>{copy.remotePath}</span><input value={value.remotePath || ""} placeholder="/home/user" onChange={(event) => update("remotePath", event.target.value)} /></label>
+          <div className="ssh-advanced">
+            <span className="ssh-advanced-title">{copy.advanced}</span>
+            <label><span>{copy.jumpHost}</span><input value={value.jumpHost || ""} placeholder="user@host:port" onChange={(event) => update("jumpHost", event.target.value)} /></label>
+            <label><span>{copy.proxyCommand}</span><input value={value.proxyCommand || ""} placeholder="ssh -W %h:%p user@proxy" onChange={(event) => update("proxyCommand", event.target.value)} /></label>
+            <div>
+              <label><span>{copy.keepAliveInterval}</span><input type="text" inputMode="numeric" value={value.keepAliveInterval === undefined ? "" : String(value.keepAliveInterval)} placeholder="30" onChange={(event) => updateKeepAlive("keepAliveInterval", event.target.value)} /></label>
+              <label><span>{copy.keepAliveMax}</span><input type="text" inputMode="numeric" value={value.keepAliveMax === undefined ? "" : String(value.keepAliveMax)} placeholder="6" onChange={(event) => updateKeepAlive("keepAliveMax", event.target.value)} /></label>
+            </div>
+            <label><span>{copy.preferredAuth}</span>
+              <select value={value.preferredAuth || "auto"} onChange={(event) => update("preferredAuth", event.target.value)}>
+                {(["auto", "publickey", "password", "keyboard-interactive"] as const).map((mode) => <option key={mode} value={mode}>{copy.authModes[mode]}</option>)}
+              </select>
+            </label>
+            <p className="keymap-footer-hint">{copy.advancedHint}</p>
+          </div>
         </div>
         {stages.length > 0 && <div className="ssh-stages">{stages.map((stage) => <div className={stage.status} key={stage.name}><span>{stage.status === "running" ? <LoaderCircle className="spin" size={13} /> : stage.status === "done" ? <Check size={13} /> : <i />}</span><strong>{copy.stages[stage.name]}</strong>{stage.message && <small>{stage.message}</small>}</div>)}</div>}
         {testStatus && <div className={"ssh-test-status" + (testStatus.error ? " error" : "")}>{testStatus.message}</div>}
