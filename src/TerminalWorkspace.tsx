@@ -7,6 +7,7 @@ import {
   FileText, Folder,
 } from "lucide-react";
 import BrandIcon from "./BrandIcon";
+import { sanitizeDisplayText } from "./text-encoding";
 import type { AppSettings, CliLifecycleStatus, CliToolInfo, CompletionCandidate, DocumentFile, ProjectRecord, ShellProfile, SshProfile, TerminalEvent, TerminalInfo } from "./types";
 import { getUiCopy, getWorkbenchCopy } from "./i18n";
 import { keybindingCaptureActive, keybindingMatches } from "./keybindings";
@@ -1457,7 +1458,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
         {terminalView && drawer === "sftp" && selectedSsh && <SftpDrawer profile={selectedSsh} onClose={() => setDrawer(null)} onError={onError} />}
         {terminalView && drawer === "directories" && <DirectoriesDrawer onClose={() => setDrawer(null)} onNewTerminal={(path) => void createTerminal(path, { reuseExisting: false, shellId: settings.defaultShellId })} onCd={jumpToDirectory} onError={onError} />}
       </div>
-      {notice && <button className="terminal-notice" onClick={() => { assignSession(notice.sessionId); setNotice(undefined); }}><Bell size={15} /><span><strong>{notice.title}</strong><small>{notice.message}</small></span><ChevronLeft size={13} /></button>}
+      {notice && <button className="terminal-notice" onClick={() => { assignSession(notice.sessionId); setNotice(undefined); }}><Bell size={15} /><span><strong>{sanitizeDisplayText(notice.title)}</strong><small>{sanitizeDisplayText(notice.message)}</small></span><ChevronLeft size={13} /></button>}
       {paletteOpen && <CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} />}
       {shellPaletteOpen && <CommandPalette actions={shellPaletteActions} onClose={() => setShellPaletteOpen(false)} />}
       {sshEditor && <SshEditor profile={sshEditor === "new" ? undefined : sshEditor} onClose={() => setSshEditor(undefined)} onError={onError} onSave={async (profile) => { const saved = await window.codex.saveSshProfile(profile); setSshEditor(undefined); await refreshSshProfiles(); setSelectedSsh(saved); }} onDelete={async (id) => { await window.codex.deleteSshProfile(id); setSshEditor(undefined); await refreshSshProfiles(); }} />}

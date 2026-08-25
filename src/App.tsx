@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, LoaderCircle, ShieldAlert, X } from "lucide-react";
 import Composer from "./Composer";
+import { sanitizeDisplayText } from "./text-encoding";
 import ConversationView from "./ConversationView";
 import Sidebar from "./Sidebar";
 import { getUiCopy, UiLocaleContext, useResolvedAppLocale } from "./i18n";
@@ -704,11 +705,11 @@ export default function App() {
       </Suspense>
 
       {error && (
-        <div className="error-toast"><AlertTriangle size={15} /><span>{error}</span><button title={copy.close} onClick={() => setError(null)}><X size={13} /></button></div>
+        <div className="error-toast"><AlertTriangle size={15} /><span>{sanitizeDisplayText(error)}</span><button title={copy.close} onClick={() => setError(null)}><X size={13} /></button></div>
       )}
       {toast && (
         <button className="completion-toast" onClick={() => { setSelectedConversationId(toast.id); setToast(null); }}>
-          <CheckCircle2 size={17} /><span><strong>{copy.completed}</strong><small>{toast.title}</small></span>
+          <CheckCircle2 size={17} /><span><strong>{copy.completed}</strong><small>{sanitizeDisplayText(toast.title)}</small></span>
         </button>
       )}
       {pendingDanger && (

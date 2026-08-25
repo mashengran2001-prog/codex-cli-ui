@@ -21,6 +21,7 @@ import { access, appendFile, lstat, mkdir, readFile, readdir, realpath, rename, 
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
+import { decodeWindowsText } from "../src/text-encoding";
 import type { IPty } from "node-pty";
 import type {
   Activity,
@@ -1074,9 +1075,9 @@ interface ProcessRow {
 
 function runtimeExecFileText(file: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(file, args, { windowsHide: true, maxBuffer: 2 * 1024 * 1024 }, (error, stdout) => {
+    execFile(file, args, { windowsHide: true, maxBuffer: 2 * 1024 * 1024, encoding: "buffer" }, (error, stdout) => {
       if (error) reject(error);
-      else resolve(stdout);
+      else resolve(decodeWindowsText(stdout));
     });
   });
 }
@@ -1617,9 +1618,9 @@ async function prepareTerminalIntegration() {
 
 function execFileText(file: string, args: string[], options: Parameters<typeof execFile>[2] = {}) {
   return new Promise<{ stdout: string; stderr: string }>((resolveResult, reject) => {
-    execFile(file, args, { windowsHide: true, timeout: 12_000, maxBuffer: 2 * 1024 * 1024, ...options }, (error, stdout, stderr) => {
-      if (error) reject(Object.assign(error, { stdout, stderr }));
-      else resolveResult({ stdout: String(stdout), stderr: String(stderr) });
+    execFile(file, args, { windowsHide: true, timeout: 12_000, maxBuffer: 2 * 1024 * 1024, encoding: "buffer", ...options }, (error, stdout, stderr) => {
+      if (error) reject(Object.assign(error, { stdout: decodeWindowsText(stdout), stderr: decodeWindowsText(stderr) }));
+      else resolveResult({ stdout: decodeWindowsText(stdout), stderr: decodeWindowsText(stderr) });
     });
   });
 }
@@ -2400,8 +2401,8 @@ function runSftpBatch(profile: SshProfile, commands: string[], timeout = 60_000)
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => child.kill(), timeout);
-    child.stdout?.on("data", (chunk: Buffer) => { stdout = `${stdout}${chunk.toString("utf8")}`.slice(-4 * 1024 * 1024); });
-    child.stderr?.on("data", (chunk: Buffer) => { stderr = `${stderr}${chunk.toString("utf8")}`.slice(-4 * 1024 * 1024); });
+    child.stdout?.on("data", (chunk: Buffer) => { stdout = `${stdout}${decodeWindowsText(chunk)}`.slice(-4 * 1024 * 1024); });
+    child.stderr?.on("data", (chunk: Buffer) => { stderr = `${stderr}${decodeWindowsText(chunk)}`.slice(-4 * 1024 * 1024); });
     child.on("error", (error) => { clearTimeout(timer); reject(error); });
     child.on("close", (code) => {
       clearTimeout(timer);
@@ -2869,8 +2870,8 @@ async function getCodexInfo(): Promise<CodexInfo> {
     const child = spawn(executable, [...codexPrefixArgs(), "--version"], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     let errorOutput = "";
-    child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString("utf8"); });
-    child.stderr?.on("data", (chunk: Buffer) => { errorOutput += chunk.toString("utf8"); });
+    child.stdout?.on("data", (chunk: Buffer) => { output += decodeWindowsText(chunk); });
+    child.stderr?.on("data", (chunk: Buffer) => { errorOutput += decodeWindowsText(chunk); });
     child.on("error", (error) => resolveInfo({
       id: "codex",
       name: "OpenAI Codex",
@@ -2947,7 +2948,7 @@ function createCodexProvider(): AgentProvider {
           context.emit({ providerId: "codex", runId: value.runId, type: "stderr", text: line });
         }
       });
-      child.stderr?.on("data", (chunk: Buffer) => context.emit({ providerId: "codex", runId: value.runId, type: "stderr", text: chunk.toString("utf8") }));
+      child.stderr?.on("data", (chunk: Buffer) => context.emit({ providerId: "codex", runId: value.runId, type: "stderr", text: decodeWindowsText(chunk) }));
       child.on("error", (error) => context.emit({ providerId: "codex", runId: value.runId, type: "error", text: error.message }));
       child.on("close", (code) => {
         activeRuns.delete(value.runId);

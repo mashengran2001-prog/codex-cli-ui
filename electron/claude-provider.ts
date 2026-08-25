@@ -4,6 +4,7 @@ import { existsSync, readdirSync, statSync, type Dirent } from "node:fs";
 import { readFileSync } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
+import { decodeWindowsText } from "../src/text-encoding";
 import { connect } from "node:net";
 import { homedir } from "node:os";
 import { basename, join, normalize, resolve, sep } from "node:path";
@@ -191,8 +192,8 @@ function runClaudeVersion(executable: string) {
     const child = spawnClaudeProcess(executable, ["--version"], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     let errorOutput = "";
-    child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString("utf8"); });
-    child.stderr?.on("data", (chunk: Buffer) => { errorOutput += chunk.toString("utf8"); });
+    child.stdout?.on("data", (chunk: Buffer) => { output += decodeWindowsText(chunk); });
+    child.stderr?.on("data", (chunk: Buffer) => { errorOutput += decodeWindowsText(chunk); });
     child.on("error", (error) => resolveRun({ code: 1, output: "", errorOutput: error.message }));
     child.on("close", (code) => resolveRun({ code, output: output.trim(), errorOutput: errorOutput.trim() }));
   });
@@ -637,7 +638,7 @@ export class ClaudeProvider implements AgentProvider {
       }
     });
 
-    child.stderr?.on("data", (chunk: Buffer) => context.emit({ providerId: PROVIDER_ID, runId: value.runId, type: "stderr", text: chunk.toString("utf8") }));
+    child.stderr?.on("data", (chunk: Buffer) => context.emit({ providerId: PROVIDER_ID, runId: value.runId, type: "stderr", text: decodeWindowsText(chunk) }));
     child.on("error", (error) => context.emit({ providerId: PROVIDER_ID, runId: value.runId, type: "error", text: error.message }));
     child.on("close", (code) => {
       this.activeRuns.delete(value.runId);
