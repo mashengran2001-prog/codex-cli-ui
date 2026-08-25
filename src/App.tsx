@@ -430,9 +430,7 @@ export default function App() {
   const visibleConversations = conversations.filter((conversation) => conversation.providerId === activeProviderId);
   const selectedConversation = visibleConversations.find((conversation) => conversation.id === selectedConversationId);
 
-  const addProject = async () => {
-    const path = await window.codex.chooseDirectory();
-    if (!path) return false;
+  const openPathAsProject = async (path: string) => {
     const existing = projectsRef.current.find((project) => project.path.toLowerCase() === path.toLowerCase());
     if (existing) {
       setSelectedProjectId(existing.id);
@@ -454,6 +452,18 @@ export default function App() {
     setWorkspaceMode("chat");
     void refreshProject(project.id, activeProviderId);
     return true;
+  };
+
+  const addProject = async () => {
+    const path = await window.codex.chooseDirectory();
+    if (!path) return false;
+    return openPathAsProject(path);
+  };
+
+  // WSL 发行版快捷入口：把 \\wsl.localhost\<发行版> 当作工作目录直接进入对话。
+  const newWslConversation = (distroName: string) => {
+    const path = `\\\\wsl.localhost\\${distroName}`;
+    void openPathAsProject(path);
   };
 
   const newConversation = (projectId?: string) => {
@@ -669,6 +679,7 @@ export default function App() {
               providerName={activeProvider?.shortName || "Provider"}
               loading={loadingConversationId === selectedConversation?.id}
               onNewConversation={() => newConversation()}
+              onPickWslWorkspace={(name) => newWslConversation(name)}
             />
             <Composer
               conversation={selectedConversation}

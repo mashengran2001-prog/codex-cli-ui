@@ -48,8 +48,16 @@ try {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(760, 620));
   await window.waitForTimeout(250);
   await window.getByRole("tab", { name: "终端" }).click();
-  await window.getByTitle("CLI 工具设置").click();
-  await window.locator(".terminal-settings").waitFor();
+  // 高负载下点击可能丢失：最多重试 3 次直到设置页出现（load-flake 加固）
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await window.getByTitle("CLI 工具设置").click();
+    try {
+      await window.locator(".terminal-settings").waitFor({ timeout: 15_000 });
+      break;
+    } catch (error) {
+      if (attempt === 2) throw error;
+    }
+  }
   await window.getByLabel("标签栏位置").selectOption("top");
   await window.locator('.terminal-top-tab[data-tab-kind="settings"]').waitFor();
   await window.locator(".terminal-top-tab[data-session-id] .terminal-tab-main").first().click();

@@ -140,7 +140,8 @@ try {
   assert.deepEqual(sidebarMenuMetrics.titles, ["新建终端", "选择终端"]);
   await sideMode.page.getByTitle("选择终端").click();
   await sideMode.page.locator(".command-palette").waitFor();
-  assert.equal(await sideMode.page.locator(".command-palette .palette-list button").count(), 2);
+  // mock listShells = PowerShell / CMD / WSL Ubuntu，共 3 个终端选项
+  assert.equal(await sideMode.page.locator(".command-palette .palette-list button").count(), 3);
   await sideMode.context.close();
   await desktop.context.close();
 

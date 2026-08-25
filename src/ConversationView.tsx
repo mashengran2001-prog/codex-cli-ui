@@ -19,7 +19,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useUiCopy } from "./i18n";
-import type { Activity, ChatMessage, ConversationRecord, ProjectRecord } from "./types";
+import type { Activity, ChatMessage, ConversationRecord, ProjectRecord, ShellProfile } from "./types";
 
 interface ConversationViewProps {
   project?: ProjectRecord;
@@ -27,6 +27,7 @@ interface ConversationViewProps {
   providerName: string;
   loading: boolean;
   onNewConversation(): void;
+  onPickWslWorkspace(distroName: string): void;
 }
 
 function activityIcon(activity: Activity) {
@@ -136,6 +137,15 @@ export default function ConversationView(props: ConversationViewProps) {
   const followOutputRef = useRef(true);
   const messages = props.conversation?.messages ?? [];
   const lastMessage = messages.at(-1);
+  const [wslPickerOpen, setWslPickerOpen] = useState(false);
+  const [wslDistros, setWslDistros] = useState<ShellProfile[] | null>(null);
+  const toggleWslPicker = async () => {
+    if (!wslDistros) {
+      const shells = await window.codex.listShells().catch(() => []);
+      setWslDistros(shells.filter((shell) => shell.kind === "wsl"));
+    }
+    setWslPickerOpen((open) => !open);
+  };
 
   useEffect(() => {
     if (!followOutputRef.current) return;
@@ -149,7 +159,21 @@ export default function ConversationView(props: ConversationViewProps) {
         <section className="empty-workspace">
           <div className="hero-mark" aria-hidden="true"><span /><span /><span /><span /></div>
           <h1>CLI Workbench</h1>
-          <button className="primary-button" onClick={props.onNewConversation}><FolderOpen size={15} />{copy.chooseDirectory}</button>
+          <div className="workspace-picker-actions">
+            <button className="primary-button" onClick={props.onNewConversation}><FolderOpen size={15} />{copy.chooseDirectory}</button>
+            <button className="wsl-picker-toggle" onClick={() => void toggleWslPicker()}><TerminalSquare size={15} />{copy.wslDistributions}</button>
+          </div>
+          {wslPickerOpen && (
+            <div className="wsl-distro-picker" role="listbox" aria-label={copy.wslDistributions}>
+              {wslDistros && wslDistros.length > 0 ? wslDistros.map((shell) => (
+                <button key={shell.id} className="wsl-distro-row" role="option" onClick={() => props.onPickWslWorkspace(shell.label)}>
+                  <TerminalSquare size={13} /><span>{shell.label}</span><small>WSL</small>
+                </button>
+              )) : (
+                <span className="wsl-distro-empty">{copy.noWslDistributions}</span>
+              )}
+            </div>
+          )}
         </section>
       </main>
     );

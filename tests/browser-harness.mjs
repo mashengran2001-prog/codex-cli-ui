@@ -177,6 +177,7 @@ export async function installMockBridge(page) {
       listShells: async () => [
         { id: "powershell", label: "Windows PowerShell", command: "powershell.exe", kind: "powershell" },
         { id: "cmd", label: "Command Prompt", command: "cmd.exe", kind: "cmd" },
+        { id: "wsl:VWJ1bnR1", label: "Ubuntu", command: "wsl.exe", args: ["--distribution", "Ubuntu"], kind: "wsl" },
       ],
       listCliTools: async () => [
         { id: "builtin:codex", name: "Codex", command: "codex", args: [], icon: "code", description: "OpenAI Codex CLI", builtIn: true, available: true, executable: "C:\\mock\\codex.exe", installCommand: "npm install -g @openai/codex" },

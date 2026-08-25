@@ -2,6 +2,8 @@
 
 一个本地优先的 Windows CLI 工作台，用 Electron、React 和 TypeScript 统一运行 Codex、Claude Code、DeepSeek Harness 和其他命令行工具。
 
+详细使用方法见 [使用手册](docs/USAGE.md)。
+
 ## 已实现
 
 - 以工作目录组织项目，每个项目支持多个独立 Codex thread

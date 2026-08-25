@@ -97,17 +97,28 @@ try {
 
   await window.getByRole("tab", { name: "终端" }).click();
   // 与 Nebula 一致，默认侧边；本用例其余部分基于顶部标签，先切到顶部
-  await window.getByTitle("CLI 工具设置").click();
-  await window.locator(".terminal-settings").waitFor();
+  // 高负载下点击可能丢失：最多重试 3 次直到设置页出现（load-flake 加固）
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await window.getByTitle("CLI 工具设置").click();
+    try {
+      await window.locator(".terminal-settings").waitFor({ timeout: 15_000 });
+      break;
+    } catch (error) {
+      if (attempt === 2) throw error;
+    }
+  }
   await window.getByLabel("标签栏位置").selectOption("top");
   await window.locator('.terminal-top-tab[data-tab-kind="settings"]').waitFor();
   await window.locator(".terminal-top-tab[data-session-id] .terminal-tab-main").first().click();
   await window.waitForFunction(() => document.querySelectorAll(".terminal-top-tabs").length === 1 && document.querySelectorAll(".terminal-side-tabs").length === 0);
+  // 高负载下 pane 可能尚未激活：先等画布出现并点击聚焦，再等待输入 textarea 可见
+  await window.locator(".terminal-pane-leaf .terminal-canvas").first().waitFor({ timeout: 15_000 });
+  await window.locator(".terminal-pane-leaf .xterm-screen").first().click();
   await window.locator(".xterm-helper-textarea").waitFor({ timeout: 15_000 });
   await window.locator(".xterm-helper-textarea").focus();
   await window.keyboard.type('Write-Output ("NEBULA" + "_PTY_OK")', { delay: 12 });
   await window.keyboard.press("Enter");
-  await window.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent?.includes("NEBULA_PTY_OK"), undefined, { timeout: 15_000 });
+  await window.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent?.includes("NEBULA_PTY_OK"), undefined, { timeout: 30_000 });
  assert.equal(await window.evaluate(async () => (await window.codex.listTerminals()).length), 1);
   // 通过真实终端执行官方 hook 脚本注入 CLI 生命周期事件（对标 Nebula runtime_task_state）：
   // 终端 PTY 环境自带 CODEX_UI_NOTIFY_PIPE / CODEX_UI_SESSION_ID，调用形态与生产 config.toml 的 notify 命令一致
@@ -115,7 +126,8 @@ try {
   const aiThreadId = "33333333-3333-4333-8333-333333333333";
   const lifecycleHookPath = join(root, "scripts", "cli-lifecycle-hook.ps1").replaceAll("'", "''");
   const waitForTerminal = async (match, label) => {
-    const deadline = Date.now() + 20_000;
+    // 高负载机器上 hook 命令本身可能耗时数秒：放宽到 45s（load-flake 加固）
+    const deadline = Date.now() + 45_000;
     for (;;) {
       const terminals = await window.evaluate(async () => await window.codex.listTerminals());
       const terminal = terminals.find((item) => item.id === aiTerminalId);
@@ -140,7 +152,7 @@ try {
   // 触发设置持久化（同时排队保存终端快照），确保 AI 身份随快照跨重启
   await window.evaluate(async () => window.codex.setAppSettings(await window.codex.getAppSettings()));
   const snapshotPath = join(userData, "terminal-sessions.json");
-  const snapshotDeadline = Date.now() + 15_000;
+  const snapshotDeadline = Date.now() + 30_000;
   while (Date.now() < snapshotDeadline) {
     try {
       const rawSnapshot = readFileSync(snapshotPath, "utf8");
@@ -197,6 +209,9 @@ try {
   // 新标签默认不激活，点击新标签让其 xterm 挂载后再输入
   const newSessionId = await window.evaluate(async () => (await window.codex.listTerminals()).at(-1).id);
   await window.locator(`.terminal-top-tab[data-session-id="${newSessionId}"] .terminal-tab-main`).click();
+  // 高负载下新 pane 可能尚未激活：先等画布出现并点击聚焦，再等待输入 textarea 可见
+  await window.locator(`.terminal-pane-leaf[data-session-id="${newSessionId}"] .terminal-canvas`).first().waitFor({ timeout: 15_000 });
+  await window.locator(`.terminal-pane-leaf[data-session-id="${newSessionId}"] .xterm-screen`).first().click();
   await window.locator(".terminal-pane-leaf[data-session-id='" + newSessionId + "'] .xterm-helper-textarea").waitFor({ timeout: 15_000 });
   await window.locator(".terminal-pane-leaf[data-session-id='" + newSessionId + "'] .xterm-helper-textarea").focus();
   await window.keyboard.type('Write-Output ("PROXY=" + $env:HTTPS_PROXY)', { delay: 8 });

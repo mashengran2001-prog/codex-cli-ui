@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createPopulatedPage, launchBrowser, startPreview } from "./browser-harness.mjs";
+import { createPopulatedPage, installMockBridge, launchBrowser, startPreview } from "./browser-harness.mjs";
 
 const server = await startPreview(4322);
 const browser = await launchBrowser();
@@ -197,7 +197,8 @@ try {
   assert.ok(menuBox && Math.abs(menuBox.width - 180) <= 1 && Math.abs(menuBox.y - (moreBox.y + moreBox.height + 6)) <= 1);
   await moreMenu.getByRole("menuitem", { name: "选择终端" }).click();
   await page.locator(".command-palette").waitFor();
-  assert.equal(await page.locator(".command-palette .palette-list button").count(), 2);
+  // mock listShells = PowerShell / CMD / WSL Ubuntu，共 3 个终端选项
+  assert.equal(await page.locator(".command-palette .palette-list button").count(), 3);
   await page.keyboard.press("Escape");
   await moreButton.click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
@@ -678,7 +679,7 @@ try {
   assert.ok(sideShellBox && Math.abs(sideShellBox.width - 20) <= 1 && Math.abs(sideShellBox.height - 20) <= 1);
   await sideShellButton.click();
   await page.locator(".command-palette").waitFor();
-  assert.equal(await page.locator(".command-palette .palette-list button").count(), 2);
+  assert.equal(await page.locator(".command-palette .palette-list button").count(), 3);
   await page.keyboard.press("Escape");
   await page.getByTitle("CLI 工具设置").click();
   await page.locator(".terminal-settings").waitFor();
@@ -779,6 +780,23 @@ try {
   assert.equal(await sshModal.locator(".ssh-key-row").count(), 2);
   await sshModal.getByTitle("关闭").click();
   await page.locator('.terminal-top-tab[data-tab-kind="settings"] .terminal-tab-close').click();
+
+  // #12 目录选择器 WSL 快捷入口：空工作台选 WSL 发行版 → 直接建立 WSL 项目会话
+  const wslContext = await browser.newContext({ viewport: { width: 1380, height: 880 }, locale: "zh-CN" });
+  const wslPage = await wslContext.newPage();
+  await installMockBridge(wslPage);
+  await wslPage.addInitScript(() => localStorage.removeItem("codex-cli-ui/state/v1"));
+  await wslPage.goto(server.url, { waitUntil: "networkidle" });
+  await wslPage.locator(".empty-workspace").waitFor();
+  await wslPage.getByRole("button", { name: "WSL 发行版" }).click();
+  const wslUbuntu = wslPage.locator(".wsl-distro-row", { hasText: "Ubuntu" });
+  await wslUbuntu.waitFor();
+  await wslUbuntu.click();
+  await wslPage.waitForFunction(() => document.querySelector(".project-label strong")?.textContent === "Ubuntu");
+  assert.equal(await wslPage.evaluate(() => document.querySelector(".project-label small")?.textContent), "\\\\wsl.localhost\\Ubuntu");
+  await wslPage.locator(".composer textarea").waitFor();
+  await wslContext.close();
+
   await context.close();
   console.log("workflow: chat, Nebula terminal, drawers, launcher, overflow, SVN, split restore, SSH settings, and WSL checks passed");
 } finally {
