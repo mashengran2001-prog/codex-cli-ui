@@ -16,7 +16,7 @@ import {
 } from "electron";
 import { spawn, execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, renameSync, statSync, writeFileSync, type Dirent, type Stats } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync, type Dirent, type Stats } from "node:fs";
 import { access, appendFile, lstat, mkdir, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
@@ -1507,9 +1507,8 @@ function appendTerminalOutput(session: TerminalSession, data: string) {
   else if (!session.flushTimer) session.flushTimer = setTimeout(() => flushTerminalOutput(session), 16);
 }
 
-function queueTerminalSnapshotSave() {
-  if (isQuitting) return;
-  const snapshots: TerminalSnapshot[] = (appSettings.restoreTerminalTabs ? [...terminalSessions.values()] : [])
+function currentTerminalSnapshots(): TerminalSnapshot[] {
+  return (appSettings.restoreTerminalTabs ? [...terminalSessions.values()] : [])
     .filter((session) => session.status === "running")
     .map((session) => ({
       id: session.id,
@@ -1523,6 +1522,11 @@ function queueTerminalSnapshotSave() {
       aiSource: session.aiSource,
       aiSessionId: session.aiSessionId,
     }));
+}
+
+function queueTerminalSnapshotSave() {
+  if (isQuitting) return;
+  const snapshots = currentTerminalSnapshots();
   terminalSaveQueue = terminalSaveQueue.then(async () => {
     const path = terminalSnapshotsPath();
     const temporary = `${path}.tmp`;
@@ -1534,6 +1538,18 @@ function queueTerminalSnapshotSave() {
       await writeFile(path, JSON.stringify({ version: 1, sessions: snapshots }, null, 2), "utf8");
     }
   }).catch(() => undefined);
+}
+
+// 退出阶段可能还有排队的异步快照写入未落盘：同步补一次，
+// 避免重启恢复出已被关闭的终端标签（原异步队列在 isQuitting 后不再执行）。
+function flushTerminalSnapshotSync() {
+  try {
+    const path = terminalSnapshotsPath();
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ version: 1, sessions: currentTerminalSnapshots() }, null, 2), "utf8");
+  } catch {
+    // 退出阶段尽力而为，失败不阻塞关闭。
+  }
 }
 
 function terminalDimension(value: unknown, fallback: number, maximum: number) {
@@ -3755,6 +3771,7 @@ app.on("before-quit", () => {
   if (isQuitting) return;
   isQuitting = true;
   markTerminalRuntimeClean();
+  flushTerminalSnapshotSync();
   for (const run of activeRuns.values()) stopChild(run);
   void providerRegistry?.dispose();
   void cliLifecycleBridge?.dispose();

@@ -6,7 +6,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { connect } from "node:net";
 import { homedir } from "node:os";
-import { basename, join, normalize, resolve } from "node:path";
+import { basename, join, normalize, resolve, sep } from "node:path";
 import type {
   Activity,
   AgentProviderInfo,
@@ -101,6 +101,14 @@ function compactTitle(value: string) {
 function normalizePath(value: string) {
   const path = normalize(resolve(value));
   return process.platform === "win32" ? path.toLowerCase() : path;
+}
+
+function isWithinWorkspace(cwd: string, workspace: string) {
+  const normalized = normalizePath(cwd);
+  const root = normalizePath(workspace);
+  if (normalized === root) return true;
+  const prefix = root.endsWith(sep) ? root : `${root}${sep}`;
+  return normalized.startsWith(prefix);
 }
 
 function claudeHome() {
@@ -472,31 +480,29 @@ async function parseClaudeSessionFile(file: ClaudeSessionFile, includeMessages: 
 
 async function listSessionsForWorkspace(cwd: string) {
   const files = await collectClaudeSessionFiles();
-  const expected = normalizePath(cwd);
   const results: SessionSummary[] = [];
   const cliIds = new Set<string>();
   for (const file of files) {
     const summary = await parseClaudeSessionFile(file, false);
-    if (summary && normalizePath(summary.cwd) === expected) {
+    if (summary && isWithinWorkspace(summary.cwd, cwd)) {
       results.push(summary);
       cliIds.add(summary.id);
     }
   }
   for (const desktop of await collectDesktopSessions()) {
-    if (normalizePath(desktop.cwd) === expected && !cliIds.has(desktop.id)) results.push(desktop);
+    if (isWithinWorkspace(desktop.cwd, cwd) && !cliIds.has(desktop.id)) results.push(desktop);
   }
   return results.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 async function getSession(id: string, cwd: string) {
   const files = await collectClaudeSessionFiles();
-  const expected = normalizePath(cwd);
   for (const file of files) {
     const summary = await parseClaudeSessionFile(file, true);
-    if (summary?.id === id && normalizePath(summary.cwd) === expected) return summary;
+    if (summary?.id === id && isWithinWorkspace(summary.cwd, cwd)) return summary;
   }
   const desktops = await collectDesktopSessions();
-  return desktops.find((item) => item.id === id && normalizePath(item.cwd) === expected) ?? null;
+  return desktops.find((item) => item.id === id && isWithinWorkspace(item.cwd, cwd)) ?? null;
 }
 
 function permissionModeFor(sandboxMode: RunRequest["sandboxMode"]) {

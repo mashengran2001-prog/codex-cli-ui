@@ -120,6 +120,7 @@ npm run dist
 
 - Claude Desktop 内嵌的 Claude Code 对话与 CLI **共用同一份本地转录**（`~/.claude/projects/<项目>/<会话id>.jsonl`），因此 Claude Provider 天然就能列出并打开桌面版产生的会话，可继续对话或分叉
 - 对于本机没有 jsonl 转录的桌面版会话，UI 会扫描 `%LOCALAPPDATA%\Claude-3p\claude-code-sessions` 与 `Packages\Claude*\LocalCache\Roaming\Claude\claude-code-sessions` 的 `local_*.json` 元数据，补出标题 / 时间 / 模型，侧栏显示“桌面版”徽标；这类会话只同步元数据，打开后提示新建 CLI 会话继续
+- 会话按**项目目录聚合**：项目下会同时列出该项目目录及其**子目录**里的 Claude 会话（含桌面版），无需为每个子目录单独建项目；会话仍保留各自的工作目录
 - 本地没有转录时不会误传 `--resume`，而是自动开启新会话
 
 ---
@@ -170,6 +171,7 @@ npm run dist
   - Markdown / GFM 富文本、KaTeX 数学公式
   - JSON / 纯文本 / 日志带行号查看
   - 图片单独开标签查看
+  - 非图片文档（Markdown / JSON / 文本 / 日志）在**终端 pane 内分屏打开**，与终端并存，可关闭、可拖拽调整宽度
   - 点击文件/目录在终端中打开或跳转
 - **常用目录抽屉**：
   - 自动按使用频率排序（frecency）

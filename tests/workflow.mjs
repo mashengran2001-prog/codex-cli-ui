@@ -327,20 +327,24 @@ try {
   assert.equal(await page.locator(".command-dock input").inputValue(), "npm run --help");
   await page.locator(".command-dock input").fill("npm run");
   await page.locator(".completion-popup").waitFor();
+  // 二次填入后候选异步加载，等两个候选都出现再按方向键，避免竞态（load-flake 加固）
+  await page.locator(".completion-popup button").nth(1).waitFor({ timeout: 5000 });
   await page.locator(".command-dock input").press("ArrowDown");
   await page.locator(".command-dock input").press("Tab");
   assert.equal(await page.locator(".command-dock input").inputValue(), "npm run.ps1");
   await page.locator(".command-dock input").press("Escape");
   await page.locator(".command-dock input").fill("");
   // #56：弹窗模式下无候选时，方向键回退到命令历史（Up/Down 循环）
-  await page.evaluate(() => { window.__mock.commandHistory = ["npm run --help", "git status"]; });
+  // 历史条目以 z 开头：mock 的 getCompletions 对 z 前缀返回空候选，
+  // 确保方向键确实走“无候选→历史回退”分支，而不是被补全弹窗消费（load-flake 加固）
+  await page.evaluate(() => { window.__mock.commandHistory = ["zzz --help", "zzz status"]; });
   await page.locator(".command-dock input").fill("zzz");
   await page.locator(".command-dock input").press("ArrowUp");
-  await page.waitForFunction(() => document.querySelector(".command-dock input")?.value === "npm run --help");
+  await page.waitForFunction(() => document.querySelector(".command-dock input")?.value === "zzz --help");
   await page.locator(".command-dock input").press("ArrowUp");
-  await page.waitForFunction(() => document.querySelector(".command-dock input")?.value === "git status");
+  await page.waitForFunction(() => document.querySelector(".command-dock input")?.value === "zzz status");
   await page.locator(".command-dock input").press("ArrowDown");
-  await page.waitForFunction(() => document.querySelector(".command-dock input")?.value === "npm run --help");
+  await page.waitForFunction(() => document.querySelector(".command-dock input")?.value === "zzz --help");
   await page.locator(".command-dock input").press("ArrowDown");
   await page.waitForFunction(() => document.querySelector(".command-dock input")?.value === "zzz");
   await page.locator(".command-dock input").fill("");
@@ -444,6 +448,9 @@ try {
   await page.waitForFunction(() => window.__mock.terminalWrites.some((write) => write.data === "'F:\\demo\\atlas-workspace\\README.md'"));
   await readmeRow.click();
  await page.getByRole("heading", { name: "Atlas" }).waitFor();
+  // #53 终端内分屏文件视图：文档在 pane 内分屏打开，终端 pane 仍在旁边
+  assert.equal(await page.locator(".document-pane-leaf").count(), 1);
+  assert.ok(await page.locator(".terminal-pane-leaf:not(.document-pane-leaf)").count() >= 1);
   // DocumentViewer 本地与远程图片渲染
   const localImg = page.locator('.document-content img[src^="data:image/png"]');
   await localImg.waitFor();
@@ -461,6 +468,7 @@ try {
   const readDocLog = await page.evaluate(() => (window.__mock.$$callLog?.readDocument || [])[0]);
   assert.ok(readDocLog?.args?.[0]?.endsWith("atlas-workspace"), `readDocument root should end with atlas-workspace, got ${readDocLog?.args?.[0]}`);
  await page.getByRole("button", { name: "关闭文档" }).click();
+  assert.equal(await page.locator(".document-pane-leaf").count(), 0);
   await page.getByRole("button", { name: "Git 状态" }).click();
   await page.getByText("src/App.tsx").waitFor();
   // 常用目录面板：frecency 历史 + 收藏 + 跳转 / 新建终端 / 移除历史

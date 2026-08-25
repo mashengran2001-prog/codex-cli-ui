@@ -44,6 +44,9 @@ type DockEdge = "center" | "left" | "right" | "top" | "bottom";
 interface PaneLeaf {
   type: "leaf";
   sessionId: string;
+  kind?: "terminal" | "document";
+  document?: DocumentFile;
+  root?: string;
 }
 
 /** Launch identity for a pane, used to rebuild leaves that lost their PTY. */
@@ -150,6 +153,37 @@ function containsLeaf(node: PaneNode | null, sessionId: string): boolean {
   return collectLeafIds(node).includes(sessionId);
 }
 
+const DOC_LEAF_PREFIX = "doc:";
+
+function isDocumentLeafId(id: string) {
+  return id.startsWith(DOC_LEAF_PREFIX);
+}
+
+function documentLeafId(path: string) {
+  return `${DOC_LEAF_PREFIX}${path.replaceAll("\\", "/").toLowerCase()}`;
+}
+
+/** First terminal leaf id in the tree (skips in-pane document leaves). */
+function firstTerminalLeaf(node: PaneNode | null): string | null {
+  if (!node) return null;
+  if (node.type === "leaf") return isDocumentLeafId(node.sessionId) ? null : node.sessionId;
+  for (const child of node.children) {
+    const found = firstTerminalLeaf(child);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Document panes are transient: strip them when persisting the layout. */
+function stripDocumentLeaves(node: PaneNode | null): PaneNode | null {
+  if (!node) return null;
+  if (node.type === "leaf") return isDocumentLeafId(node.sessionId) ? null : node;
+  const children = node.children.map(stripDocumentLeaves).filter((child): child is PaneNode => child !== null);
+  if (children.length === 0) return null;
+  if (children.length === 1) return children[0];
+  return rebuildSplit(node, children, children.length === node.children.length);
+}
+
 function rebuildSplit(node: PaneSplit, children: PaneNode[], keepSizes: boolean): PaneSplit {
   const sizes = keepSizes && node.sizes && node.sizes.length === children.length ? node.sizes : undefined;
   return sizes ? { type: "split", direction: node.direction, children, sizes } : { type: "split", direction: node.direction, children };
@@ -173,11 +207,10 @@ function replaceLeaf(node: PaneNode | null, targetId: string, newSessionId: stri
   return rebuildSplit(node, children, true);
 }
 
-function splitLeaf(node: PaneNode | null, targetId: string, direction: SplitDirection, newSessionId: string): PaneNode | null {
-  const leaf: PaneNode = { type: "leaf", sessionId: newSessionId };
+function splitLeaf(node: PaneNode | null, targetId: string, direction: SplitDirection, leaf: PaneLeaf): PaneNode | null {
   if (!node) return leaf;
   if (node.type === "leaf") return node.sessionId === targetId ? { type: "split", direction, children: [node, leaf] } : node;
-  const children = node.children.map((child) => splitLeaf(child, targetId, direction, newSessionId)).filter((child): child is PaneNode => child !== null);
+  const children = node.children.map((child) => splitLeaf(child, targetId, direction, leaf)).filter((child): child is PaneNode => child !== null);
   return rebuildSplit(node, children, true);
 }
 
@@ -421,7 +454,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
       const session = sessionsRef.current.find((item) => item.id === id);
       if (session) leaves[id] = leafIdentity(session);
     }
-    localStorage.setItem(layoutKey, JSON.stringify({ tree: paneTree, activeSessionId, sidebarWidth, drawerWidth, sidebarCollapsed, tabsCollapsed, toolsCollapsed, sshCollapsed, leaves } satisfies SavedLayout));
+    localStorage.setItem(layoutKey, JSON.stringify({ tree: stripDocumentLeaves(paneTree), activeSessionId, sidebarWidth, drawerWidth, sidebarCollapsed, tabsCollapsed, toolsCollapsed, sshCollapsed, leaves } satisfies SavedLayout));
   }, [activeSessionId, drawerWidth, paneTree, sidebarCollapsed, sidebarWidth, sshCollapsed, tabsCollapsed, terminalStateLoaded, toolsCollapsed]);
 
   const assignSession = useCallback((id: string, targetId?: string) => {
@@ -431,6 +464,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
       if (!current) return { type: "leaf", sessionId: id };
       if (containsLeaf(current, id)) return current;
       const anchor = targetId ?? activeLeafId(current, activeSessionIdRef.current) ?? collectLeafIds(current)[0] ?? "";
+      if (isDocumentLeafId(anchor)) return splitLeaf(current, anchor, "columns", { type: "leaf", sessionId: id });
       return replaceLeaf(current, anchor, id);
     });
     setActiveSessionId(id);
@@ -504,7 +538,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
           restored = replaceLeaf(restored, missing[index][0], session.id);
           if (!restored || !containsLeaf(restored, session.id)) {
             const anchor = restored ? activeLeafId(restored, null) ?? collectLeafIds(restored)[0] ?? "" : "";
-            restored = restored && anchor ? splitLeaf(restored, anchor, "columns", session.id) : { type: "leaf", sessionId: session.id };
+            restored = restored && anchor ? splitLeaf(restored, anchor, "columns", { type: "leaf", sessionId: session.id }) : { type: "leaf", sessionId: session.id };
           }
         }
       }
@@ -594,7 +628,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
       if (!current) return { type: "leaf", sessionId: id! };
       if (containsLeaf(current, id!)) return current;
       const anchor = anchorId && containsLeaf(current, anchorId) ? anchorId : activeLeafId(current, activeSessionIdRef.current) ?? collectLeafIds(current)[0];
-      return splitLeaf(current, anchor, direction, id!);
+      return splitLeaf(current, anchor, direction, { type: "leaf", sessionId: id! });
     });
     setActiveSessionId(id);
     setView("terminal");
@@ -721,6 +755,25 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const closePane = (sessionId: string) => {
     setPaneTree((current) => removeLeaf(current, sessionId));
     setActiveSessionId((current) => (current === sessionId ? null : current));
+  };
+
+  const openDocumentPane = useCallback((document: DocumentFile, root: string) => {
+    setView("terminal");
+    onWorkspaceModeChange("terminal");
+    const docId = documentLeafId(document.path);
+    setPaneTree((current) => {
+      if (current && containsLeaf(current, docId)) return current;
+      if (!current) return { type: "leaf", sessionId: docId, kind: "document", document, root };
+      const anchor = activeLeafId(current, activeSessionIdRef.current) ?? firstTerminalLeaf(current) ?? collectLeafIds(current)[0] ?? "";
+      return splitLeaf(current, anchor, "columns", { type: "leaf", sessionId: docId, kind: "document", document, root });
+    });
+    setActiveSessionId(docId);
+  }, [onWorkspaceModeChange]);
+
+  const closeDocumentPane = (docId: string) => {
+    const next = removeLeaf(treeRef.current, docId);
+    setPaneTree(next);
+    if (activeSessionIdRef.current === docId) setActiveSessionId(activeLeafId(next, null));
   };
 
   const closeTerminal = async (id: string) => {
@@ -1204,6 +1257,20 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
         </div>
       );
     }
+    if (node.kind === "document" && node.document) {
+      const isActive = activeId === node.sessionId;
+      return (
+        <div className={`terminal-pane-leaf document-pane-leaf${isActive ? " active" : ""}`} data-document-id={node.sessionId} key={node.sessionId}>
+          <div className="pane-toolbar">
+            <span title={node.document.path}><FileText size={12} /><strong>{node.document.name}</strong><small>{node.root}</small></span>
+            <span className="pane-toolbar-actions">
+              {leafCount(paneTree) > 1 && <button aria-label={workbenchCopy.closePane} title={workbenchCopy.closePane} onClick={() => closeDocumentPane(node.sessionId)}><X size={11} /></button>}
+            </span>
+          </div>
+          <DocumentViewer document={node.document} root={node.root ?? projectPath} onClose={() => closeDocumentPane(node.sessionId)} onError={onError} />
+        </div>
+      );
+    }
     const session = sessions.find((item) => item.id === node.sessionId);
     if (!session) return null;
     const isActive = activeId === session.id;
@@ -1376,7 +1443,16 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
         {terminalView && drawer && settings.resizablePanels && <div className="panel-resizer drawer-resizer" onPointerDown={(event) => resizePanel("drawer", event)} />}
         {terminalView && drawer === "files" && project && (filesSshProfile
           ? <SftpDrawer profile={filesSshProfile} onClose={() => setDrawer(null)} onError={onError} />
-          : <FilesDrawer root={filesRoot} onClose={() => setDrawer(null)} onNewTerminal={(path) => void createTerminal(path, { reuseExisting: false, shellId: settings.defaultShellId })} onDocument={(next) => { setDocument(next); setDrawer(null); setView("document"); }} onError={onError} />)}
+          : <FilesDrawer root={filesRoot} onClose={() => setDrawer(null)} onNewTerminal={(path) => void createTerminal(path, { reuseExisting: false, shellId: settings.defaultShellId })} onDocument={(next) => {
+  if (next.kind === "image") {
+    setDocument(next);
+    setDrawer(null);
+    setView("document");
+  } else {
+    openDocumentPane(next, filesRoot);
+    setDrawer(null);
+  }
+}} onError={onError} />)}
         {terminalView && drawer === "git" && project && <GitDrawer root={projectPath} onClose={() => setDrawer(null)} onError={onError} />}
         {terminalView && drawer === "sftp" && selectedSsh && <SftpDrawer profile={selectedSsh} onClose={() => setDrawer(null)} onError={onError} />}
         {terminalView && drawer === "directories" && <DirectoriesDrawer onClose={() => setDrawer(null)} onNewTerminal={(path) => void createTerminal(path, { reuseExisting: false, shellId: settings.defaultShellId })} onCd={jumpToDirectory} onError={onError} />}
