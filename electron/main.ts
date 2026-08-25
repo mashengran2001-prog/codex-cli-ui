@@ -1132,6 +1132,67 @@ async function runtimeListProcesses(paneId: string): Promise<RuntimePaneProcesse
   return { window_id: runtimeWindowId(), pane_id: paneId, root_pid: rootPid, processes };
 }
 
+const AI_WATCHDOG_AGENTS = new Set(["claude", "codex", "gemini", "opencode", "amp", "cursor", "copilot", "grok", "pi", "omp"]);
+
+function agentProcessName(executable: string): string | undefined {
+  const display = executable.split(/[\\/]/).pop() || executable;
+  const base = display.toLowerCase().replace(/\.(exe|cmd|bat|ps1|com|js)$/i, "");
+  return AI_WATCHDOG_AGENTS.has(base) ? base : undefined;
+}
+
+/** v1.3 fix (#42/#54): process-tree evidence disproves stale "running" state.
+ * Only native CLIs (codex/claude) are probed; node-hosted agents would look
+ * like a finished tree while still alive. */
+async function probeStaleAiStates() {
+  const candidates = [...terminalSessions.values()].filter((session) => (
+    session.status === "running"
+    && session.kind === "local"
+    && !session.shellId.startsWith("wsl:")
+    && (session.aiSource === "codex" || session.aiSource === "claude")
+    && session.aiTaskState === "running"
+    && session.commandStartedAt != null
+    && Date.now() - session.commandStartedAt > 4_000
+  ));
+  if (!candidates.length) return;
+  const rows = await readProcessRows();
+  if (!rows.length) return;
+  const byParent = new Map<number, ProcessRow[]>();
+  for (const row of rows) {
+    const list = byParent.get(row.parent_pid) ?? [];
+    list.push(row);
+    byParent.set(row.parent_pid, list);
+  }
+  for (const session of candidates) {
+    const rootPid = session.pty.pid;
+    if (!Number.isInteger(rootPid) || rootPid <= 0) continue;
+    const root = rows.find((row) => row.pid === rootPid);
+    if (!root) continue;
+    let foundAgent = false;
+    const stack: ProcessRow[] = [root];
+    const visited = new Set<number>();
+    while (stack.length) {
+      const row = stack.pop()!;
+      if (visited.has(row.pid)) continue;
+      visited.add(row.pid);
+      if (agentProcessName(row.executable)) { foundAgent = true; break; }
+      for (const child of byParent.get(row.pid) ?? []) stack.push(child);
+    }
+    if (foundAgent) continue;
+    session.aiTaskState = "finished";
+    session.activity = "idle";
+    session.activeCommand = undefined;
+    session.commandStartedAt = undefined;
+    sendTerminalMeta(session);
+  }
+}
+
+let aiStateWatchdogTimer: NodeJS.Timeout | undefined;
+function startAiStateWatchdog() {
+  if (aiStateWatchdogTimer) return;
+  aiStateWatchdogTimer = setInterval(() => { void probeStaleAiStates(); }, 3_000);
+  if (typeof aiStateWatchdogTimer.unref === "function") aiStateWatchdogTimer.unref();
+}
+
 async function runtimeWaitForPane(paneId: string, state: RuntimeWaitState, timeoutMs: number, afterSeq?: number): Promise<PaneWaitResult> {
   const deadline = Date.now() + timeoutMs;
   let observedState = "unknown";
@@ -1165,6 +1226,11 @@ function runtimeCommandWithExitMarker(session: TerminalSession, command: string,
   }
   if (shellId.includes("cmd") || /(^|[\\/])cmd(?:\.exe)?$/i.test(shell)) {
     return `${command.replace(/\r?\n/g, " ")} & echo ${token}:%ERRORLEVEL%`;
+  }
+  if (shellId.includes("nu") || shell.includes("nushell") || /(^|[\\/])nu(?:\.exe)?$/i.test(shell)) {
+    // Nushell: LAST_EXIT_CODE is only set after an external command; `?`
+    // (optional cell path) + default keeps the marker valid after internals.
+    return `${command.replace(/\r?\n/g, " ")}; let __codex_ui_exit = ($env.LAST_EXIT_CODE? | default 0); print $"__TOKEN__:($__codex_ui_exit)"`;
   }
   return `${command.replace(/\r?\n/g, " ")}; printf '%s:%s\\n' '${token}' "$?"`;
 }
@@ -1292,6 +1358,18 @@ function flushTerminalOutput(session: TerminalSession) {
   sendTerminalEvent(session, { type: "data", data });
 }
 
+/** Auto-dismiss AI completion notifications after 90s (Nebula v1.3 fix). */
+const trackedNotifications = new Set<Electron.Notification>();
+function trackNotificationDismiss(notification: Electron.Notification) {
+  trackedNotifications.add(notification);
+  notification.on("close", () => trackedNotifications.delete(notification));
+  const timer = setTimeout(() => {
+    trackedNotifications.delete(notification);
+    try { notification.close(); } catch { /* Already closed. */ }
+  }, 90_000);
+  if (typeof timer.unref === "function") timer.unref();
+}
+
 function notifyTerminalAttention(session: TerminalSession, message = "Attention requested", completion = false) {
   sendTerminalEvent(session, { type: "bell" });
   if (appSettings.bellMode === "sound" || appSettings.bellMode === "both") {
@@ -1308,6 +1386,7 @@ function notifyTerminalAttention(session: TerminalSession, message = "Attention 
     showMainWindow();
     sendTerminalEvent(session, { type: "focus" });
   });
+  trackNotificationDismiss(notification);
   notification.show();
 }
 
@@ -1370,6 +1449,7 @@ function handleCliLifecycleEvent(event: CliLifecycleEvent) {
     silent: true,
   });
   notification.on("click", () => showMainWindow());
+  trackNotificationDismiss(notification);
   notification.show();
 }
 
@@ -1523,6 +1603,24 @@ function execFileText(file: string, args: string[], options: Parameters<typeof e
   });
 }
 
+function findNushellExecutable(): string | undefined {
+  if (process.platform !== "win32") return undefined;
+  // Nebula's find_nushell: per-user roots first, then PATH.
+  const roots = [process.env.ProgramFiles, process.env.LOCALAPPDATA, process.env.USERPROFILE].filter((value): value is string => Boolean(value));
+  const candidates = ["nu\\bin\\nu.exe", "Programs\\nu\\bin\\nu.exe", "scoop\\apps\\nu\\current\\nu.exe"];
+  for (const root of roots) {
+    for (const candidate of candidates) {
+      const path = join(root, candidate);
+      if (existsSync(path)) return path;
+    }
+  }
+  for (const dir of (process.env.PATH || "").split(";").filter(Boolean)) {
+    const path = join(dir, "nu.exe");
+    if (existsSync(path)) return path;
+  }
+  return undefined;
+}
+
 async function detectTerminalShells() {
   const profiles: DetectedShell[] = [];
   if (process.platform === "win32") {
@@ -1537,6 +1635,9 @@ async function detectTerminalShells() {
     if (existsSync(cmd)) profiles.push({ id: "cmd", label: "Command Prompt", command: cmd, args: ["/Q"], kind: "cmd" });
     const gitBash = join(programFiles, "Git", "bin", "bash.exe");
     if (existsSync(gitBash)) profiles.push({ id: "git-bash", label: "Git Bash", command: gitBash, args: ["--noprofile", "--norc", "-i"], kind: "git-bash" });
+    // Nushell — installed per-user; Nebula probes well-known roots then PATH.
+    const nu = findNushellExecutable();
+    if (nu) profiles.push({ id: "nu", label: "Nushell", command: nu, args: [], kind: "nushell" });
     // WSL discovery can block while the subsystem starts. Keep it out of the
     // critical boot path and publish the profiles when the optional probe ends.
     const wsl = join(systemRoot, "System32", "wsl.exe");
@@ -1973,13 +2074,52 @@ function sshProfilesPath() {
   return join(app.getPath("userData"), "ssh-profiles.json");
 }
 
+/** Split `user@host[:port]` (old saved format) into parts. Mirrors Nebula's
+ * SshDestination::parse: accepts ssh:// prefix, `user@`, `[v6]:port` and bare
+ * `host:port`; a host-embedded port wins over the separate port field. */
+function splitSshTarget(raw: string): { host: string; username: string; port: number } {
+  let value = raw.trim();
+  if (value.startsWith("ssh://")) value = value.slice("ssh://".length);
+  let username = "";
+  const at = value.lastIndexOf("@");
+  if (at >= 0) {
+    username = value.slice(0, at).trim();
+    value = value.slice(at + 1);
+  }
+  let port = 22;
+  if (value.startsWith("[")) {
+    const close = value.indexOf("]");
+    if (close > 0) {
+      const suffix = value.slice(close + 1);
+      if (suffix.startsWith(":")) {
+        const parsed = Number(suffix.slice(1));
+        if (Number.isInteger(parsed) && parsed > 0 && parsed <= 65535) port = parsed;
+      }
+      value = value.slice(1, close);
+    }
+  } else {
+    const colon = value.lastIndexOf(":");
+    if (colon > 0 && !value.slice(0, colon).includes(":")) {
+      const parsed = Number(value.slice(colon + 1));
+      if (Number.isInteger(parsed) && parsed > 0 && parsed <= 65535) {
+        port = parsed;
+        value = value.slice(0, colon);
+      }
+    }
+  }
+  return { host: value, username, port };
+}
+
 function normalizeSshProfile(value: Partial<SshProfile>, preserveId = true): SshProfile {
-  const host = typeof value.host === "string" ? value.host.trim() : "";
-  const username = typeof value.username === "string" ? value.username.trim() : "";
+  const explicitUsername = typeof value.username === "string" ? value.username.trim() : "";
+  const parsed = splitSshTarget(typeof value.host === "string" ? value.host : "");
+  const host = parsed.host;
+  const username = explicitUsername || parsed.username;
   const name = typeof value.name === "string" ? value.name.trim() : "";
-  if (!host || host.length > 255 || /[\r\n\0]/.test(host)) throw new Error("Invalid SSH host");
+  if (!host || host.length > 255 || /[\r\n\0]/.test(host) || host.includes("@")) throw new Error("Invalid SSH host");
   if (username.length > 128 || /[\r\n\0]/.test(username)) throw new Error("Invalid SSH username");
-  const port = Number.isInteger(value.port) && Number(value.port) > 0 && Number(value.port) <= 65535 ? Number(value.port) : 22;
+  const explicitPort = Number.isInteger(value.port) && Number(value.port) > 0 && Number(value.port) <= 65535 ? Number(value.port) : undefined;
+  const port = parsed.port === 22 && explicitPort !== undefined ? explicitPort : parsed.port;
   const identityFile = typeof value.identityFile === "string" && value.identityFile.trim()
     ? resolve(value.identityFile.trim().replace(/^~(?=[\\/])/, homedir()))
     : undefined;
@@ -2070,7 +2210,13 @@ async function testSshConnection(value: Partial<SshProfile>): Promise<SshTestRes
   }
   try {
     stages[0].status = "running";
-    await execFileText(sshExecutable(), ["-G", ...sshArguments(profile).slice(0, -1), sshArguments(profile).at(-1)!]);
+    // Nebula ssh_config_probe_target: ssh -G only splits user@host:port when it
+    // arrives as an ssh:// URI; bare host:port would be treated as a hostname.
+    const probeHost = profile.host.includes(":") ? `[${profile.host}]` : profile.host;
+    const probeTarget = profile.port !== 22
+      ? `ssh://${profile.username ? `${profile.username}@` : ""}${probeHost}:${profile.port}`
+      : `${profile.username ? `${profile.username}@` : ""}${profile.host}`;
+    await execFileText(sshExecutable(), ["-G", probeTarget]);
     stages[0] = { ...stages[0], status: "done", message: profile.host };
     stages[1].status = "running";
     const args = [...sshArguments(profile, true), "printf CODEX_UI_SSH_OK"];
@@ -2826,6 +2972,7 @@ function notifyProviderCompletion(owner: BrowserWindow, title: string, body: str
   if (!appSettings.notifyOnCompletion || (owner.isVisible() && owner.isFocused()) || !Notification.isSupported()) return;
   const notification = new Notification({ title, body, silent: true });
   notification.on("click", () => showMainWindow());
+  trackNotificationDismiss(notification);
   notification.show();
 }
 
@@ -3087,7 +3234,7 @@ ipcMain.handle("terminal:history", async (_event, prefix: unknown, cwd: unknown)
   }
 });
 
-ipcMain.handle("terminal:completions", async (_event, prefix: unknown, cwd: unknown) => {
+ipcMain.handle("terminal:completions", async (_event, prefix: unknown, cwd: unknown, sshProfileId: unknown) => {
   if (typeof prefix !== "string" || prefix.length > 4096 || typeof cwd !== "string" || cwd.length > 4096) return [];
   const trimmed = prefix.trim();
   if (!trimmed) return [];
@@ -3103,6 +3250,28 @@ ipcMain.handle("terminal:completions", async (_event, prefix: unknown, cwd: unkn
     seen.add(key);
     out.push({ value, source });
   };
+  // Remote panes complete against the SSH filesystem (Nebula
+  // list_dir_for_completion): no local history, no local PATH commands.
+  if (typeof sshProfileId === "string" && sshProfileId.length > 0 && sshProfileId.length <= 180) {
+    const profile = sshProfiles.find((item) => item.id === sshProfileId);
+    if (!profile) return [];
+    try {
+      const entries = await listSftpEntries(profile, cwd || "~");
+      const visible = (entry: SftpEntry) => entry.name.toLowerCase().startsWith(lower) && (entry.name.startsWith(".") ? token.startsWith(".") : true);
+      const pick = (entry: SftpEntry, source: CompletionCandidate["source"]) => {
+        if (out.length >= 8) return false;
+        push(`${before}${entry.name}`, source);
+        return true;
+      };
+      const dirs = entries.filter((entry) => entry.type !== "file" && visible(entry));
+      const files = entries.filter((entry) => entry.type === "file" && visible(entry));
+      for (const entry of dirs) if (!pick(entry, "dir")) return out;
+      for (const entry of files) if (!pick(entry, "file")) return out;
+    } catch {
+      // Remote list failure is a normal empty result (Nebula semantics).
+    }
+    return out;
+  }
   // 1. Shared command history for this working directory (whole-line prefix match).
   try {
     const content = (await readFile(commandHistoryPath(), "utf8")).slice(-2 * 1024 * 1024);
@@ -3479,6 +3648,7 @@ void app.whenReady().then(async () => {
   createWindow();
   bootTrace("window-created");
   startRuntimeHeartbeat();
+  startAiStateWatchdog();
   void startRuntimeControl(app.getPath("userData"), {
     windowId: runtimeWindowId,
     createTab: (params) => runtimeCreateTab(params),

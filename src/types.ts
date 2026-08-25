@@ -290,7 +290,7 @@ export interface ShellProfile {
   id: string;
   label: string;
   command: string;
-  kind: "powershell" | "cmd" | "git-bash" | "wsl" | "custom";
+  kind: "powershell" | "cmd" | "git-bash" | "wsl" | "nushell" | "custom";
   detail?: string;
 }
 
@@ -434,7 +434,7 @@ export interface CodexBridge {
   listShells(): Promise<ShellProfile[]>;
   listCliTools(): Promise<CliToolInfo[]>;
   getCommandHistory(prefix: string, cwd: string): Promise<string[]>;
-  getCompletions(prefix: string, cwd: string): Promise<CompletionCandidate[]>;
+  getCompletions(prefix: string, cwd: string, sshProfileId?: string): Promise<CompletionCandidate[]>;
   listDirectories(): Promise<DirectoryEntry[]>;
   pinDirectory(path: string): Promise<DirectoryEntry[]>;
   unpinDirectory(path: string): Promise<DirectoryEntry[]>;

@@ -176,7 +176,7 @@ export async function installMockBridge(page) {
         { id: "builtin:codex", name: "Codex", command: "codex", args: [], icon: "code", description: "OpenAI Codex CLI", builtIn: true, available: true, executable: "C:\\mock\\codex.exe", installCommand: "npm install -g @openai/codex" },
         { id: "builtin:claude", name: "Claude Code", command: "claude", args: [], icon: "code", description: "Anthropic Claude Code", builtIn: true, available: false, installCommand: "npm install -g @anthropic-ai/claude-code" },
       ],
-      getCommandHistory: async (prefix) => prefix ? [`${prefix} --help`] : [],
+      getCommandHistory: async (prefix) => prefix ? [`${prefix} --help`] : (window.__mock.commandHistory || []),
       listDirectories: async () => (window.__mock.directoryEntries || [
         { path: "F:\\demo\\atlas-workspace", rank: 820, lastAccessed: Date.now() - 1000, pinned: true, score: 820 },
         { path: "F:\\demo\\docs", rank: 240, lastAccessed: Date.now() - 3600_000, pinned: false, score: 210 },
@@ -202,7 +202,7 @@ export async function installMockBridge(page) {
         ]).filter((entry) => entry.path !== path);
         return window.__mock.directoryEntries;
       },
-      getCompletions: async (prefix) => prefix ? [
+      getCompletions: async (prefix) => prefix && !/^z/i.test(prefix) ? [
         { value: `${prefix} --help`, source: "history" },
         { value: `${prefix}.ps1`, source: "command" },
       ] : [],

@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type React
 import {
   Bell, Bot, ChevronDown, ChevronLeft, ChevronRight, CircleX, Columns2, Command, Copy,
   Download, EllipsisVertical, FolderOpen, FolderTree, GitBranch, GitFork, Globe2, GripVertical, LoaderCircle, PanelLeftClose,
-  PanelLeftOpen, Pencil, Plus, RefreshCw, Rows2, Search, Server, Settings2, SquareTerminal, TerminalSquare, TriangleAlert, Upload, X,
+  PanelLeftOpen, Pencil, Plus, Radio, RefreshCw, Rows2, Search, Server, Settings2, SquareTerminal, TerminalSquare, TriangleAlert, Upload, X,
   RotateCcw, History,
   FileText, Folder,
 } from "lucide-react";
@@ -297,6 +297,7 @@ function shellTag(session: TerminalInfo) {
   if (session.shell.toLowerCase().includes("pwsh")) return "pwsh";
   if (session.shell.toLowerCase().includes("powershell")) return "ps";
   if (session.shell.toLowerCase().includes("cmd")) return "cmd";
+  if (session.shellId === "nu" || session.shell.toLowerCase().includes("nushell") || /(^|[\\/])nu(?:\.exe)?$/i.test(session.shell)) return "nu";
   if (session.shell.toLowerCase().includes("bash")) return "bash";
   return session.shell.replace(/\.exe$/i, "").slice(0, 8);
 }
@@ -357,10 +358,20 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const [tabMenu, setTabMenu] = useState<{ sessionId: string; x: number; y: number }>();
   const [dockTarget, setDockTarget] = useState<{ sessionId: string; edge: DockEdge } | null>(null);
   const [commandText, setCommandText] = useState("");
+  const commandTextRef = useRef(commandText);
+  const historyLinesRef = useRef<string[]>([]);
+  const historyCursorRef = useRef(-1);
+  const historyDraftRef = useRef("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [completionCandidates, setCompletionCandidates] = useState<CompletionCandidate[]>([]);
   const [completionDismissed, setCompletionDismissed] = useState(false);
   const [bellFlash, setBellFlash] = useState<Set<string>>(new Set());
+  const [broadcastOn, setBroadcastOn] = useState(false);
+  const broadcastOnRef = useRef(broadcastOn);
+  const topTabsRef = useRef<HTMLDivElement>(null);
+  const [topTabsOverflow, setTopTabsOverflow] = useState(false);
+  const [topTabsAtStart, setTopTabsAtStart] = useState(true);
+  const [topTabsAtEnd, setTopTabsAtEnd] = useState(true);
   const tabDragXRef = useRef(0);
   const tabScrollFrameRef = useRef(0);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
@@ -382,6 +393,9 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const projectLabel = project?.name ?? "CLI Workbench";
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
   useEffect(() => { treeRef.current = paneTree; }, [paneTree]);
+  useEffect(() => { broadcastOnRef.current = broadcastOn; }, [broadcastOn]);
+  useEffect(() => { commandTextRef.current = commandText; }, [commandText]);
+  useEffect(() => { if (leafCount(paneTree) <= 1) setBroadcastOn(false); }, [paneTree]);
   useEffect(() => { activeSessionIdRef.current = activeSessionId; }, [activeSessionId]);
   useEffect(() => {
     setActiveSessionId((current) => (current && containsLeaf(treeRef.current, current) ? current : activeLeafId(treeRef.current, null)));
@@ -692,7 +706,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     let cancelled = false;
     const timeout = window.setTimeout(async () => {
       if (settings.completionStyle === "popup") {
-        const items = await window.codex.getCompletions(commandText, active.cwd);
+        const items = await window.codex.getCompletions(commandText, active.cwd, active.kind === "ssh" ? active.sshProfileId : undefined);
         if (!cancelled) { setCompletionCandidates(items); setSuggestionIndex(0); }
       } else {
         const history = await window.codex.getCommandHistory(commandText, active.cwd);
@@ -893,6 +907,18 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     return () => cancelAnimationFrame(tabScrollFrameRef.current);
   }, [draggingSession]);
 
+  // Broadcast input: forward the focused pane's bytes to every other pane in
+  // the active split tree (Nebula v1.3 pane_header fan-out). The source pane
+  // already wrote to its own PTY, so it is excluded.
+  const broadcastInput = useCallback((sourceId: string, data: string) => {
+    if (!broadcastOnRef.current || !data) return;
+    const current = treeRef.current;
+    if (!current) return;
+    for (const id of collectLeafIds(current)) {
+      if (id !== sourceId) void window.codex.writeTerminal(id, data);
+    }
+  }, []);
+
   const dockSession = (sessionId: string, targetId: string, edge: DockEdge) => {
     if (edge === "center") { assignSession(sessionId, targetId); return; }
     if (leafCount(treeRef.current) >= 4) { assignSession(sessionId, targetId); return; }
@@ -985,9 +1011,34 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     }
     void window.codex.writeTerminal(active.id, `${command}\r`);
     setCommandText("");
+    historyCursorRef.current = -1;
+    historyLinesRef.current = [];
     setSuggestions([]);
     setCompletionCandidates([]);
   };
+
+  // Up/Down history fallback when neither the popup nor the inline ghost has
+  // candidates — fixes #56 (popup mode could not cycle history records).
+  const navigateHistory = useCallback(async (direction: -1 | 1, cwd?: string, draft?: string) => {
+    if (!cwd) return;
+    // 仅当尚未开始翻历史（cursor 在 -1）时记录草稿；翻动过程中不覆盖，
+    // 否则 Down 回到草稿时会拿到历史项而非最初输入。
+    if (historyCursorRef.current < 0) historyDraftRef.current = draft ?? commandTextRef.current;
+    if (!historyLinesRef.current.length) {
+      try {
+        historyLinesRef.current = await window.codex.getCommandHistory("", cwd);
+      } catch {
+        historyLinesRef.current = [];
+      }
+      historyCursorRef.current = -1;
+    }
+    const lines = historyLinesRef.current;
+    if (!lines.length) return;
+    // direction: -1 = ArrowUp (older), +1 = ArrowDown (newer); cursor -1 表示回到草稿
+    const next = Math.max(-1, Math.min(lines.length - 1, historyCursorRef.current - direction));
+    historyCursorRef.current = next;
+    setCommandText(next >= 0 ? lines[next] : historyDraftRef.current);
+  }, []);
 
   const acceptCompletion = (value: string) => {
     setCommandText(value);
@@ -1107,6 +1158,36 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const headingTitle = view === "settings" ? workbenchCopy.settings : view === "document" ? document?.name || workbenchCopy.document : chatView ? chatTitle || workbenchCopy.conversations : workbenchCopy.terminal;
   const headingLabel = view === "settings" ? workbenchCopy.settingsLabel : chatView ? workbenchCopy.conversationsLabel : workbenchCopy.terminalLabel;
 
+  // Paged title-bar tabs (Nebula v1.3): show ‹ › when the strip overflows and
+  // grey them out at either end; drag edge auto-scroll lives in the effect above.
+  useEffect(() => {
+    const strip = topTabsRef.current;
+    if (!strip) return;
+    const update = () => {
+      const overflow = strip.scrollWidth > strip.clientWidth + 1;
+      setTopTabsOverflow(overflow);
+      setTopTabsAtStart(strip.scrollLeft <= 0);
+      setTopTabsAtEnd(!overflow || strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 1);
+    };
+    update();
+    strip.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(strip);
+    const parentObserver = new ResizeObserver(update);
+    if (strip.parentElement) parentObserver.observe(strip.parentElement);
+    return () => {
+      strip.removeEventListener("scroll", update);
+      observer.disconnect();
+      parentObserver.disconnect();
+    };
+  }, [showTopTabs, sessions.length]);
+
+  const pageTopTabs = useCallback((direction: -1 | 1) => {
+    const strip = topTabsRef.current;
+    if (!strip) return;
+    strip.scrollBy({ left: direction * 168, behavior: "smooth" });
+  }, []);
+
   const renderPaneNode = (node: PaneNode): ReactNode => {
     if (node.type === "split") {
       const splitKey = collectLeafIds(node).join(",");
@@ -1136,15 +1217,16 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
         onDrop={(event) => handlePaneDrop(event, session.id)}
       >
         <div className={`pane-toolbar${bellFlash.has(session.id) ? " bell-flash" : ""}`}>
-          <span>{terminalIcon(session)}<strong>{tabDisplayTitle(session)}</strong><small>{session.remoteHost || session.cwd}</small>{session.activity === "attention" && <i />}</span>
+          <span draggable title={workbenchCopy.dragPaneToDetach} onDragStart={(event) => { event.stopPropagation(); setDraggingSession(session.id); event.dataTransfer.setData("text/terminal-session", session.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { setDraggingSession(undefined); setDockTarget(null); }}>{terminalIcon(session)}<strong>{tabDisplayTitle(session)}</strong><small>{session.remoteHost || session.cwd}</small>{session.activity === "attention" && <i />}</span>
           <span className="pane-toolbar-actions">
+            {leafCount(paneTree) > 1 && <button className={broadcastOn ? "active" : ""} aria-label={workbenchCopy.broadcastInput} title={workbenchCopy.broadcastInput} onClick={() => setBroadcastOn((value) => !value)}><Radio size={11} /></button>}
             <button aria-label={workbenchCopy.splitPaneRight} title={workbenchCopy.splitPaneRight} onClick={() => void splitPane("columns", session.id, session.id)}><Columns2 size={11} /></button>
             <button aria-label={workbenchCopy.splitPaneDown} title={workbenchCopy.splitPaneDown} onClick={() => void splitPane("rows", session.id, session.id)}><Rows2 size={11} /></button>
             {session.kind === "ssh" && session.exitedAt && <button className="pane-retry" aria-label={workbenchCopy.xRetryTerminal} title={workbenchCopy.xRetryTerminal} onClick={() => void restartSsh(session)}><RefreshCw size={11} /></button>}
             {leafCount(paneTree) > 1 && <button aria-label={workbenchCopy.closePane} title={workbenchCopy.closePane} onClick={() => closePane(session.id)}><X size={11} /></button>}
           </span>
         </div>
-        <TerminalPane session={session} theme={settings.theme} cursorStyle={settings.cursorStyle} cursorBlink={settings.cursorBlink} fontFamily={settings.fontFamily} cellWidth={settings.cellWidth} backgroundOverride={settings.backgroundColor} bellFlash={bellFlash.has(session.id)} copyOnSelect={settings.copyOnSelect} active={isActive && terminalView && windowFocused} onFocus={() => { setActiveSessionId(session.id); setUnread((current) => { const next = new Set(current); next.delete(session.id); return next; }); }} onTerminalReady={(id, terminal) => { if (terminal) terminalInstancesRef.current.set(id, terminal); else terminalInstancesRef.current.delete(id); }} onError={onError} />
+        <TerminalPane session={session} theme={settings.theme} cursorStyle={settings.cursorStyle} cursorBlink={settings.cursorBlink} fontFamily={settings.fontFamily} cellWidth={settings.cellWidth} backgroundOverride={settings.backgroundColor} bellFlash={bellFlash.has(session.id)} copyOnSelect={settings.copyOnSelect} active={isActive && terminalView && windowFocused} onFocus={() => { setActiveSessionId(session.id); setUnread((current) => { const next = new Set(current); next.delete(session.id); return next; }); }} onTerminalReady={(id, terminal) => { if (terminal) terminalInstancesRef.current.set(id, terminal); else terminalInstancesRef.current.delete(id); }} onError={onError} onBroadcast={(data) => broadcastInput(session.id, data)} />
         {draggingSession && draggingSession !== session.id && <div className="dock-overlay">
           <button className={`dock-top${hoverEdge === "top" ? " active" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); dockSession(draggingSession, session.id, "top"); }} />
           <button className={`dock-right${hoverEdge === "right" ? " active" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); dockSession(draggingSession, session.id, "right"); }} />
@@ -1166,7 +1248,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
       <header className="terminal-header">
         {showTopTabs ? (
           <>
-        <div className="terminal-top-tabs" role="tablist" aria-label={workbenchCopy.topTabs} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; tabDragXRef.current = event.clientX; }}>
+        <div ref={topTabsRef} className="terminal-top-tabs" role="tablist" aria-label={workbenchCopy.topTabs} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; tabDragXRef.current = event.clientX; }} onDrop={(event) => { const source = event.dataTransfer.getData("text/terminal-session"); if (!source) return; if ((event.target as HTMLElement).closest(".terminal-top-tab")) return; event.preventDefault(); setDraggingSession(undefined); setPaneTree((current) => removeLeaf(current, source)); }}>
           {sessions.map((session) => (
             <div
               className={`terminal-top-tab ${containsLeaf(paneTree, session.id) ? "active" : ""}`}
@@ -1203,6 +1285,10 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
             </div>
           )}
         </div>
+        {topTabsOverflow && <div className="top-tabs-paging">
+          <button className="terminal-header-action" title={workbenchCopy.pageTabsLeft} disabled={topTabsAtStart} onClick={() => pageTopTabs(-1)}><ChevronLeft size={14} /></button>
+          <button className="terminal-header-action" title={workbenchCopy.pageTabsRight} disabled={topTabsAtEnd} onClick={() => pageTopTabs(1)}><ChevronRight size={14} /></button>
+        </div>}
         <button className="terminal-header-action" title={workbenchCopy.newTerminal} onClick={() => void createTerminal(active?.cwd || projectPath, { reuseExisting: false, shellId: settings.defaultShellId })}><Plus size={15} /></button>
         <button className={`terminal-header-action top-tabs-menu${moreMenuOpen ? " active" : ""}`} title={workbenchCopy.moreActions} onClick={(event) => toggleMoreMenu(event.currentTarget)}><EllipsisVertical size={18} /></button>
           </>
@@ -1282,7 +1368,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
             <div className={`terminal-pane-tree${paneResizing ? " pane-resizing" : ""}`}>
               {paneTree ? renderPaneNode(paneTree) : <div className="terminal-empty"><TerminalSquare size={24} /><button onClick={() => void createTerminal(projectPath, { reuseExisting: false, shellId: settings.defaultShellId })}><Plus size={14} />{workbenchCopy.newTerminal}</button></div>}
             </div>
-            {active && <div className="command-dock"><Search size={13} /><div><input aria-label={workbenchCopy.commandInput} value={commandText} placeholder={workbenchCopy.runCommandPlaceholder} onChange={(event) => setCommandText(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); if (completionCandidates[suggestionIndex]) acceptCompletion(completionCandidates[suggestionIndex].value); else sendCommand(); } else if (event.key === "Tab" && completionCandidates.length) { event.preventDefault(); acceptCompletion(completionCandidates[suggestionIndex]?.value ?? completionCandidates[0].value); } else if (event.key === "Tab" && ghost) { event.preventDefault(); setCommandText(ghost); } else if (event.key === "ArrowDown" && completionCandidates.length) { event.preventDefault(); setSuggestionIndex((value) => (value + 1) % completionCandidates.length); } else if (event.key === "ArrowUp" && completionCandidates.length) { event.preventDefault(); setSuggestionIndex((value) => (value - 1 + completionCandidates.length) % completionCandidates.length); } else if (event.key === "ArrowDown" && suggestions.length) { event.preventDefault(); setSuggestionIndex((value) => (value + 1) % suggestions.length); } else if (event.key === "ArrowUp" && suggestions.length) { event.preventDefault(); setSuggestionIndex((value) => (value - 1 + suggestions.length) % suggestions.length); } else if (event.key === "Escape" && completionCandidates.length) { event.preventDefault(); setCompletionCandidates([]); setCompletionDismissed(true); } }} />{!completionCandidates.length && ghostSuffix && <span aria-hidden="true"><b>{commandText}</b>{ghostSuffix}</span>}{completionCandidates.length > 0 && <div className="completion-popup" role="listbox" aria-label={workbenchCopy.commandSuggestions}>{completionCandidates.map((candidate, index) => <button key={`${candidate.source}:${candidate.value}`} role="option" aria-selected={index === suggestionIndex} className={index === suggestionIndex ? "selected" : ""} onMouseDown={(event) => { event.preventDefault(); acceptCompletion(candidate.value); }} onMouseEnter={() => setSuggestionIndex(index)}><i aria-hidden="true">{completionSourceIcons[candidate.source]}</i><span>{candidate.value}</span><em>{workbenchCopy[completionSourceLabels[candidate.source]]}</em></button>)}</div>}</div><button title={workbenchCopy.runCommand} disabled={!commandText.trim()} onClick={() => sendCommand()}><ChevronRight size={14} /></button></div>}
+            {active && <div className="command-dock"><Search size={13} /><div><input aria-label={workbenchCopy.commandInput} value={commandText} placeholder={workbenchCopy.runCommandPlaceholder} onChange={(event) => { historyCursorRef.current = -1; setCommandText(event.target.value); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); if (completionCandidates[suggestionIndex]) acceptCompletion(completionCandidates[suggestionIndex].value); else sendCommand(); } else if (event.key === "Tab" && completionCandidates.length) { event.preventDefault(); acceptCompletion(completionCandidates[suggestionIndex]?.value ?? completionCandidates[0].value); } else if (event.key === "Tab" && ghost) { event.preventDefault(); setCommandText(ghost); } else if (event.key === "ArrowDown" && completionCandidates.length) { event.preventDefault(); setSuggestionIndex((value) => (value + 1) % completionCandidates.length); } else if (event.key === "ArrowUp" && completionCandidates.length) { event.preventDefault(); setSuggestionIndex((value) => (value - 1 + completionCandidates.length) % completionCandidates.length); } else if (event.key === "ArrowDown" && suggestions.length) { event.preventDefault(); setSuggestionIndex((value) => (value + 1) % suggestions.length); } else if (event.key === "ArrowUp" && suggestions.length) { event.preventDefault(); setSuggestionIndex((value) => (value - 1 + suggestions.length) % suggestions.length); } else if (event.key === "ArrowDown" && !completionCandidates.length && !suggestions.length) { event.preventDefault(); void navigateHistory(1, active?.cwd, event.currentTarget.value); } else if (event.key === "ArrowUp" && !completionCandidates.length && !suggestions.length) { event.preventDefault(); void navigateHistory(-1, active?.cwd, event.currentTarget.value); } else if (event.key === "Escape" && completionCandidates.length) { event.preventDefault(); setCompletionCandidates([]); setCompletionDismissed(true); } }} />{!completionCandidates.length && ghostSuffix && <span aria-hidden="true"><b>{commandText}</b>{ghostSuffix}</span>}{completionCandidates.length > 0 && <div className="completion-popup" role="listbox" aria-label={workbenchCopy.commandSuggestions}>{completionCandidates.map((candidate, index) => <button key={`${candidate.source}:${candidate.value}`} role="option" aria-selected={index === suggestionIndex} className={`completion-src-${candidate.source}${index === suggestionIndex ? " selected" : ""}`} onMouseDown={(event) => { event.preventDefault(); acceptCompletion(candidate.value); }} onMouseEnter={() => setSuggestionIndex(index)}><i aria-hidden="true">{completionSourceIcons[candidate.source]}</i><span>{candidate.value}</span><em>{workbenchCopy[completionSourceLabels[candidate.source]]}</em></button>)}</div>}</div><button title={workbenchCopy.runCommand} disabled={!commandText.trim()} onClick={() => sendCommand()}><ChevronRight size={14} /></button></div>}
           </div>
           {view === "settings" && <SettingsPanel settings={settings} shells={shells} cliTools={cliTools} cliLifecycleStatus={cliLifecycleStatus} cliLifecycleBusy={cliLifecycleBusy} onChange={onSettingsChange} onCliLifecycleToggle={onCliLifecycleToggle} onConnectSsh={connectSsh} onClose={closeSettingsTab} />}
           {view === "document" && document && <DocumentViewer document={document} root={filesRoot} onClose={() => setView("terminal")} onError={onError} />}

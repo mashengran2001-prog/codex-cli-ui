@@ -20,6 +20,8 @@ await createElectronFixture(root, codexHome);
 const fakeBin = join(testRoot, "fake-bin");
 await mkdir(fakeBin, { recursive: true });
 writeFileSync(join(fakeBin, "codex.cmd"), "@echo off\r\necho FAKE_CODEX_AGENT_OK\r\nexit /b 0\r\n", "utf8");
+// Fake Nushell for shell detection (Nebula v1.2 shell 分类注入): presence via PATH.
+writeFileSync(join(fakeBin, "nu.exe"), "fake-nushell", "utf8");
 writeFileSync(join(fakeBin, "codex.ps1"), "Write-Output 'FAKE_CODEX_AGENT_OK'\r\n", "utf8");
 
 const electronEnv = {
@@ -63,6 +65,9 @@ try {
   const quarantineStatus = await window.evaluate(async () => window.codex.getTerminalQuarantineStatus());
   assert.deepEqual(quarantineStatus, { quarantined: false, snapshotPath: null });
   console.log("electron-quarantine: IPC status channel answers normally");
+  const detectedShells = await window.evaluate(async () => window.codex.listShells());
+  assert.ok(detectedShells.some((shell) => shell.id === "nu" && shell.kind === "nushell" && shell.label === "Nushell"), JSON.stringify(detectedShells.map((shell) => ({ id: shell.id, kind: shell.kind }))));
+  console.log("electron-shells: Nushell detected via PATH (Nebula v1.2 shell 分类注入)");
 
   await window.getByText("Fix the parser from CLI").first().click();
   const textarea = window.locator("textarea");
@@ -365,6 +370,20 @@ try {
   assert.equal(dirtyReceipt.error.code, "dirty_source");
   assert.throws(() => execFileSync("git", ["-C", forkRepo, "show-ref", "--verify", "--quiet", "refs/heads/nebula/dirty-agent"], { windowsHide: true }));
   console.log("electron-agent-fork: transactional worktree creation, commit, and dirty-source rejection passed");
+
+  // --- SSH 旧格式 user@host:port（Nebula v1.2 修复）：保存后拆分为 user/host/port ---
+  const sshFormat = await window.evaluate(async () => {
+    await window.codex.saveSshProfile({ name: "old-format", host: "dev@example.com:2222", username: "", port: 22 });
+    const profiles = await window.codex.listSshProfiles();
+    const found = profiles.find((item) => item.name === "old-format");
+    if (!found) throw new Error("old-format profile was not persisted");
+    return found;
+  });
+  assert.equal(sshFormat.host, "example.com", JSON.stringify(sshFormat));
+  assert.equal(sshFormat.username, "dev", JSON.stringify(sshFormat));
+  assert.equal(sshFormat.port, 2222, JSON.stringify(sshFormat));
+  assert.equal(await window.evaluate((id) => window.codex.deleteSshProfile(id), sshFormat.id), true);
+  console.log("electron-ssh-format: user@host:port normalization passed");
 
 } finally {
   await app.close();

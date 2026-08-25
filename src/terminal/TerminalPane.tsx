@@ -25,6 +25,7 @@ interface TerminalPaneProps {
   onFocus(): void;
   onTerminalReady?(id: string, terminal: XTerm | null): void;
   onError?(message: string): void;
+  onBroadcast?(data: string): void;
 }
 
 // Tiny transient pane sizes (tab re-layout, window minimize) must never reach
@@ -82,7 +83,7 @@ function resolveTerminalPath(base: string, candidate: string) {
   return `${drive ? drive + "\\" : ""}${stack.join("\\")}`;
 }
 
-export default function TerminalPane({ session, theme, cursorStyle, cursorBlink, fontFamily, cellWidth, backgroundOverride, bellFlash, copyOnSelect, active, onFocus, onTerminalReady, onError }: TerminalPaneProps) {
+export default function TerminalPane({ session, theme, cursorStyle, cursorBlink, fontFamily, cellWidth, backgroundOverride, bellFlash, copyOnSelect, active, onFocus, onTerminalReady, onError, onBroadcast }: TerminalPaneProps) {
   const copy = useUiCopy().workbench;
   const copyRef = useRef(copy);
   useEffect(() => { copyRef.current = copy; }, [copy]);
@@ -93,6 +94,7 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
   const copyOnSelectRef = useRef(copyOnSelect);
   const onFocusRef = useRef(onFocus);
   const onErrorRef = useRef(onError);
+  const onBroadcastRef = useRef(onBroadcast);
   const [searchOpen, setSearchOpen] = useState(false);
   const [linkPreview, setLinkPreview] = useState<LinkPreviewState | null>(null);
   const [query, setQuery] = useState("");
@@ -100,6 +102,7 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
   useEffect(() => { copyOnSelectRef.current = copyOnSelect; }, [copyOnSelect]);
   useEffect(() => { onFocusRef.current = onFocus; }, [onFocus]);
   useEffect(() => { onErrorRef.current = onError; }, [onError]);
+  useEffect(() => { onBroadcastRef.current = onBroadcast; }, [onBroadcast]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -173,7 +176,10 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
     };
     const observer = new ResizeObserver(resize);
     observer.observe(container);
-    const input = terminal.onData((data) => { void window.codex.writeTerminal(session.id, data); });
+    const input = terminal.onData((data) => {
+      void window.codex.writeTerminal(session.id, data);
+      onBroadcastRef.current?.(data);
+    });
     let selectionTimer = 0;
     const copySelection = () => {
       const text = terminal.getSelection();
@@ -239,6 +245,9 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
     container.addEventListener("drop", drop);
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown") return true;
+      // IME composition (搜狗/微软拼音 etc.): keyCode 229 marks in-progress
+      // candidates; let xterm feed the composition and never hijack Ctrl+C/V.
+      if (event.isComposing || event.keyCode === 229) return true;
       const key = event.key.toLowerCase();
       if (event.ctrlKey && !event.shiftKey && key === "f") {
         setSearchOpen(true);

@@ -312,6 +312,18 @@ try {
   assert.equal(await page.locator(".command-dock input").inputValue(), "npm run.ps1");
   await page.locator(".command-dock input").press("Escape");
   await page.locator(".command-dock input").fill("");
+  // #56：弹窗模式下无候选时，方向键回退到命令历史（Up/Down 循环）
+  await page.evaluate(() => { window.__mock.commandHistory = ["npm run --help", "git status"]; });
+  await page.locator(".command-dock input").fill("zzz");
+  await page.locator(".command-dock input").press("ArrowUp");
+  await page.waitForFunction(() => document.querySelector(".command-dock input")?.value === "npm run --help");
+  await page.locator(".command-dock input").press("ArrowUp");
+  await page.waitForFunction(() => document.querySelector(".command-dock input")?.value === "git status");
+  await page.locator(".command-dock input").press("ArrowDown");
+  await page.waitForFunction(() => document.querySelector(".command-dock input")?.value === "npm run --help");
+  await page.locator(".command-dock input").press("ArrowDown");
+  await page.waitForFunction(() => document.querySelector(".command-dock input")?.value === "zzz");
+  await page.locator(".command-dock input").fill("");
   // 恢复默认补全样式与字符宽度，避免影响后续用例
   await page.getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
   await page.locator(".terminal-settings").waitFor();
@@ -677,6 +689,21 @@ try {
   await page.locator(".hsv-picker").nth(1).locator("input").fill("#336699");
   assert.equal((await page.evaluate(() => window.codex.getAppSettings())).accentColor, "#336699");
   await page.locator('.terminal-top-tab[data-tab-kind="settings"] .terminal-tab-close').click();
+
+  // 广播输入（Nebula v1.3）：分屏 ≥2 时开启广播，键入同时写入全部 pane
+  if (await page.locator(".terminal-pane-leaf").count() < 2) {
+    await page.getByTitle("向右拆分此分屏").first().click();
+    await page.waitForFunction(() => document.querySelectorAll(".terminal-pane-leaf").length >= 2);
+  }
+  await page.getByTitle("广播输入到本标签全部分屏").first().click();
+  await page.locator(".terminal-pane-leaf.active .xterm-screen").first().click();
+  const broadcastBefore = await page.evaluate(() => window.__mock.terminalWrites.length);
+  await page.keyboard.type("echo broadcast");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction((before) => window.__mock.terminalWrites.length >= before + 2, broadcastBefore);
+  const broadcastIds = await page.evaluate((before) => [...new Set(window.__mock.terminalWrites.slice(before).map((write) => write.id))], broadcastBefore);
+  assert.ok(broadcastIds.length >= 2, `broadcast reached ${broadcastIds.length} panes`);
+  await page.getByTitle("广播输入到本标签全部分屏").first().click();
 
   // SSH 设置区：58px 行、两击删除 + 8 秒撤销、端口 5 位过滤、私钥列表
   await page.getByTitle("更多操作").click(); await page.getByRole("menuitem", { name: "打开设置" }).click();
