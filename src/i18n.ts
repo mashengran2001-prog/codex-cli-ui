@@ -65,6 +65,8 @@ const uiCopies = {
       switchProvider: "切换结构化对话 Provider",
       connected: "已连接",
       configurationRequired: "需要配置",
+      desktopBadge: "桌面版",
+      desktopSessionHint: "来自 Claude 桌面版（Claude Code），本地仅同步会话元数据",
       unavailable: "不可用",
     },
     composer: {
@@ -110,6 +112,8 @@ const uiCopies = {
       newSession: "新建会话",
       loading: "正在载入会话",
       startTask: "开始一个新任务",
+      desktopSessionTitle: "Claude 桌面版会话",
+      desktopSessionHint: "该会话来自 Claude 桌面版（Claude Code），本机没有可读的对话转录，仅同步标题、时间、模型等元数据。可新建会话开始 CLI 对话，或到桌面版继续。",
     },
     workbench: {
       settings: "设置",
@@ -348,6 +352,8 @@ const uiCopies = {
       switchProvider: "Switch structured chat provider",
       connected: "Connected",
       configurationRequired: "Configuration required",
+      desktopBadge: "Desktop",
+      desktopSessionHint: "From Claude Desktop; only session metadata is synced locally",
       unavailable: "Unavailable",
     },
     composer: {
@@ -393,6 +399,8 @@ const uiCopies = {
       newSession: "New session",
       loading: "Loading session",
       startTask: "Start a new task",
+      desktopSessionTitle: "Claude Desktop session",
+      desktopSessionHint: "This session was started in Claude Desktop (Claude Code). No readable local transcript exists, so only metadata (title, time, model) is synced. Start a new session to chat with the CLI, or continue in Desktop.",
     },
     workbench: {
       settings: "Settings",

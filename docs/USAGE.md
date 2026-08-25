@@ -106,6 +106,21 @@ npm run dist
 - 重启应用后，恢复出的标签会自动重敲 `codex resume <id>` / `claude --resume <id>` 接续上次会话（设置 → AI 可关闭）
 - 右键运行中的 AI 标签：**继续上次 AI 会话** 或 **分叉 AI 会话**（把当前对话复制成一个新标签）
 
+### 4.4 Claude Code Provider（cc-switch 与桌面版同步）
+
+**自动识别与认证**
+
+- 自动查找本机 `claude` 命令（优先 npm 全局包里的原生 `claude.exe`；也可用 `CLAUDE_UI_CLI_PATH` 指定路径）
+- 若检测到 `~/.claude/settings.json` 的 `env`（例如 cc-switch 写入的 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` 与模型覆盖），Provider 会**显式继承**该配置并删除全局 `ANTHROPIC_API_KEY`，避免代理模式下被全局密钥抢占导致 403
+- 未使用 cc-switch 时，可在侧栏 Claude 的 Provider 区输入 Anthropic API Key，加密保存在本机
+- 会话通过 `claude -p --output-format stream-json --verbose` 以结构化事件流运行，界面解析为回答 / 推理 / 工具调用；`CLAUDE_CODE_MAX_RETRIES=0`，认证失败时不会长时间重试卡住
+
+**Claude Desktop 会话同步**
+
+- Claude Desktop 内嵌的 Claude Code 对话与 CLI **共用同一份本地转录**（`~/.claude/projects/<项目>/<会话id>.jsonl`），因此 Claude Provider 天然就能列出并打开桌面版产生的会话，可继续对话或分叉
+- 对于本机没有 jsonl 转录的桌面版会话，UI 会扫描 `%LOCALAPPDATA%\Claude-3p\claude-code-sessions` 与 `Packages\Claude*\LocalCache\Roaming\Claude\claude-code-sessions` 的 `local_*.json` 元数据，补出标题 / 时间 / 模型，侧栏显示“桌面版”徽标；这类会话只同步元数据，打开后提示新建 CLI 会话继续
+- 本地没有转录时不会误传 `--resume`，而是自动开启新会话
+
 ---
 
 ## 5. 终端

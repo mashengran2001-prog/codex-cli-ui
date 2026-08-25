@@ -56,6 +56,7 @@ import type {
 } from "../src/types";
 import { DEFAULT_KEYBINDINGS, normalizeKeybindings } from "../src/types";
 import { DeepSeekProvider } from "./deepseek-provider";
+import { ClaudeProvider } from "./claude-provider";
 import { CliLifecycleBridge, type CliLifecycleEvent } from "./cli-lifecycle";
 import { ProviderRegistry, type AgentProvider, type ProviderRunContext } from "./provider-registry";
 import { enumerateSystemFonts } from "./system-fonts";
@@ -2963,6 +2964,10 @@ function initializeProviderRegistry() {
     sessionRoot: join(app.getPath("userData"), "deepseek-sessions"),
     getCredential: () => loadProviderCredential("deepseek"),
     setCredential: (value) => saveProviderCredential("deepseek", value),
+  }));
+  registry.register(new ClaudeProvider({
+    getCredential: () => loadProviderCredential("claude"),
+    setCredential: (value) => saveProviderCredential("claude", value),
   }));
   providerRegistry = registry;
   return registry;

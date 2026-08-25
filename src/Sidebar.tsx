@@ -153,7 +153,7 @@ export default function Sidebar(props: SidebarProps) {
                           {renaming?.type === "conversation" && renaming.id === conversation.id ? (
                             <RenameInput value={conversation.title} onCommit={(name) => { props.onRenameConversation(conversation.id, name); setRenaming(null); }} onCancel={() => setRenaming(null)} />
                           ) : (
-                            <span><strong>{conversation.title}</strong><small>{conversation.model || (conversation.isDraft ? copy.draft : activeProvider?.shortName || "Provider")} · {timeLabel(conversation.updatedAt, locale)}</small></span>
+                            <span><strong>{conversation.title}</strong>{conversation.source === "desktop" && <em className="session-source-badge" title={copy.desktopSessionHint}>{copy.desktopBadge}</em>}<small>{conversation.model || (conversation.isDraft ? copy.draft : activeProvider?.shortName || "Provider")} · {timeLabel(conversation.updatedAt, locale)}</small></span>
                           )}
                         </button>
                         <button className="conversation-rename" title={copy.renameSession} onClick={() => setRenaming({ type: "conversation", id: conversation.id })}><Pencil size={11} /></button>
@@ -186,7 +186,7 @@ export default function Sidebar(props: SidebarProps) {
             <div className="setting-divider" />
             {activeProvider && <div className="provider-setting">
               <div className="provider-setting-head"><div><strong>{activeProvider.name}</strong><small>{activeProvider.error || activeProvider.description}</small></div><button title={copy.refreshProvider} onClick={() => props.onProviderRefresh(activeProvider.id)}><RefreshCw size={12} /></button></div>
-              {activeProvider.id === "deepseek" && <div className="provider-credential"><input type="password" value={credential} placeholder="DeepSeek API Key" onChange={(event) => setCredential(event.target.value)} /><button disabled={!credential.trim()} onClick={() => { props.onProviderCredential(activeProvider.id, credential); setCredential(""); }}>{copy.save}</button></div>}
+              {(activeProvider.id === "deepseek" || activeProvider.id === "claude") && <div className="provider-credential"><input type="password" value={credential} placeholder={activeProvider.id === "deepseek" ? "DeepSeek API Key" : "Anthropic API Key"} onChange={(event) => setCredential(event.target.value)} /><button disabled={!credential.trim()} onClick={() => { props.onProviderCredential(activeProvider.id, credential); setCredential(""); }}>{copy.save}</button></div>}
               {!activeProvider.cliAvailable && activeProvider.installCommand && <button className="provider-install" onClick={() => props.onProviderInstall(activeProvider.id)}><Download size={12} />{copy.installCli}</button>}
             </div>}
             <div className="setting-divider" />

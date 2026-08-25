@@ -206,7 +206,8 @@ export default function ConversationView(props: ConversationViewProps) {
         ) : messages.length === 0 ? (
           <div className="conversation-start">
             <div className="conversation-start-mark"><Clipboard size={18} /></div>
-            <h2>{copy.startTask}</h2>
+            {props.conversation?.source === "desktop" ? <h2>{copy.desktopSessionTitle}</h2> : <h2>{copy.startTask}</h2>}
+            {props.conversation?.source === "desktop" && <p className="desktop-session-hint">{copy.desktopSessionHint}</p>}
           </div>
         ) : (
           <div className="conversation-content">

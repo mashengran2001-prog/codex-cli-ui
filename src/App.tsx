@@ -85,6 +85,7 @@ function aliasKey(providerId: AgentProviderId, sessionId: string) {
 
 function providerLabel(providerId: AgentProviderId) {
   if (providerId === "codex") return "Codex";
+  if (providerId === "claude") return "Claude";
   if (providerId === "deepseek") return "DeepSeek";
   return providerId;
 }
@@ -507,7 +508,7 @@ export default function App() {
         runId,
         prompt,
         cwd: conversation.cwd,
-        threadId: conversation.isDraft ? undefined : conversation.id,
+        threadId: conversation.isDraft || conversation.source === "desktop" ? undefined : conversation.id,
         model: model || undefined,
         reasoningEffort,
         sandboxMode,

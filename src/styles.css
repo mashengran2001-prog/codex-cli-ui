@@ -1439,3 +1439,26 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* 非默认值标记（Nebula v1.3 settings non-default markers） */
 .settings-modified-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:6px;vertical-align:middle;flex:none;background:var(--t-accent,#52a8ff);box-shadow:0 0 0 3px color-mix(in srgb,var(--t-accent,#52a8ff) 18%,transparent)}
 .settings-toggle .settings-modified-dot{margin-left:4px}
+
+
+.session-source-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-style: normal;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--text-secondary, #9aa0aa);
+  background: rgba(127, 127, 127, 0.14);
+  vertical-align: 1px;
+}
+
+.desktop-session-hint {
+  margin: 8px 0 0;
+  max-width: 420px;
+  color: var(--text-secondary, #9aa0aa);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+}

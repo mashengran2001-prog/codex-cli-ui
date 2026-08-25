@@ -206,6 +206,7 @@ export interface SessionSummary {
   updatedAt: number;
   model?: string;
   cliVersion?: string;
+  source?: "cli" | "desktop";
   gitBranch?: string;
   messages?: ChatMessage[];
 }
