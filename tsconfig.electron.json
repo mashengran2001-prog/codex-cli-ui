@@ -6,10 +6,16 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "outDir": "dist-electron",
     "rootDir": ".",
     "sourceMap": true
   },
-  "include": ["electron/**/*.ts", "src/types.ts"]
+  "include": [
+    "electron/**/*.ts",
+    "src/types.ts",
+    "src/terminal/terminal-math.ts"
+  ]
 }

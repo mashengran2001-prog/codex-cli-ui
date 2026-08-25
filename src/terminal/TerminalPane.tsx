@@ -6,6 +6,8 @@ import { SearchAddon } from "@xterm/addon-search";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal as XTerm } from "@xterm/xterm";
+import katex from "katex";
+import { TerminalMathOverlay } from "./terminal-math";
 import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
 import type { TerminalCursorStyle, TerminalInfo, TerminalThemeName } from "../types";
 import { useUiCopy } from "../i18n";
@@ -21,6 +23,7 @@ interface TerminalPaneProps {
   backgroundOverride?: string;
   bellFlash: boolean;
   copyOnSelect: boolean;
+  renderTerminalMath: boolean;
   active: boolean;
   onFocus(): void;
   onTerminalReady?(id: string, terminal: XTerm | null): void;
@@ -83,7 +86,7 @@ function resolveTerminalPath(base: string, candidate: string) {
   return `${drive ? drive + "\\" : ""}${stack.join("\\")}`;
 }
 
-export default function TerminalPane({ session, theme, cursorStyle, cursorBlink, fontFamily, cellWidth, backgroundOverride, bellFlash, copyOnSelect, active, onFocus, onTerminalReady, onError, onBroadcast }: TerminalPaneProps) {
+export default function TerminalPane({ session, theme, cursorStyle, cursorBlink, fontFamily, cellWidth, backgroundOverride, bellFlash, copyOnSelect, renderTerminalMath, active, onFocus, onTerminalReady, onError, onBroadcast }: TerminalPaneProps) {
   const copy = useUiCopy().workbench;
   const copyRef = useRef(copy);
   useEffect(() => { copyRef.current = copy; }, [copy]);
@@ -92,6 +95,7 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
   const fitRef = useRef<FitAddon | undefined>(undefined);
   const searchRef = useRef<SearchAddon | undefined>(undefined);
   const copyOnSelectRef = useRef(copyOnSelect);
+  const mathOverlayRef = useRef<TerminalMathOverlay | null>(null);
   const onFocusRef = useRef(onFocus);
   const onErrorRef = useRef(onError);
   const onBroadcastRef = useRef(onBroadcast);
@@ -339,10 +343,33 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!terminal) return;
+    mathOverlayRef.current?.refresh();
     terminal.options.theme = backgroundOverride
       ? { ...terminalThemes[theme].terminal, background: backgroundOverride }
       : terminalThemes[theme].terminal;
   }, [backgroundOverride, theme]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    const container = containerRef.current;
+    if (!terminal || !container) return;
+    if (!renderTerminalMath) {
+      mathOverlayRef.current?.dispose();
+      mathOverlayRef.current = null;
+      return;
+    }
+    const xtermEl = container.querySelector<HTMLElement>(".xterm");
+    if (!xtermEl) return;
+    const overlay = new TerminalMathOverlay(terminal, xtermEl, (tex, display) =>
+      katex.renderToString(tex, { displayMode: display, throwOnError: false, output: "html" }),
+    );
+    mathOverlayRef.current = overlay;
+    overlay.refresh();
+    return () => {
+      overlay.dispose();
+      if (mathOverlayRef.current === overlay) mathOverlayRef.current = null;
+    };
+  }, [renderTerminalMath, session.id]);
 
   useEffect(() => {
     const terminal = terminalRef.current;

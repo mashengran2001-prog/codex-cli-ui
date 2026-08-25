@@ -107,6 +107,7 @@ export interface AppSettings {
   cellWidth: "compact" | "relaxed";
   completionStyle: "inline" | "popup";
   bellMode: "off" | "flash" | "sound" | "both";
+  renderTerminalMath: boolean;
   tabPosition: "top" | "side";
   backgroundColor?: string;
   accentColor?: string;

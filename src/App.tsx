@@ -50,6 +50,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   cellWidth: "compact",
   completionStyle: "inline",
   bellMode: "both",
+  renderTerminalMath: true,
   tabPosition: "side",
   resumeAiSessions: true,
   loadShellProfile: false,

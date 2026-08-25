@@ -190,6 +190,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   cellWidth: "compact",
   completionStyle: "inline",
   bellMode: "both",
+  renderTerminalMath: true,
   tabPosition: "side",
   backgroundColor: undefined,
   accentColor: undefined,
@@ -653,6 +654,7 @@ function normalizeAppSettings(value: Partial<AppSettings> | null | undefined): A
     bellMode: value?.bellMode === "off" || value?.bellMode === "flash" || value?.bellMode === "sound" || value?.bellMode === "both"
       ? value.bellMode
       : ((value as { bellSound?: boolean } | null | undefined)?.bellSound === false ? "flash" : "both"),
+    renderTerminalMath: value?.renderTerminalMath !== false,
     tabPosition: value?.tabPosition === "top" || value?.tabPosition === "side" ? value.tabPosition : "side",
     backgroundColor: typeof value?.backgroundColor === "string" && /^#[0-9a-fA-F]{6}$/.test(value.backgroundColor) ? value.backgroundColor.toLowerCase() : undefined,
     accentColor: typeof value?.accentColor === "string" && /^#[0-9a-fA-F]{6}$/.test(value.accentColor) ? value.accentColor.toLowerCase() : undefined,
