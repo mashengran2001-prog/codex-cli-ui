@@ -112,6 +112,7 @@ npm run dist
 
 - 自动查找本机 `claude` 命令（优先 npm 全局包里的原生 `claude.exe`；也可用 `CLAUDE_UI_CLI_PATH` 指定路径）
 - 若检测到 `~/.claude/settings.json` 的 `env`（例如 cc-switch 写入的 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` 与模型覆盖），Provider 会**显式继承**该配置并删除全局 `ANTHROPIC_API_KEY`，避免代理模式下被全局密钥抢占导致 403
+- Provider 会探测 `ANTHROPIC_BASE_URL` 指向的本地端口；cc-switch 未运行时侧栏会明确提示“cc-switch 代理未运行”，若保存过 API Key 会自动回退使用，无需改配置
 - 未使用 cc-switch 时，可在侧栏 Claude 的 Provider 区输入 Anthropic API Key，加密保存在本机
 - 会话通过 `claude -p --output-format stream-json --verbose` 以结构化事件流运行，界面解析为回答 / 推理 / 工具调用；`CLAUDE_CODE_MAX_RETRIES=0`，认证失败时不会长时间重试卡住
 
@@ -213,7 +214,7 @@ Git 状态抽屉支持：
 | 启动集成 | PowerShell launcher、打开 PowerShell/CMD 时唤起工作台 |
 | 通知 | 完成通知（90 秒自动关闭）、托盘 agent 提醒、CLI 生命周期 |
 | 代理 | 代理地址与绕过列表（仅注入工作台内启动的 CLI 子进程） |
-| 关于 | 版本、检查更新（GitHub Releases） |
+| 关于 | 版本、检查更新（GitHub Releases）、诊断（运行时长、崩溃恢复状态、输入延迟探针、启动日志目录） |
 
 非默认值标记：设置项若被改过，行尾会显示“已修改”圆点，改回默认即消失，方便排查配置。
 
@@ -303,7 +304,15 @@ codex login
 
 这是设计行为：关闭窗口默认最小化到托盘，终端进程不受影响；重新打开 UI 会附着到原有标签与回放缓冲。应用**完全退出**时 PTY 才会终止。
 
-### 12.6 修改源码后如何验证
+### 12.6 Claude 提示“cc-switch 代理未运行”
+
+先确认 cc-switch 是否已启动（它通过 `~/.claude/settings.json` 的 env 注入本地代理）。未启动时：
+
+- 侧栏 Claude 的 Provider 区会明确显示代理未运行
+- 若之前在侧栏保存过 Anthropic API Key，发送任务会自动回退使用该 Key
+- 否则先启动 cc-switch，或在侧栏 Claude 的凭据框里填写 API Key
+
+### 12.7 修改源码后如何验证
 
 ```powershell
 npm run build    # 类型检查 + 前端构建

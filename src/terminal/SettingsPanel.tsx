@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { BellRing, Brain, Check, ChevronDown, Command, Download, ExternalLink, FileCode2, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Pencil, Plug, Plus, RotateCcw, Search, Server, TerminalSquare, Trash2, Undo2, X, type LucideIcon } from "lucide-react";
+import { Activity, BellRing, Brain, Check, ChevronDown, Command, Download, ExternalLink, FileCode2, FolderOpen, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Pencil, Plug, Plus, RotateCcw, Search, Server, TerminalSquare, Trash2, Undo2, X, type LucideIcon } from "lucide-react";
 import BrandIcon, { type BrandIconName } from "../BrandIcon";
 import { chordFromEvent, isModifierOnly, modifierPrefix, setKeybindingCaptureActive } from "../keybindings";
-import type { AppSettings, CliLifecycleStatus, CliProfile, CliToolInfo, KeybindingAction, ShellProfile, SshProfile, TerminalThemeName, UpdateCheckResult } from "../types";
+import type { AppSettings, CliLifecycleStatus, CliProfile, CliToolInfo, DiagnosticsInfo, KeybindingAction, LatencyProbeResult, ShellProfile, SshProfile, TerminalThemeName, UpdateCheckResult } from "../types";
 import { DEFAULT_KEYBINDINGS } from "../types";
 import { getSettingsCopy } from "../i18n";
 import { terminalThemes } from "./themes";
@@ -49,6 +49,16 @@ interface SettingsPanelProps {
   onClose(): void;
 }
 
+function formatDuration(ms: number) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
 export default function SettingsPanel({ settings, shells, cliTools, cliLifecycleStatus, cliLifecycleBusy, onChange, onCliLifecycleToggle, onConnectSsh, onClose }: SettingsPanelProps) {
   const [newName, setNewName] = useState("");
   const [newCommand, setNewCommand] = useState("");
@@ -90,6 +100,27 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
   const [profileError, setProfileError] = useState(false);
   const [updateState, setUpdateState] = useState<"idle" | "checking" | "done" | "error">("idle");
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsInfo | null>(null);
+  const [latency, setLatency] = useState<LatencyProbeResult | null>(null);
+  const [latencyBusy, setLatencyBusy] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void window.codex.getDiagnosticsInfo()
+      .then((next) => { if (!cancelled) setDiagnostics(next); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const measureLatency = async () => {
+    setLatencyBusy(true);
+    setLatency(null);
+    try {
+      setLatency(await window.codex.probeInputLatency());
+    } catch (error) {
+      setLatency({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setLatencyBusy(false);
+    }
+  };
   const refreshSshHosts = useCallback(() => {
     void window.codex.listSshProfiles()
       .then(setSshHosts)
@@ -485,6 +516,28 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
             {updateState === "done" && !updateResult?.latest ? <span className="settings-update-result">{copy.updateNone}</span> : null}
             {updateState === "error" ? <span className="settings-update-result error">{updateResult?.error || copy.updateCheckFailed}</span> : null}
           </div>
+          <div className="settings-group-divider" />
+          <h3>{copy.diagnostics}</h3>
+          <div className="settings-row"><label>{copy.diagnosticsUptime}</label><span>{formatDuration(diagnostics?.uptimeMs ?? 0)}</span></div>
+          <div className="settings-row"><label>{copy.diagnosticsPtyCount}</label><span>{diagnostics?.ptyCount ?? 0}</span></div>
+          <div className="settings-row">
+            <label>{copy.diagnosticsLatency}</label>
+            <button className="settings-update-button" disabled={latencyBusy} onClick={() => void measureLatency()}>
+              {latencyBusy ? <LoaderCircle className="spin" size={12} /> : <Activity size={12} />}
+              {copy.measureLatency}
+            </button>
+            {latency && <span className={latency.ok ? "settings-update-result" : "settings-update-result error"}>{latency.ok ? copy.latencyResult(latency.latencyMs ?? 0) : latency.error === "pane_not_found" ? copy.latencyProbeNoTerminal : latency.error === "busy" ? copy.latencyProbeBusy : latency.error}</span>}
+          </div>
+          <div className="settings-row">
+            <label>{copy.diagnosticsQuarantine}</label>
+            <span>{diagnostics?.quarantine.quarantined ? copy.quarantineActive : copy.quarantineOk}</span>
+            {typeof diagnostics?.runtimeState.failures === "number" && diagnostics.runtimeState.failures > 0 && <small className="settings-update-result">{copy.diagnosticsFailures(diagnostics.runtimeState.failures)}</small>}
+          </div>
+          <div className="settings-row">
+            <label>{copy.diagnosticsBootLog}</label>
+            <button className="settings-update-button" onClick={() => { if (diagnostics?.userData) void window.codex.revealPath(diagnostics.userData); }}><FolderOpen size={12} />{copy.openBootTrace}</button>
+          </div>
+          <p className="keymap-footer-hint">{copy.latencyProbeHint}</p>
         </section>
           </div>
         </div>

@@ -3274,6 +3274,72 @@ ipcMain.handle("terminal:quarantine-status", () => ({
   snapshotPath: terminalQuarantinePath,
 }));
 
+ipcMain.handle("diagnostics:info", () => {
+  let runtimeState: { cleanExit?: boolean; failures?: number; startedAt?: number; exitedAt?: number } = {};
+  try {
+    runtimeState = JSON.parse(readFileSync(terminalRuntimeStatePath(), "utf8")) as typeof runtimeState;
+  } catch {
+    // 首次启动或状态文件缺失时返回默认值。
+  }
+  return {
+    appVersion: app.getVersion(),
+    electronVersion: process.versions.electron ?? "",
+    userData: app.getPath("userData"),
+    bootTracePath: join(app.getPath("userData"), "boot-trace.log"),
+    uptimeMs: Date.now() - bootStartedAt,
+    ptyCount: [...terminalSessions.values()].filter((session) => session.status === "running").length,
+    runtimeState,
+    quarantine: { quarantined: terminalRestoreQuarantined, snapshotPath: terminalQuarantinePath },
+  };
+});
+
+ipcMain.handle("terminal:latency-probe", async (_event, paneId: unknown) => {
+  const session = typeof paneId === "string" && paneId.length > 0
+    ? terminalSessions.get(paneId)
+    : [...terminalSessions.values()].find((candidate) => candidate.status === "running") ?? undefined;
+  if (!session || session.status !== "running") return { ok: false, error: "pane_not_found" };
+  // 命令刚结束时 activity 可能还没翻回 idle，最多等 2.5s 再测，避免误报 busy。
+  const isIdle = () => session.activity === "idle";
+  if (!isIdle()) {
+    const idleDeadline = Date.now() + 2_500;
+    while (!isIdle() && Date.now() < idleDeadline) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+    }
+    if (!isIdle()) return { ok: false, error: "busy" };
+  }
+  const startedAt = Date.now();
+  // Windows ConPTY 不响应 DSR/DA 查询，改用“写入唯一标记、测回显”的往返延迟：
+  // 标记经 ConPTY 输入 → shell 回显 → 输出，测量的是用户真实体感的输入延迟。
+  const token = `__PTYPROBE_${Math.random().toString(36).slice(2, 8).toUpperCase()}__`;
+  return await new Promise<{ ok: boolean; latencyMs?: number; error?: string }>((resolveProbe) => {
+    let buffer = "";
+    let subscription: ReturnType<typeof session.pty.onData> | null = null;
+    const finish = (result: { ok: boolean; latencyMs?: number; error?: string }) => {
+      clearTimeout(timer);
+      subscription?.dispose();
+      resolveProbe(result);
+    };
+    const timer = setTimeout(() => finish({ ok: false, error: "timeout" }), 5_000);
+    const onData = (chunk: string) => {
+      buffer = `${buffer}${chunk}`.slice(-256);
+      if (!buffer.includes(token)) return;
+      finish({ ok: true, latencyMs: Date.now() - startedAt });
+      // 回退删除输入的标记，保持终端干净；清理结果本身无需等待。
+      try {
+        session.pty.write("\b".repeat(token.length));
+      } catch {
+        // 清理失败不影响测量结果。
+      }
+    };
+    subscription = session.pty.onData(onData);
+    try {
+      session.pty.write(token);
+    } catch (error) {
+      finish({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+});
+
 ipcMain.handle("terminal:shells", () => detectedShells.map(({ args: _args, ...profile }) => profile));
 ipcMain.handle("terminal:cli-tools", () => cliToolsInfo());
 

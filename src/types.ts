@@ -412,6 +412,32 @@ export interface PersistedState {
   activeProviderId: AgentProviderId;
 }
 
+export interface DiagnosticsInfo {
+  /** 应用与运行环境版本。 */
+  appVersion: string;
+  electronVersion: string;
+  /** Electron 用户数据目录（快照/运行时状态所在）。 */
+  userData: string;
+  bootTracePath: string;
+  /** 主进程运行时长（毫秒）。 */
+  uptimeMs: number;
+  /** 当前存活终端 pane 数。 */
+  ptyCount: number;
+  /** 崩溃守卫的持久化运行时状态。 */
+  runtimeState: { cleanExit?: boolean; failures?: number; startedAt?: number; exitedAt?: number };
+  /** 终端快照崩溃隔离状态。 */
+  quarantine: { quarantined: boolean; snapshotPath: string | null };
+}
+
+export interface LatencyProbeResult {
+  ok: boolean;
+  /** 输入到回显的往返毫秒数（DSR 光标位置查询）。 */
+  latencyMs?: number;
+  row?: number;
+  col?: number;
+  error?: string;
+}
+
 export interface UpdateCheckResult {
   /** 最新发布 tag，例如 v1.3.0。 */
   latest?: string;
@@ -445,6 +471,8 @@ export interface CodexBridge {
   getWindowIconSize(): Promise<{ width: number; height: number } | null>;
   getDefaultSettings(): Promise<Partial<AppSettings>>;
   checkForUpdates(): Promise<UpdateCheckResult>;
+  getDiagnosticsInfo(): Promise<DiagnosticsInfo>;
+  probeInputLatency(paneId?: string): Promise<LatencyProbeResult>;
   getShellProfilePath(shellId: string): Promise<string | null>;
   openShellProfile(shellId: string): Promise<boolean>;
   openTerminal(path: string): Promise<boolean>;

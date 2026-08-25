@@ -257,6 +257,8 @@ export async function installMockBridge(page) {
         return true;
       },
       getTerminalQuarantineStatus: async () => ({ quarantined: false, snapshotPath: null }),
+      getDiagnosticsInfo: async () => ({ appVersion: "0.2.0", electronVersion: "mock", userData: "C:\\mock\\user-data", bootTracePath: "C:\\mock\\user-data\\boot-trace.log", uptimeMs: 42_000, ptyCount: terminalSessions.filter((item) => item.status === "running").length, runtimeState: { cleanExit: true, failures: 0 }, quarantine: { quarantined: false, snapshotPath: null } }),
+      probeInputLatency: async () => ({ ok: true, latencyMs: 12, row: 3, col: 5 }),
       listDirectory: async (_root, path) => [
         { name: "src", path: `${path}\\src`, type: "directory" },
         { name: "README.md", path: `${path}\\README.md`, type: "file", size: 2113 },

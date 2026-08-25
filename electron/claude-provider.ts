@@ -4,6 +4,7 @@ import { existsSync, readdirSync, statSync, type Dirent } from "node:fs";
 import { readFileSync } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
+import { connect } from "node:net";
 import { homedir } from "node:os";
 import { basename, join, normalize, resolve } from "node:path";
 import type {
@@ -35,6 +36,54 @@ interface ClaudeSessionFile {
 const PROVIDER_ID = "claude" as const;
 const MAX_SESSION_BYTES = 30 * 1024 * 1024;
 const MAX_SESSION_FILES = 250;
+
+const PROXY_PROBE_TTL_MS = 1_500;
+let proxyProbeCache: { key: string; at: number; ok: boolean } | null = null;
+
+function probeProxyEndpoint(baseUrl: string): Promise<boolean> {
+  return new Promise((resolveProbe) => {
+    try {
+      const url = new URL(baseUrl);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        resolveProbe(true);
+        return;
+      }
+      const host = url.hostname || "127.0.0.1";
+      const port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
+      if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+        resolveProbe(true);
+        return;
+      }
+      const socket = connect({ host, port });
+      const timer = setTimeout(() => {
+        socket.destroy();
+        resolveProbe(false);
+      }, 700);
+      socket.once("connect", () => {
+        clearTimeout(timer);
+        socket.destroy();
+        resolveProbe(true);
+      });
+      socket.once("error", () => {
+        clearTimeout(timer);
+        socket.destroy();
+        resolveProbe(false);
+      });
+    } catch {
+      resolveProbe(true);
+    }
+  });
+}
+
+async function proxyHealth(baseUrl: string): Promise<"up" | "down"> {
+  const now = Date.now();
+  if (proxyProbeCache && proxyProbeCache.key === baseUrl && now - proxyProbeCache.at < PROXY_PROBE_TTL_MS) {
+    return proxyProbeCache.ok ? "up" : "down";
+  }
+  const ok = await probeProxyEndpoint(baseUrl);
+  proxyProbeCache = { key: baseUrl, at: now, ok };
+  return ok ? "up" : "down";
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -156,13 +205,24 @@ function claudeCapabilities() {
   };
 }
 
-async function getClaudeInfo(): Promise<AgentProviderInfo> {
+async function getClaudeInfo(storedCredential?: string | null): Promise<AgentProviderInfo> {
   const executable = findClaudeExecutable();
   const result = await runClaudeVersion(executable);
   const available = result.code === 0;
   const settingsEnv = claudeSettingsEnv();
   const managedAuth = Boolean(settingsEnv.ANTHROPIC_BASE_URL || settingsEnv.ANTHROPIC_AUTH_TOKEN);
-  const configured = available && (hasClaudeCredential() || managedAuth);
+  let proxyDown = false;
+  let proxyUrl = "";
+  if (settingsEnv.ANTHROPIC_BASE_URL) {
+    proxyUrl = settingsEnv.ANTHROPIC_BASE_URL;
+    proxyDown = (await proxyHealth(proxyUrl)) === "down";
+  }
+  const fallbackCredential = Boolean(storedCredential);
+  const configured = available
+    ? proxyDown
+      ? fallbackCredential
+      : (hasClaudeCredential() || managedAuth || fallbackCredential)
+    : false;
   const modelOverrides: Array<[string, string, string]> = [
     ["ANTHROPIC_DEFAULT_OPUS_MODEL", "Claude Opus", "opus"],
     ["ANTHROPIC_DEFAULT_SONNET_MODEL", "Claude Sonnet", "sonnet"],
@@ -172,13 +232,19 @@ async function getClaudeInfo(): Promise<AgentProviderInfo> {
     id: PROVIDER_ID,
     name: "Anthropic Claude Code",
     shortName: "Claude",
-    description: "Claude Code CLI with stream-json events and resumable sessions",
+    description: proxyDown
+      ? (fallbackCredential ? "cc-switch 代理未运行，已回退到本地 API Key" : "cc-switch 代理未运行，无可用凭据")
+      : "Claude Code CLI with stream-json events and resumable sessions",
     available,
     configured,
     cliAvailable: available,
     version: available ? result.output : undefined,
     executable,
-    error: available ? undefined : result.errorOutput || `Claude 退出码 ${result.code}`,
+    error: available
+      ? proxyDown && !fallbackCredential
+        ? `cc-switch 代理 ${proxyUrl} 未运行，请先启动 cc-switch，或在侧栏填写 Anthropic API Key`
+        : undefined
+      : result.errorOutput || `Claude 退出码 ${result.code}`,
     installCommand: "npm install -g @anthropic-ai/claude-code",
     defaultModel: "",
     models: modelOverrides.map(([key, label, alias]) => ({
@@ -459,8 +525,9 @@ export class ClaudeProvider implements AgentProvider {
 
   constructor(private readonly options: ClaudeProviderOptions) {}
 
-  getInfo(): Promise<AgentProviderInfo> {
-    return getClaudeInfo();
+  async getInfo(): Promise<AgentProviderInfo> {
+    const storedCredential = await this.options.getCredential();
+    return getClaudeInfo(storedCredential);
   }
 
   listSessions(cwd: string) {
@@ -484,14 +551,20 @@ export class ClaudeProvider implements AgentProvider {
 
     const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1", CLAUDE_CODE_MAX_RETRIES: "0" };
     const settingsEnv = claudeSettingsEnv();
-    if (settingsEnv.ANTHROPIC_BASE_URL || settingsEnv.ANTHROPIC_AUTH_TOKEN) {
+    const storedCredential = await this.options.getCredential();
+    const proxyBaseUrl = settingsEnv.ANTHROPIC_BASE_URL;
+    const proxyDown = proxyBaseUrl ? (await proxyHealth(proxyBaseUrl)) === "down" : false;
+    const managedAuth = Boolean(proxyBaseUrl || settingsEnv.ANTHROPIC_AUTH_TOKEN);
+    if (managedAuth && !(proxyBaseUrl && proxyDown)) {
       // cc-switch / settings.json 管理认证与本地代理：显式走配置里的端点，避免全局 API Key 抢占。
       delete env.ANTHROPIC_API_KEY;
       if (settingsEnv.ANTHROPIC_BASE_URL) env.ANTHROPIC_BASE_URL = settingsEnv.ANTHROPIC_BASE_URL;
       if (settingsEnv.ANTHROPIC_AUTH_TOKEN) env.ANTHROPIC_AUTH_TOKEN = settingsEnv.ANTHROPIC_AUTH_TOKEN;
-    } else {
-      const storedCredential = await this.options.getCredential();
-      if (storedCredential && !env.ANTHROPIC_API_KEY) env.ANTHROPIC_API_KEY = storedCredential;
+    } else if (storedCredential) {
+      // cc-switch 代理未运行或未配置：回退到本地保存的 API Key。
+      delete env.ANTHROPIC_BASE_URL;
+      delete env.ANTHROPIC_AUTH_TOKEN;
+      if (!env.ANTHROPIC_API_KEY) env.ANTHROPIC_API_KEY = storedCredential;
     }
 
     const child = spawnClaudeProcess(executable, args, {

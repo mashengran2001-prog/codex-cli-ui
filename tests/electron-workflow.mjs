@@ -65,6 +65,13 @@ try {
   const quarantineStatus = await window.evaluate(async () => window.codex.getTerminalQuarantineStatus());
   assert.deepEqual(quarantineStatus, { quarantined: false, snapshotPath: null });
   console.log("electron-quarantine: IPC status channel answers normally");
+  const diagnostics = await window.evaluate(async () => window.codex.getDiagnosticsInfo());
+  assert.ok(diagnostics && typeof diagnostics.uptimeMs === "number" && diagnostics.uptimeMs >= 0, JSON.stringify(diagnostics));
+  assert.ok(diagnostics.runtimeState && typeof diagnostics.runtimeState.failures === "number", JSON.stringify(diagnostics.runtimeState));
+  assert.deepEqual(diagnostics.quarantine, { quarantined: false, snapshotPath: null });
+  assert.ok(typeof diagnostics.ptyCount === "number" && diagnostics.ptyCount >= 0);
+  assert.ok(typeof diagnostics.appVersion === "string" && diagnostics.appVersion.length > 0);
+  console.log("electron-diagnostics: diagnostics info IPC answers normally");
   const detectedShells = await window.evaluate(async () => window.codex.listShells());
   assert.ok(detectedShells.some((shell) => shell.id === "nu" && shell.kind === "nushell" && shell.label === "Nushell"), JSON.stringify(detectedShells.map((shell) => ({ id: shell.id, kind: shell.kind }))));
   console.log("electron-shells: Nushell detected via PATH (Nebula v1.2 shell 分类注入)");
@@ -120,6 +127,13 @@ try {
   await window.keyboard.press("Enter");
   await window.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent?.includes("NEBULA_PTY_OK"), undefined, { timeout: 30_000 });
  assert.equal(await window.evaluate(async () => (await window.codex.listTerminals()).length), 1);
+  let latencyProbe = null;
+  for (let attempt = 0; attempt < 3 && !latencyProbe?.ok; attempt++) {
+    latencyProbe = await window.evaluate(async () => window.codex.probeInputLatency());
+    if (!latencyProbe?.ok && attempt < 2) await new Promise((resolveWait) => setTimeout(resolveWait, 1_000));
+  }
+  assert.ok(latencyProbe?.ok === true && typeof latencyProbe.latencyMs === "number" && latencyProbe.latencyMs >= 0, JSON.stringify(latencyProbe));
+  console.log(`electron-latency: input latency probe ${latencyProbe.latencyMs}ms`);
   // 通过真实终端执行官方 hook 脚本注入 CLI 生命周期事件（对标 Nebula runtime_task_state）：
   // 终端 PTY 环境自带 CODEX_UI_NOTIFY_PIPE / CODEX_UI_SESSION_ID，调用形态与生产 config.toml 的 notify 命令一致
   const aiTerminalId = (await window.evaluate(async () => (await window.codex.listTerminals())[0].id));
