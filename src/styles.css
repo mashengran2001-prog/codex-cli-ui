@@ -1418,6 +1418,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-imported-font small { color: var(--t-muted); }
 .settings-imported-font button { display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--t-muted); cursor: pointer; }
 .settings-imported-font button:hover { color: var(--t-danger); }
+.settings-backup-categories { display: flex; flex-direction: column; gap: 2px; padding: 2px 0 0 16px; }
+.settings-check-row { display: flex; align-items: center; gap: 8px; min-height: 26px; font-size: 10.5px; cursor: pointer; }
+.settings-check-row input { width: 13px; height: 13px; accent-color: var(--t-accent); cursor: pointer; }
+.settings-check-row:has(input:disabled) { opacity: .5; cursor: default; }
+.settings-backup-passphrase { width: 260px; height: 29px; padding: 0 8px; border: 1px solid var(--t-border); border-radius: 5px; background: var(--t-panel-2); color: var(--t-text); font-size: 10px; }
+.settings-backup-passphrase:focus { border-color: var(--t-accent); outline: none; }
 .settings-import-font-status { margin: 0 0 0 16px; font-size: 10px; color: var(--t-text); }
 .settings-import-font-status.error { color: var(--t-danger); }
 .font-picker-list button em.imported { color: var(--t-accent); font-style: normal; font-size: 9px; }

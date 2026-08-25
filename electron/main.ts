@@ -77,6 +77,14 @@ import {
   parseFontFamilyNames,
   supportedFontExtension,
 } from "./font-import";
+import {
+  DEFAULT_BACKUP_SELECTION,
+  exportBackup,
+  restoreBackup,
+  type BackupCategory,
+  type BackupResult,
+  type BackupSelection,
+} from "./encrypted-backup";
 import { CliLifecycleBridge, type CliLifecycleEvent } from "./cli-lifecycle";
 import { ProviderRegistry, type AgentProvider, type ProviderRunContext } from "./provider-registry";
 import { enumerateSystemFonts } from "./system-fonts";
@@ -3149,6 +3157,58 @@ ipcMain.handle("fonts:imported", () => listImportedFonts(app.getPath("userData")
 ipcMain.handle("fonts:delete", (_event, fileName: unknown) => {
   if (typeof fileName !== "string" || !fileName) return false;
   return deleteImportedFont(app.getPath("userData"), fileName);
+});
+
+const BACKUP_CATEGORY_KEYS: BackupCategory[] = [
+  "appearance", "config", "ssh", "session", "directory_history", "command_history", "fonts",
+];
+
+function normalizeBackupSelection(value: unknown): BackupSelection {
+  const source = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const result: BackupSelection = { ...DEFAULT_BACKUP_SELECTION };
+  for (const key of BACKUP_CATEGORY_KEYS) {
+    if (typeof source[key] === "boolean") result[key] = source[key];
+  }
+  return result;
+}
+
+ipcMain.handle("backup:export", async (_event, selectionValue: unknown, passphrase: unknown) => {
+  const selection = normalizeBackupSelection(selectionValue);
+  if (typeof passphrase !== "string" || passphrase.length < 8) return { ok: false, error: "备份密码至少 8 位" } satisfies BackupResult;
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const options: Electron.SaveDialogOptions = {
+    title: "导出加密备份",
+    defaultPath: `codex-cli-ui-backup-${stamp}.nebula-backup`,
+    filters: [{ name: "Nebula Backup", extensions: ["nebula-backup", "bak"] }],
+  };
+  const result = mainWindow && !mainWindow.isDestroyed()
+    ? await dialog.showSaveDialog(mainWindow, options)
+    : await dialog.showSaveDialog(options);
+  if (result.canceled || !result.filePath) return { ok: false, error: "已取消" } satisfies BackupResult;
+  return exportBackup(app.getPath("userData"), selection, passphrase, result.filePath);
+});
+
+ipcMain.handle("backup:restore", async (_event, passphrase: unknown) => {
+  if (typeof passphrase !== "string" || passphrase.length < 8) return { ok: false, error: "备份密码至少 8 位" } satisfies BackupResult;
+  const options: Electron.OpenDialogOptions = {
+    title: "选择加密备份文件",
+    properties: ["openFile"],
+    filters: [{ name: "Nebula Backup", extensions: ["nebula-backup", "bak"] }],
+  };
+  const picked = mainWindow && !mainWindow.isDestroyed()
+    ? await dialog.showOpenDialog(mainWindow, options)
+    : await dialog.showOpenDialog(options);
+  const file = picked.canceled ? null : picked.filePaths[0] ?? null;
+  if (!file) return { ok: false, error: "已取消" } satisfies BackupResult;
+  const result = await restoreBackup(app.getPath("userData"), passphrase, file);
+  if (result.ok) {
+    await Promise.all([loadSettings(), loadSshProfiles()]);
+    sshProfilesReady = Promise.resolve();
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send("backup:restored");
+    }
+  }
+  return result;
 });
 
 ipcMain.handle("dialog:directory", async () => {

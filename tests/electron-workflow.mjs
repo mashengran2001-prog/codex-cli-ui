@@ -114,6 +114,13 @@ try {
       if (attempt === 2) throw error;
     }
   }
+  // 备份分区（加密导出/恢复）应出现在设置页：导航项 + 分类勾选 + 密码框
+  await window.locator(".settings-nav button", { hasText: "备份" }).waitFor({ timeout: 10_000 });
+  await window.locator("#settings-backup").waitFor({ timeout: 10_000 });
+  assert.ok((await window.locator("#settings-backup input[type=checkbox]").count()) >= 5, "backup categories should render checkboxes");
+  assert.equal(await window.locator(".settings-backup-passphrase").count(), 1);
+  assert.equal(await window.getByRole("button", { name: /导出到文件/ }).count(), 1);
+  assert.equal(await window.getByRole("button", { name: /从文件恢复/ }).count(), 1);
   await window.getByLabel("标签栏位置").selectOption("top");
   await window.locator('.terminal-top-tab[data-tab-kind="settings"]').waitFor();
   await window.locator(".terminal-top-tab[data-session-id] .terminal-tab-main").first().click();

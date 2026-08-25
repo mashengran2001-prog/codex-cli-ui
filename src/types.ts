@@ -8,6 +8,32 @@ export type UiDensity = "compact" | "normal" | "comfortable";
 export type KeybindingAction = "command-palette" | "new-terminal" | "split-right" | "split-down" | "pane-next" | "pane-prev" | "quick-terminal" | "open-settings";
 export type AgentProviderId = "codex" | "deepseek" | (string & {});
 
+export type BackupCategory =
+  | "appearance"
+  | "config"
+  | "ssh"
+  | "session"
+  | "directory_history"
+  | "command_history"
+  | "fonts";
+
+export interface BackupSelection {
+  appearance: boolean;
+  config: boolean;
+  ssh: boolean;
+  session: boolean;
+  directory_history: boolean;
+  command_history: boolean;
+  fonts: boolean;
+}
+
+export interface BackupResult {
+  ok: boolean;
+  message?: string;
+  path?: string;
+  error?: string;
+}
+
 export const DEFAULT_KEYBINDINGS: Record<KeybindingAction, string> = {
   "command-palette": "Ctrl+Shift+P",
   "new-terminal": "Ctrl+Shift+T",
@@ -540,6 +566,9 @@ export interface CodexBridge {
   readDocument(root: string, path: string): Promise<DocumentFile | null>;
   readDocumentImage(root: string, path: string): Promise<string | null>;
   exportTerminalSession(sessionId: string, content: string): Promise<string | null>;
+  exportBackup(selection: BackupSelection, passphrase: string): Promise<BackupResult>;
+  restoreBackup(passphrase: string): Promise<BackupResult>;
+  onBackupRestored(listener: () => void): () => void;
   getGitStatus(path: string): Promise<GitStatus>;
   runGitAction(request: GitActionRequest): Promise<OperationResult>;
   listSshProfiles(): Promise<SshProfile[]>;

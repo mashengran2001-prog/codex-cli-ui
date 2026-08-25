@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AgentProviderId, AiForkRequest, AppSettings, CodexBridge, GitActionRequest, LauncherRequest, RunEvent, RunRequest, SftpActionRequest, ShellProfile, SshProfile, TerminalCreateRequest, TerminalEvent, UpdateProgress } from "../src/types";
+import type { AgentProviderId, AiForkRequest, AppSettings, BackupSelection, CodexBridge, GitActionRequest, LauncherRequest, RunEvent, RunRequest, SftpActionRequest, ShellProfile, SshProfile, TerminalCreateRequest, TerminalEvent, UpdateProgress } from "../src/types";
 
 const rendererMode: "webgl" | "dom" =
   typeof process !== "undefined" && process.argv?.includes("--codex-ui-dom-renderer") ? "dom" : "webgl";
@@ -17,6 +17,13 @@ const bridge: CodexBridge = {
   listImportedFonts: () => ipcRenderer.invoke("fonts:imported"),
   importFont: () => ipcRenderer.invoke("fonts:import"),
   deleteImportedFont: (fileName: string) => ipcRenderer.invoke("fonts:delete", fileName),
+  exportBackup: (selection: BackupSelection, passphrase: string) => ipcRenderer.invoke("backup:export", selection, passphrase),
+  restoreBackup: (passphrase: string) => ipcRenderer.invoke("backup:restore", passphrase),
+  onBackupRestored: (listener: () => void) => {
+    const handler = () => listener();
+    ipcRenderer.on("backup:restored", handler);
+    return () => ipcRenderer.removeListener("backup:restored", handler);
+  },
   chooseDirectory: () => ipcRenderer.invoke("dialog:directory"),
   chooseImages: () => ipcRenderer.invoke("dialog:images"),
   chooseBackgroundImage: () => ipcRenderer.invoke("dialog:background-image"),

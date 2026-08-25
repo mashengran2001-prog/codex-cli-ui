@@ -173,6 +173,9 @@ try {
   await page.waitForFunction((previous) => document.querySelector('.terminal-pane-shell[data-active="true"]')?.closest(".terminal-pane-leaf")?.dataset.sessionId !== previous, activeAfterNext);
 
   // 收回多余分屏，恢复单 pane，后续用例保持原布局假设
+  // 若后台任务完成通知 toast 仍显示（90 秒自动关闭），先点掉避免遮挡分屏控件
+  const toastButton = page.locator(".completion-toast");
+  if (await toastButton.count()) await toastButton.click().catch(() => {});
   await page.locator(".terminal-pane-leaf").nth(1).getByRole("button", { name: "关闭分屏" }).click();
   await page.waitForFunction(() => document.querySelectorAll(".terminal-pane-leaf").length === 2);
   await page.locator(".terminal-pane-leaf").nth(1).getByRole("button", { name: "关闭分屏" }).click();

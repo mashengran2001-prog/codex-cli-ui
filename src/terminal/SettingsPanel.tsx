@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { Activity, BellRing, Brain, Check, ChevronDown, Command, Download, ExternalLink, FileCode2, FolderOpen, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Pencil, Plug, Plus, RotateCcw, Search, Server, TerminalSquare, Trash2, Undo2, X, type LucideIcon } from "lucide-react";
+import { Activity, BellRing, Brain, Check, ChevronDown, Command, Download, ExternalLink, FileCode2, FolderOpen, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Pencil, Plug, Plus, RotateCcw, Search, Server, Shield, TerminalSquare, Trash2, Undo2, X, type LucideIcon } from "lucide-react";
 import BrandIcon, { type BrandIconName } from "../BrandIcon";
 import { chordFromEvent, isModifierOnly, modifierPrefix, setKeybindingCaptureActive } from "../keybindings";
-import type { AppSettings, CliLifecycleStatus, CliProfile, CliToolInfo, DiagnosticsInfo, KeybindingAction, LatencyProbeResult, ShellProfile, SshProfile, TerminalThemeName, ImportedFontInfo, ImportFontResult, UpdateCheckResult, UpdateDownloadResult, UpdateProgress } from "../types";
+import type { AppSettings, BackupResult, BackupSelection, CliLifecycleStatus, CliProfile, CliToolInfo, DiagnosticsInfo, KeybindingAction, LatencyProbeResult, ShellProfile, SshProfile, TerminalThemeName, ImportedFontInfo, ImportFontResult, UpdateCheckResult, UpdateDownloadResult, UpdateProgress } from "../types";
 import { DEFAULT_KEYBINDINGS } from "../types";
 import { getSettingsCopy } from "../i18n";
 import { registerImportedFontFaces } from "../importedFonts";
@@ -114,6 +114,10 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
   const [importedFonts, setImportedFonts] = useState<ImportedFontInfo[]>([]);
   const [fontImportStatus, setFontImportStatus] = useState<{ message: string; error?: boolean }>();
   const [fontImportBusy, setFontImportBusy] = useState(false);
+  const [backupSelection, setBackupSelection] = useState<BackupSelection>({ appearance: true, config: false, ssh: false, session: false, directory_history: false, command_history: false, fonts: false });
+  const [backupPassphrase, setBackupPassphrase] = useState("");
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupStatus, setBackupStatus] = useState<{ message: string; error?: boolean }>();
   const [diagnostics, setDiagnostics] = useState<DiagnosticsInfo | null>(null);
   const [latency, setLatency] = useState<LatencyProbeResult | null>(null);
   const [latencyBusy, setLatencyBusy] = useState(false);
@@ -197,6 +201,41 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
       setFontImportStatus({ message: result.error || copy.importFontFailed, error: true });
     }
     setFontImportBusy(false);
+  };
+  const BACKUP_CATEGORY_ROWS: Array<{ key: keyof BackupSelection; label: string }> = [
+    { key: "appearance", label: copy.backupAppearance },
+    { key: "config", label: copy.backupConfig },
+    { key: "ssh", label: copy.backupSsh },
+    { key: "session", label: copy.backupSession },
+    { key: "directory_history", label: copy.backupDirectoryHistory },
+    { key: "command_history", label: copy.backupCommandHistory },
+    { key: "fonts", label: copy.backupFonts },
+  ];
+  const exportBackup = async () => {
+    if (backupBusy) return;
+    if (backupPassphrase.length < 8) { setBackupStatus({ message: copy.backupPassphraseTooShort, error: true }); return; }
+    if (!Object.values(backupSelection).some(Boolean)) { setBackupStatus({ message: copy.backupSelectAtLeastOne, error: true }); return; }
+    setBackupBusy(true);
+    setBackupStatus(undefined);
+    const result = await window.codex.exportBackup(backupSelection, backupPassphrase).catch<BackupResult>(() => ({ ok: false, message: copy.backupCanceled, error: copy.backupCanceled }));
+    setBackupBusy(false);
+    if (result.ok) setBackupStatus({ message: result.message || copy.backupExportSuccess });
+    else setBackupStatus({ message: result.error || result.message || copy.backupCanceled, error: true });
+  };
+  const restoreBackup = async () => {
+    if (backupBusy) return;
+    if (backupPassphrase.length < 8) { setBackupStatus({ message: copy.backupPassphraseTooShort, error: true }); return; }
+    setBackupBusy(true);
+    setBackupStatus(undefined);
+    const result = await window.codex.restoreBackup(backupPassphrase).catch<BackupResult>(() => ({ ok: false, message: copy.backupCanceled, error: copy.backupCanceled }));
+    setBackupBusy(false);
+    if (result.ok) {
+      setBackupStatus({ message: result.message || copy.backupRestoreSuccess });
+      const restored = await window.codex.getAppSettings().catch(() => null);
+      if (restored) onChange(restored);
+    } else {
+      setBackupStatus({ message: result.error || result.message || copy.backupCanceled, error: true });
+    }
   };
   const removeImportedFont = async (fileName: string) => {
     const removed = await window.codex.deleteImportedFont(fileName).catch(() => false);
@@ -324,6 +363,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
     { id: "settings-interaction", label: copy.interaction },
     { id: "settings-proxy", label: copy.proxy },
     { id: "settings-keybindings", label: copy.keybindings },
+    { id: "settings-backup", label: copy.backup },
   ];
   const [activeSection, setActiveSection] = useState("settings-appearance");
   const settingsScrollRef = useRef<HTMLDivElement>(null);
@@ -351,6 +391,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
     "settings-interaction": MousePointerClick,
     "settings-proxy": Globe,
     "settings-keybindings": Keyboard,
+    "settings-backup": Shield,
   };
   const activeLabel = sections.find((item) => item.id === activeSection)?.label ?? sections[0].label;
   return (
@@ -575,6 +616,30 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
             {keymapVisible.size === 0 && <div className="keymap-empty">{copy.keymapNoMatches}</div>}
           </div>
           <p className="keymap-footer-hint">{copy.keymapFooterHint}</p>
+        </section>
+          <div className="settings-group-divider" />
+        <section id="settings-backup">
+          <h2>{copy.backup}</h2>
+          <p className="keymap-footer-hint">{copy.backupHint}</p>
+          <div className="settings-group-divider" />
+          <h3>{copy.backupCategories}</h3>
+          <div className="settings-backup-categories">
+            {BACKUP_CATEGORY_ROWS.map((row) => (
+              <label className="settings-check-row" key={row.key}>
+                <input type="checkbox" checked={backupSelection[row.key]} disabled={backupBusy} onChange={(event) => setBackupSelection((prev) => ({ ...prev, [row.key]: event.target.checked }))} />
+                <span>{row.label}</span>
+              </label>
+            ))}
+          </div>
+          <div className="settings-row">
+            <label>{copy.backupPassphrase}</label>
+            <input type="password" className="settings-backup-passphrase" value={backupPassphrase} disabled={backupBusy} placeholder={copy.backupPassphrasePlaceholder} onChange={(event) => setBackupPassphrase(event.target.value)} />
+          </div>
+          <div className="settings-row settings-update-row">
+            <button className="settings-update-button" disabled={backupBusy} onClick={() => void exportBackup()}><Download size={12} />{backupBusy ? copy.backupBusy : copy.backupExport}</button>
+            <button className="settings-update-button" disabled={backupBusy} onClick={() => void restoreBackup()}><Undo2 size={12} />{backupBusy ? copy.backupBusy : copy.backupRestore}</button>
+            {backupStatus ? <span className={`settings-update-result ${backupStatus.error ? "error" : ""}`}>{backupStatus.message}</span> : null}
+          </div>
         </section>
           <div className="settings-group-divider" />
         <section id="settings-about">

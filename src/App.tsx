@@ -188,6 +188,17 @@ export default function App() {
   const [pendingDanger, setPendingDanger] = useState<PendingDanger | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showCompletionToast = useCallback((value: ToastState) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast(value);
+    // 对齐 Nebula v1.3：完成通知 90 秒自动关闭，避免常驻遮挡终端控件。
+    toastTimerRef.current = setTimeout(() => {
+      toastTimerRef.current = null;
+      setToast(null);
+    }, 90_000);
+  }, []);
+  useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
   const projectsRef = useRef(projects);
   const conversationsRef = useRef(conversations);
   const selectedConversationRef = useRef(selectedConversationId);
@@ -313,7 +324,7 @@ export default function App() {
         }));
       }));
       if (conversationId && selectedConversationRef.current !== conversationId && state === "done") {
-        setToast({ id: conversationId, title: completedTitle });
+        showCompletionToast({ id: conversationId, title: completedTitle });
       }
       runConversationRef.current.delete(event.runId);
       runStderrRef.current.delete(event.runId);
@@ -714,7 +725,7 @@ export default function App() {
         <div className="error-toast"><AlertTriangle size={15} /><span>{sanitizeDisplayText(error)}</span><button title={copy.close} onClick={() => setError(null)}><X size={13} /></button></div>
       )}
       {toast && (
-        <button className="completion-toast" onClick={() => { setSelectedConversationId(toast.id); setToast(null); }}>
+        <button className="completion-toast" onClick={() => { setSelectedConversationId(toast.id); setToast(null); if (toastTimerRef.current) { clearTimeout(toastTimerRef.current); toastTimerRef.current = null; } }}>
           <CheckCircle2 size={17} /><span><strong>{copy.completed}</strong><small>{sanitizeDisplayText(toast.title)}</small></span>
         </button>
       )}
