@@ -62,6 +62,7 @@ const bridge: CodexBridge = {
   removeDirectory: (path: string) => ipcRenderer.invoke("directories:remove", path),
   listTerminals: () => ipcRenderer.invoke("terminal:list"),
   getTerminalQuarantineStatus: () => ipcRenderer.invoke("terminal:quarantine-status"),
+  restoreQuarantinedSnapshot: () => ipcRenderer.invoke("terminal:restore-quarantine"),
   createTerminal: (request: TerminalCreateRequest) => ipcRenderer.invoke("terminal:create", request),
   resumeAiSession: (id: string) => ipcRenderer.invoke("terminal:ai-resume", id),
   forkAiSession: (request: AiForkRequest) => ipcRenderer.invoke("terminal:ai-fork", request),

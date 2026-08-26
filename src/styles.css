@@ -631,6 +631,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .terminal-quarantine button em { font-style: normal; }
 .terminal-quarantine .terminal-quarantine-dismiss { padding: 4px; border-color: transparent; color: #96968e; }
 .terminal-quarantine .terminal-quarantine-dismiss:hover { color: #e1e4de; background: #31372f; }
+.terminal-quarantine .terminal-quarantine-restore { border-color: #8a6d2f; color: #e8c56a; }
+.terminal-quarantine .terminal-quarantine-restore:hover { background: #3a3325; }
+.terminal-quarantine .terminal-quarantine-restore:disabled { opacity: 0.55; cursor: default; }
 
 .modal-overlay { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 24px; background: rgb(29 29 26 / 32%); backdrop-filter: blur(2px); -webkit-app-region: no-drag; }
 .confirm-dialog { width: min(100%, 480px); padding: 19px; border: 1px solid #cfc7c2; border-radius: 8px; background: #fbfbf9; box-shadow: 0 20px 56px rgb(25 25 22 / 23%); }

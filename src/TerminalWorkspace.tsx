@@ -360,6 +360,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [quarantine, setQuarantine] = useState<{ quarantined: boolean; snapshotPath?: string | null }>();
   const [quarantineDismissed, setQuarantineDismissed] = useState(false);
+  const [quarantineRestoreBusy, setQuarantineRestoreBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -371,6 +372,23 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
     });
     return () => { cancelled = true; };
   }, []);
+  const restoreQuarantine = async () => {
+    if (typeof window.codex.restoreQuarantinedSnapshot !== "function") return;
+    setQuarantineRestoreBusy(true);
+    try {
+      const result = await window.codex.restoreQuarantinedSnapshot();
+      if (result.ok) {
+        setQuarantine({ quarantined: false, snapshotPath: null });
+        setQuarantineDismissed(true);
+      } else {
+        onError(result.error || workbenchCopy.quarantineRestoreFailed);
+      }
+    } catch (reason) {
+      onError(reason instanceof Error ? reason.message : workbenchCopy.quarantineRestoreFailed);
+    } finally {
+      setQuarantineRestoreBusy(false);
+    }
+  };
   const [moreMenuPosition, setMoreMenuPosition] = useState({ left: 8, top: 48 });
   const [unread, setUnread] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<{ sessionId: string; title: string; message: string }>();
@@ -1395,6 +1413,7 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
           <TriangleAlert size={15} aria-hidden="true" />
           <span><strong>{workbenchCopy.quarantineTitle}</strong><small>{workbenchCopy.quarantineMessage}</small></span>
           {quarantine.snapshotPath && <button title={workbenchCopy.quarantineReveal} onClick={() => void window.codex.revealPath(quarantine.snapshotPath!)}><FolderOpen size={12} aria-hidden="true" /><em>{workbenchCopy.quarantineReveal}</em></button>}
+          <button className="terminal-quarantine-restore" disabled={quarantineRestoreBusy} onClick={() => void restoreQuarantine()} title={workbenchCopy.quarantineRestore}>{quarantineRestoreBusy ? <LoaderCircle className="spin" size={12} aria-hidden="true" /> : <RotateCcw size={12} aria-hidden="true" />}<em>{workbenchCopy.quarantineRestore}</em></button>
           <button className="terminal-quarantine-dismiss" title={workbenchCopy.quarantineDismiss} onClick={() => setQuarantineDismissed(true)}><X size={13} aria-hidden="true" /></button>
         </div>
       )}

@@ -17,7 +17,7 @@ import {
 } from "electron";
 import { spawn, execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync, type Dirent, type Stats } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync, type Dirent, type Stats } from "node:fs";
 import { access, appendFile, lstat, mkdir, readFile, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
@@ -983,6 +983,7 @@ function initializeTerminalCrashGuard() {
       terminalRestoreQuarantined = true;
       terminalQuarantinePath = quarantine;
       failures = 0;
+      pruneTerminalQuarantineFiles();
     } catch {
       // An unreadable snapshot is already ignored by the restore path.
     }
@@ -994,6 +995,54 @@ function initializeTerminalCrashGuard() {
   }
 }
 
+const MAX_QUARANTINE_FILES = 3;
+
+function pruneTerminalQuarantineFiles() {
+  try {
+    const dir = dirname(terminalSnapshotsPath());
+    const files = readdirSync(dir)
+      .filter((name) => /^terminal-sessions\.crashed-\d+\.json$/.test(name))
+      .map((name) => ({ path: join(dir, name), mtime: statSync(join(dir, name)).mtimeMs }))
+      .sort((left, right) => right.mtime - left.mtime);
+    for (const file of files.slice(MAX_QUARANTINE_FILES)) {
+      try { unlinkSync(file.path); } catch { /* 尽力而为 */ }
+    }
+  } catch {
+    // 隔离文件清理失败不阻塞启动。
+  }
+}
+
+async function restoreTerminalQuarantine(owner: Electron.WebContents): Promise<{ ok: boolean; restored: number; error?: string }> {
+  if (!terminalQuarantinePath) return { ok: false, restored: 0, error: "没有隔离快照" };
+  try {
+    const value = JSON.parse(await readFile(terminalQuarantinePath, "utf8")) as { version?: number; sessions?: TerminalSnapshot[] };
+    if (value.version !== 1 || !Array.isArray(value.sessions)) return { ok: false, restored: 0, error: "隔离快照格式无效" };
+    let restored = 0;
+    for (const snapshot of value.sessions.slice(0, MAX_TERMINALS)) {
+      if (!snapshot || !UUID_PATTERN.test(snapshot.id) || !isDirectory(snapshot.cwd) || terminalSessions.has(snapshot.id)) continue;
+      try {
+        createTerminalSession(owner, {
+          cwd: snapshot.cwd,
+          cols: terminalDimension(snapshot.cols, 100, 400),
+          rows: terminalDimension(snapshot.rows, 30, 200),
+        }, snapshot);
+        restored += 1;
+      } catch {
+        // 单个无效快照不阻止其余会话恢复。
+      }
+    }
+    terminalRestoreQuarantined = false;
+    terminalQuarantinePath = null;
+    try {
+      writeFileSync(terminalRuntimeStatePath(), JSON.stringify({ cleanExit: false, failures: 0, startedAt: Date.now() }, null, 2), "utf8");
+    } catch {
+      // 状态文件写入失败不阻断恢复结果。
+    }
+    return { ok: true, restored };
+  } catch (reason) {
+    return { ok: false, restored: 0, error: reason instanceof Error ? reason.message : "恢复隔离快照失败" };
+  }
+}
 function markTerminalRuntimeClean() {
   try {
     writeFileSync(terminalRuntimeStatePath(), JSON.stringify({ cleanExit: true, failures: 0, exitedAt: Date.now() }, null, 2), "utf8");
@@ -3599,6 +3648,8 @@ ipcMain.handle("terminal:quarantine-status", () => ({
   quarantined: terminalRestoreQuarantined,
   snapshotPath: terminalQuarantinePath,
 }));
+
+ipcMain.handle("terminal:restore-quarantine", async (event) => restoreTerminalQuarantine(event.sender));
 
 ipcMain.handle("diagnostics:info", () => {
   let runtimeState: { cleanExit?: boolean; failures?: number; startedAt?: number; exitedAt?: number } = {};

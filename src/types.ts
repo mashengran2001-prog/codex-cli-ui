@@ -543,6 +543,12 @@ export interface SettingsUpdateState {
   busy: boolean;
 }
 
+export interface QuarantineRestoreResult {
+  ok: boolean;
+  restored: number;
+  error?: string;
+}
+
 export interface PackageManagerInfo {
   source: "winget" | "scoop" | null;
   command: string | null;
@@ -599,6 +605,7 @@ export interface CodexBridge {
   onUpdateProgress(listener: (progress: UpdateProgress) => void): () => void;
   getPackageManagerStatus(): Promise<PackageManagerInfo>;
   runPackageManagerUpdate(): Promise<PackageManagerRunResult>;
+  restoreQuarantinedSnapshot(): Promise<QuarantineRestoreResult>;
   getDiagnosticsInfo(): Promise<DiagnosticsInfo>;
   probeInputLatency(paneId?: string): Promise<LatencyProbeResult>;
   getShellProfilePath(shellId: string): Promise<string | null>;

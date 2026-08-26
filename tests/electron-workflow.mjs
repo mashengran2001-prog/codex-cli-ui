@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { _electron as electron } from "playwright";
 import electronPath from "electron";
 import { createElectronFixture, launcherArgs } from "./electron-fixture.mjs";
@@ -472,12 +472,28 @@ try {
   try { execFileSync("powershell.exe", ["-NoProfile", "-Command", `Remove-Item -LiteralPath '${shellStartupRegistry}' -Recurse -Force -ErrorAction SilentlyContinue`], { windowsHide: true }); } catch {}
 }
 
-// --- 崩溃隔离：连续崩溃后快照被隔离，UI 显示横幅且不恢复标签 ---
+// --- 崩溃隔离：连续崩溃后快照被隔离，UI 显示横幅；一键恢复 + 保留最近 3 份 ---
 const quarantineUserData = join(testRoot, "quarantine-user-data");
 await rm(quarantineUserData, { recursive: true, force: true });
 await mkdir(quarantineUserData, { recursive: true });
 writeFileSync(join(quarantineUserData, "terminal-runtime.json"), JSON.stringify({ cleanExit: false, failures: 2, startedAt: Date.now() }), "utf8");
-writeFileSync(join(quarantineUserData, "terminal-sessions.json"), JSON.stringify({ version: 1, sessions: [] }), "utf8");
+// 先种 5 份更旧的历史隔离文件，验证新崩溃隔离后只保留最近 3 份
+for (let index = 0; index < 5; index += 1) {
+  writeFileSync(join(quarantineUserData, "terminal-sessions.crashed-" + (1700000000000 + index) + ".json"), JSON.stringify({ version: 1, sessions: [] }), "utf8");
+}
+// 隔离快照内含一个有效会话，验证一键恢复按原 ID/cwd 重建终端
+const quarantineProject = join(testRoot, "quarantine-project");
+await mkdir(quarantineProject, { recursive: true });
+writeFileSync(join(quarantineUserData, "terminal-sessions.json"), JSON.stringify({
+  version: 1,
+  sessions: [{
+    id: "33333333-3333-4333-8333-333333333333",
+    title: "quarantine-restore",
+    cwd: quarantineProject,
+    cols: 120,
+    rows: 40,
+  }],
+}), "utf8");
 
 const quarantineApp = await electron.launch({
   executablePath: electronPath,
@@ -496,9 +512,22 @@ try {
   assert.equal(qStatus.quarantined, true);
   assert.ok(typeof qStatus.snapshotPath === "string" && qStatus.snapshotPath.includes("terminal-sessions.crashed-"));
   assert.equal(await qWindow.evaluate(async () => (await window.codex.listTerminals()).length), 0);
-  await qWindow.getByTitle("知道了").click();
+  // 隔离文件只保留最近 3 份（5 份种子 + 1 份新隔离 = 6 → 3）
+  const keptCrashed = readdirSync(quarantineUserData).filter((name) => /^terminal-sessions\.crashed-\d+\.json$/.test(name));
+  assert.equal(keptCrashed.length, 3, JSON.stringify(keptCrashed));
+  assert.ok(keptCrashed.includes(basename(qStatus.snapshotPath)), "newest quarantine file must be kept: " + qStatus.snapshotPath);
+  // 一键恢复隔离快照：横幅消失、隔离状态复位、终端按原 ID/cwd 重建
+  await qWindow.locator(".terminal-quarantine-restore").click();
   await qWindow.waitForFunction(() => document.querySelectorAll(".terminal-quarantine").length === 0);
-  console.log("electron-quarantine: 崩溃隔离横幅显示/关闭与快照隔离通过");
+  const restoredStatus = await qWindow.evaluate(async () => window.codex.getTerminalQuarantineStatus());
+  assert.deepEqual(restoredStatus, { quarantined: false, snapshotPath: null }, JSON.stringify(restoredStatus));
+  const restoredTerminals = await qWindow.evaluate(async () => window.codex.listTerminals());
+  assert.equal(restoredTerminals.length, 1, JSON.stringify(restoredTerminals));
+  assert.equal(restoredTerminals[0].id, "33333333-3333-4333-8333-333333333333", JSON.stringify(restoredTerminals[0]));
+  assert.equal(restoredTerminals[0].cwd, quarantineProject, JSON.stringify(restoredTerminals[0]));
+  const runtimeAfterRestore = JSON.parse(readFileSync(join(quarantineUserData, "terminal-runtime.json"), "utf8"));
+  assert.equal(runtimeAfterRestore.failures, 0, JSON.stringify(runtimeAfterRestore));
+  console.log("electron-quarantine: 崩溃隔离横幅/保留 3 份与一键恢复快照通过");
 } finally {
   await quarantineApp.close();
 }
