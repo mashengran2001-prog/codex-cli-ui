@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, KeyRound, LoaderCircle, Plus, Server, Trash2, X } from "lucide-react";
 import { useUiCopy } from "../i18n";
 import type { SshConnectionStage, SshProfile } from "../types";
@@ -23,6 +23,16 @@ export default function SshEditor({ profile, onSave, onDelete, onClose, onError 
   const [testing, setTesting] = useState(false);
   const [testStatus, setTestStatus] = useState<{ message: string; error?: boolean }>();
   const [stages, setStages] = useState<SshConnectionStage[]>([]);
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [onClose]);
   const update = (field: keyof SshProfile, next: string | number | undefined) => setValue((current) => ({ ...current, [field]: next }));
   const updateKeepAlive = (field: "keepAliveInterval" | "keepAliveMax", raw: string) => {
     const digits = raw.replace(/[^0-9]/g, "");

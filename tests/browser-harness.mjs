@@ -150,7 +150,7 @@ export async function installMockBridge(page) {
       window.setTimeout(() => emit({ providerId: request.providerId, runId: request.runId, type: "exit", code: 0, stopped: false }), 115);
     };
 
-    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null, clipboardText: null, lastPasteProfileId: null, lastResumeId: null, lastFork: null, svnMode: false, lastGitAction: null, lastOpenedPath: null, lastOpenedShellProfile: null, shellProfilePaths: null, updateResult: null, $$callLog: { readDocument: [], readDocumentImage: [], exportTerminalSession: [] } };
+    window.__mock = { runListeners, terminalListeners, launcherListeners, lastRun: null, launcherInstalled: false, terminalSessions, terminalWrites, clipboardImage: null, clipboardText: null, lastPasteProfileId: null, lastResumeId: null, lastFork: null, svnMode: false, lastGitAction: null, lastSftpAction: null, lastOpenedPath: null, lastOpenedShellProfile: null, shellProfilePaths: null, updateResult: null, $$callLog: { readDocument: [], readDocumentImage: [], exportTerminalSession: [] } };
     window.codex = {
       getInfo: async () => codexProvider,
       listProviders: async () => [codexProvider, deepseekProvider],
@@ -294,7 +294,7 @@ export async function installMockBridge(page) {
       testSshProfile: async () => ({ ok: true, elapsedMs: 42, stages: ["resolve", "tcp", "authenticate", "session"].map((name) => ({ name, status: "done" })) }),
       pickSshKeys: async () => ["C:\\mock\\.ssh\\id_ed25519", "C:\\mock\\.ssh\\id_rsa"],
       listSftp: async (_id, path) => [{ name: "remote.txt", path: `${path.replace(/\/$/, "")}/remote.txt`, type: "file", size: 512 }],
-      runSftpAction: async (request) => ({ ok: true, message: `${request.action} completed` }),
+      runSftpAction: async (request) => { window.__mock.lastSftpAction = request; return { ok: true, message: `${request.action} completed` }; },
       listSessions: async () => [],
       getSession: async () => null,
       listProviderSessions: async () => [],

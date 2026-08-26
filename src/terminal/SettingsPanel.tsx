@@ -8,6 +8,7 @@ import { getSettingsCopy } from "../i18n";
 import { registerImportedFontFaces } from "../importedFonts";
 import { terminalThemes } from "./themes";
 import SshEditor from "./SshEditor";
+import ConfirmDialog from "../ConfirmDialog";
 
 const KEYMAP_GROUPS: { id: "global" | "tabs" | "panes"; actions: KeybindingAction[] }[] = [
   { id: "global", actions: ["quick-terminal", "command-palette", "open-settings"] },
@@ -111,6 +112,7 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
   const [updateDownload, setUpdateDownload] = useState<{ phase: "downloading" | "verifying" | "done" | "error"; received?: number; total?: number; path?: string; error?: string } | null>(null);
   const updateBusy = updateDownload?.phase === "downloading" || updateDownload?.phase === "verifying";
+  const [confirmInstallOpen, setConfirmInstallOpen] = useState(false);
   const [importedFonts, setImportedFonts] = useState<ImportedFontInfo[]>([]);
   const [fontImportStatus, setFontImportStatus] = useState<{ message: string; error?: boolean }>();
   const [fontImportBusy, setFontImportBusy] = useState(false);
@@ -179,9 +181,13 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
       setUpdateDownload((prev) => ({ ...(prev ?? { phase: "error" }), phase: "error", error: result.error || copy.updateDownloadFailed }));
     }
   };
-  const launchInstaller = async () => {
+  const launchInstaller = () => {
     if (!updateDownload?.path) return;
-    if (!window.confirm(copy.updateConfirmInstall)) return;
+    setConfirmInstallOpen(true);
+  };
+  const confirmLaunchInstaller = async () => {
+    setConfirmInstallOpen(false);
+    if (!updateDownload?.path) return;
     const result = await window.codex.launchUpdateInstaller(updateDownload.path).catch<UpdateDownloadResult>(() => ({ ok: false, error: copy.updateLaunchFailed }));
     if (!result.ok) setUpdateDownload((prev) => ({ ...(prev ?? { phase: "error" }), phase: "error", error: result.error || copy.updateLaunchFailed }));
   };
@@ -729,6 +735,16 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
         </div>
       </div>
       {sshEditor && <SshEditor profile={sshEditor === "new" ? undefined : sshEditor} onClose={() => setSshEditor(undefined)} onError={(message) => setSshStatus({ message, error: true })} onSave={async (profile) => { const saved = await window.codex.saveSshProfile(profile); setSshEditor(undefined); await refreshSshHosts(); setSshStatus({ message: copy.savedHost(saved.name) }); }} onDelete={async (id) => { await window.codex.deleteSshProfile(id); setSshEditor(undefined); await refreshSshHosts(); setSshStatus({ message: copy.deletedHost }); }} />}
+      {confirmInstallOpen && (
+        <ConfirmDialog
+          title={copy.updateInstallNow}
+          body={copy.updateConfirmInstall}
+          confirmLabel={copy.updateInstallNow}
+          cancelLabel={copy.cancel}
+          onConfirm={() => void confirmLaunchInstaller()}
+          onCancel={() => setConfirmInstallOpen(false)}
+        />
+      )}
     </section>
   );
 }

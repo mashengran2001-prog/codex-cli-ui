@@ -28,6 +28,7 @@ import {
   X,
 } from "lucide-react";
 import { useUiCopy } from "../i18n";
+import ConfirmDialog from "../ConfirmDialog";
 import type { DirectoryEntry, DocumentFile, FileSystemEntry, GitStatus, SftpEntry, SshProfile } from "../types";
 
 function samePath(left: string, right: string) {
@@ -191,11 +192,14 @@ export function DirectoriesDrawer({ onClose, onNewTerminal, onCd, onError }: {
 }
 
 export function SftpDrawer({ profile, onClose, onError }: { profile: SshProfile; onClose(): void; onError(message: string): void }) {
-  const copy = useUiCopy().sftp;
+  const uiCopy = useUiCopy();
+  const copy = uiCopy.sftp;
+  const appCopy = uiCopy.app;
   const [path, setPath] = useState(profile.remotePath || "/");
   const [entries, setEntries] = useState<SftpEntry[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{ path: string; name: string } | null>(null);
   const refresh = useCallback(async () => {
     setLoading(true);
     try { setEntries(await window.codex.listSftp(profile.id, path)); }
@@ -210,14 +214,32 @@ export function SftpDrawer({ profile, onClose, onError }: { profile: SshProfile;
   };
   const visible = entries.filter((entry) => entry.name.toLowerCase().includes(query.toLowerCase()));
   return (
+    <Fragment>
     <aside className="terminal-drawer sftp-drawer" aria-label="SFTP">
       <div className="drawer-heading"><div><Upload size={15} /><strong>SFTP</strong><span>{profile.name}</span></div><button title={copy.close} onClick={onClose}><X size={14} /></button></div>
       <form className="drawer-pathbar" onSubmit={(event) => { event.preventDefault(); void refresh(); }}><button type="button" title={copy.parent} onClick={() => setPath(path.replace(/\/?[^/]+\/?$/, "") || "/")}><ChevronLeft size={14} /></button><input aria-label={copy.remotePath} value={path} onChange={(event) => setPath(event.target.value)} /><button type="button" title={copy.upload} onClick={() => void action("upload", path)}><Upload size={13} /></button><button type="button" title={copy.newFolder} onClick={() => { const name = window.prompt(copy.folderName); if (name) void action("mkdir", `${path.replace(/\/$/, "")}/${name}`); }}><FolderPlus size={13} /></button><button type="submit" title={copy.refresh}><RefreshCw className={loading ? "spin" : ""} size={13} /></button></form>
       <label className="drawer-search"><Search size={13} /><input value={query} placeholder={copy.filter} onChange={(event) => setQuery(event.target.value)} /></label>
       <div className="file-list">
-        {visible.map((entry) => <div className="file-row sftp-row" key={entry.path}><button title={entry.path} onClick={() => entry.type === "directory" ? setPath(entry.path) : undefined}><span className={`file-kind ${entry.type}`}>{entry.type === "directory" ? <Folder size={14} /> : <File size={13} />}</span><strong>{entry.name}</strong><small>{formatSize(entry.size)}</small></button><span><button title={copy.download} onClick={() => void action("download", entry.path)}><Download size={12} /></button><button title={copy.rename} onClick={() => { const name = window.prompt(copy.newName, entry.name); if (name && name !== entry.name) void action("rename", entry.path, `${path.replace(/\/$/, "")}/${name}`); }}><Pencil size={12} /></button><button title={copy.delete} onClick={() => { if (window.confirm(copy.confirmDelete(entry.name))) void action("delete", entry.path); }}><Trash2 size={12} /></button></span></div>)}
+        {visible.map((entry) => <div className="file-row sftp-row" key={entry.path}><button title={entry.path} onClick={() => entry.type === "directory" ? setPath(entry.path) : undefined}><span className={`file-kind ${entry.type}`}>{entry.type === "directory" ? <Folder size={14} /> : <File size={13} />}</span><strong>{entry.name}</strong><small>{formatSize(entry.size)}</small></button><span><button title={copy.download} onClick={() => void action("download", entry.path)}><Download size={12} /></button><button title={copy.rename} onClick={() => { const name = window.prompt(copy.newName, entry.name); if (name && name !== entry.name) void action("rename", entry.path, `${path.replace(/\/$/, "")}/${name}`); }}><Pencil size={12} /></button><button title={copy.delete} onClick={() => setPendingDelete({ path: entry.path, name: entry.name })}><Trash2 size={12} /></button></span></div>)}
         {!loading && visible.length === 0 && <div className="drawer-empty">{copy.empty}</div>}
       </div>
     </aside>
+    {pendingDelete && (
+      <ConfirmDialog
+        danger
+        icon={<Trash2 size={19} />}
+        title={copy.delete}
+        body={copy.confirmDelete(pendingDelete.name)}
+        confirmLabel={copy.delete}
+        cancelLabel={appCopy.cancel}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          const pending = pendingDelete;
+          setPendingDelete(null);
+          void action("delete", pending.path);
+        }}
+      />
+    )}
+    </Fragment>
   );
 }

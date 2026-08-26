@@ -547,7 +547,34 @@ try {
   // 活动 SSH pane 时文件面板跟随为 SFTP
   await page.getByRole("button", { name: "文件", exact: true }).click();
   await page.locator(".sftp-drawer").waitFor();
-  await page.getByText("remote.txt").waitFor();
+  // #64 统一确认弹窗：SFTP 删除先弹确认，Esc / 遮罩 / 取消不执行，确认才执行
+  const sftpRow = page.locator(".sftp-row", { hasText: "remote.txt" });
+  await sftpRow.hover();
+  await sftpRow.getByTitle("删除").click();
+  await page.locator(".confirm-dialog").waitFor();
+  assert.match(await page.locator(".confirm-dialog").textContent() ?? "", /remote\.txt/);
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".confirm-dialog", { state: "detached" });
+  assert.equal(await page.evaluate(() => window.__mock.lastSftpAction), null);
+  await sftpRow.hover();
+  await sftpRow.getByTitle("删除").click();
+  await page.locator(".confirm-dialog").waitFor();
+  await page.locator(".modal-overlay").click({ position: { x: 6, y: 6 } });
+  await page.waitForSelector(".confirm-dialog", { state: "detached" });
+  assert.equal(await page.evaluate(() => window.__mock.lastSftpAction), null);
+  await sftpRow.hover();
+  await sftpRow.getByTitle("删除").click();
+  await page.locator(".confirm-dialog").waitFor();
+  await page.locator(".confirm-dialog").getByRole("button", { name: "取消" }).click();
+  await page.waitForSelector(".confirm-dialog", { state: "detached" });
+  assert.equal(await page.evaluate(() => window.__mock.lastSftpAction), null);
+  await sftpRow.hover();
+  await sftpRow.getByTitle("删除").click();
+  await page.locator(".confirm-dialog").waitFor();
+  await page.locator(".confirm-dialog").getByRole("button", { name: "删除", exact: true }).click();
+  await page.waitForSelector(".confirm-dialog", { state: "detached" });
+  await page.waitForFunction(() => window.__mock.lastSftpAction?.action === "delete");
+  assert.equal(await page.evaluate(() => window.__mock.lastSftpAction.remotePath), "/home/dev/remote.txt");
   await page.getByRole("button", { name: "关闭 SFTP 面板" }).click();
   // AI 会话恢复与分叉：meta 事件写入 aiSource/aiSessionId 后，标签右键菜单出现两个入口
   const aiSessionId = await page.evaluate(() => {
@@ -573,6 +600,36 @@ try {
   await page.evaluate(() => { window.__mock.clipboardImage = null; });
   await page.getByRole("tab", { name: "对话" }).click();
   await page.locator(".composer textarea").waitFor();
+  // #64 危险运行确认弹窗：Esc / 遮罩 / 取消不启动，确认后才允许运行
+  const sandboxSelect = page.locator(".sandbox-select select");
+  await sandboxSelect.selectOption("danger-full-access");
+  const dangerComposer = page.locator(".composer textarea");
+  const submitDanger = async () => {
+    await dangerComposer.fill("Inspect everything");
+    await page.locator(".send-button").click();
+    await page.locator(".confirm-dialog.danger").waitFor();
+  };
+  const lastRunPrompt = () => page.evaluate(() => window.__mock.lastRun?.prompt ?? null);
+  let promptBefore = await lastRunPrompt();
+  await submitDanger();
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".confirm-dialog", { state: "detached" });
+  assert.equal(await lastRunPrompt(), promptBefore);
+  promptBefore = await lastRunPrompt();
+  await submitDanger();
+  await page.locator(".modal-overlay").click({ position: { x: 6, y: 6 } });
+  await page.waitForSelector(".confirm-dialog", { state: "detached" });
+  assert.equal(await lastRunPrompt(), promptBefore);
+  promptBefore = await lastRunPrompt();
+  await submitDanger();
+  await page.locator(".confirm-dialog").getByRole("button", { name: "取消" }).click();
+  await page.waitForSelector(".confirm-dialog", { state: "detached" });
+  assert.equal(await lastRunPrompt(), promptBefore);
+  await submitDanger();
+  await page.locator(".confirm-dialog").getByRole("button", { name: "允许并运行" }).click();
+  await page.waitForFunction(() => window.__mock.lastRun?.prompt === "Inspect everything");
+  assert.equal(await page.evaluate(() => window.__mock.lastRun.sandboxMode), "danger-full-access");
+  await sandboxSelect.selectOption("workspace-write");
 
   const overflow = await page.evaluate(() => ({
     document: document.documentElement.scrollWidth - document.documentElement.clientWidth,

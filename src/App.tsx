@@ -5,6 +5,7 @@ import { sanitizeDisplayText } from "./text-encoding";
 import { loadImportedFonts } from "./importedFonts";
 import ConversationView from "./ConversationView";
 import Sidebar from "./Sidebar";
+import ConfirmDialog from "./ConfirmDialog";
 import { getUiCopy, UiLocaleContext, useResolvedAppLocale } from "./i18n";
 import { defaultState, loadState, saveState } from "./storage";
 import {
@@ -732,20 +733,20 @@ export default function App() {
         </button>
       )}
       {pendingDanger && (
-        <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="danger-title">
-          <div className="danger-dialog">
-            <div className="danger-heading"><span><ShieldAlert size={19} /></span><div><h2 id="danger-title">{copy.dangerTitle}</h2><p>{copy.dangerBody}</p></div></div>
-            <div className="danger-scope"><strong>{projectName(pendingDanger.conversation.cwd)}</strong><code>{pendingDanger.conversation.cwd}</code></div>
-            <div className="dialog-actions">
-              <button onClick={() => { pendingDanger.resolve(false); setPendingDanger(null); }}>{copy.cancel}</button>
-              <button className="danger-confirm" onClick={() => {
-                const pending = pendingDanger;
-                setPendingDanger(null);
-                void executeRun(pending.conversation, pending.prompt, pending.imagePaths).then(pending.resolve);
-              }}>{copy.dangerRun}</button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          danger
+          icon={<ShieldAlert size={19} />}
+          title={copy.dangerTitle}
+          body={<>{copy.dangerBody}<div className="confirm-scope"><strong>{projectName(pendingDanger.conversation.cwd)}</strong><code>{pendingDanger.conversation.cwd}</code></div></>}
+          confirmLabel={copy.dangerRun}
+          cancelLabel={copy.cancel}
+          onCancel={() => { pendingDanger.resolve(false); setPendingDanger(null); }}
+          onConfirm={() => {
+            const pending = pendingDanger;
+            setPendingDanger(null);
+            void executeRun(pending.conversation, pending.prompt, pending.imagePaths).then(pending.resolve);
+          }}
+        />
       )}
     </div>
     </UiLocaleContext.Provider>
