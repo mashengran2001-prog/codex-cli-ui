@@ -16,6 +16,7 @@
   "include": [
     "electron/**/*.ts",
     "src/types.ts",
-    "src/terminal/terminal-math.ts"
+    "src/terminal/terminal-math.ts",
+    "src/terminal/box-glyphs.ts"
   ]
 }

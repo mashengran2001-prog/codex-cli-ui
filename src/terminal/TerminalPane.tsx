@@ -8,6 +8,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal as XTerm } from "@xterm/xterm";
 import katex from "katex";
 import { TerminalMathOverlay } from "./terminal-math";
+import { BoxGlyphOverlay } from "./box-glyphs";
 import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
 import type { TerminalCursorStyle, TerminalInfo, TerminalThemeName } from "../types";
 import { useUiCopy } from "../i18n";
@@ -24,6 +25,7 @@ interface TerminalPaneProps {
   bellFlash: boolean;
   copyOnSelect: boolean;
   renderTerminalMath: boolean;
+  builtinBoxDrawing: boolean;
   active: boolean;
   onFocus(): void;
   onTerminalReady?(id: string, terminal: XTerm | null): void;
@@ -86,7 +88,7 @@ function resolveTerminalPath(base: string, candidate: string) {
   return `${drive ? drive + "\\" : ""}${stack.join("\\")}`;
 }
 
-export default function TerminalPane({ session, theme, cursorStyle, cursorBlink, fontFamily, cellWidth, backgroundOverride, bellFlash, copyOnSelect, renderTerminalMath, active, onFocus, onTerminalReady, onError, onBroadcast }: TerminalPaneProps) {
+export default function TerminalPane({ session, theme, cursorStyle, cursorBlink, fontFamily, cellWidth, backgroundOverride, bellFlash, copyOnSelect, renderTerminalMath, builtinBoxDrawing, active, onFocus, onTerminalReady, onError, onBroadcast }: TerminalPaneProps) {
   const copy = useUiCopy().workbench;
   const copyRef = useRef(copy);
   useEffect(() => { copyRef.current = copy; }, [copy]);
@@ -96,6 +98,7 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
   const searchRef = useRef<SearchAddon | undefined>(undefined);
   const copyOnSelectRef = useRef(copyOnSelect);
   const mathOverlayRef = useRef<TerminalMathOverlay | null>(null);
+  const glyphOverlayRef = useRef<BoxGlyphOverlay | null>(null);
   const onFocusRef = useRef(onFocus);
   const onErrorRef = useRef(onError);
   const onBroadcastRef = useRef(onBroadcast);
@@ -344,6 +347,7 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
     const terminal = terminalRef.current;
     if (!terminal) return;
     mathOverlayRef.current?.refresh();
+    glyphOverlayRef.current?.refresh();
     terminal.options.theme = backgroundOverride
       ? { ...terminalThemes[theme].terminal, background: backgroundOverride }
       : terminalThemes[theme].terminal;
@@ -370,6 +374,26 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
       if (mathOverlayRef.current === overlay) mathOverlayRef.current = null;
     };
   }, [renderTerminalMath, session.id]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    const container = containerRef.current;
+    if (!terminal || !container) return;
+    if (!builtinBoxDrawing) {
+      glyphOverlayRef.current?.dispose();
+      glyphOverlayRef.current = null;
+      return;
+    }
+    const xtermEl = container.querySelector<HTMLElement>(".xterm");
+    if (!xtermEl) return;
+    const overlay = new BoxGlyphOverlay(terminal, xtermEl);
+    glyphOverlayRef.current = overlay;
+    overlay.refresh();
+    return () => {
+      overlay.dispose();
+      if (glyphOverlayRef.current === overlay) glyphOverlayRef.current = null;
+    };
+  }, [builtinBoxDrawing, session.id]);
 
   useEffect(() => {
     const terminal = terminalRef.current;

@@ -53,6 +53,8 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   bellMode: "both",
   renderTerminalMath: true,
   tabPosition: "side",
+  builtinBoxDrawing: true,
+
   resumeAiSessions: true,
   loadShellProfile: false,
   proxyUrl: "",

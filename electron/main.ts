@@ -222,6 +222,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   bellMode: "both",
   renderTerminalMath: true,
   tabPosition: "side",
+  builtinBoxDrawing: true,
   backgroundColor: undefined,
   accentColor: undefined,
   resumeAiSessions: true,
@@ -685,6 +686,7 @@ function normalizeAppSettings(value: Partial<AppSettings> | null | undefined): A
       ? value.bellMode
       : ((value as { bellSound?: boolean } | null | undefined)?.bellSound === false ? "flash" : "both"),
     renderTerminalMath: value?.renderTerminalMath !== false,
+    builtinBoxDrawing: value?.builtinBoxDrawing !== false,
     tabPosition: value?.tabPosition === "top" || value?.tabPosition === "side" ? value.tabPosition : "side",
     backgroundColor: typeof value?.backgroundColor === "string" && /^#[0-9a-fA-F]{6}$/.test(value.backgroundColor) ? value.backgroundColor.toLowerCase() : undefined,
     accentColor: typeof value?.accentColor === "string" && /^#[0-9a-fA-F]{6}$/.test(value.accentColor) ? value.accentColor.toLowerCase() : undefined,

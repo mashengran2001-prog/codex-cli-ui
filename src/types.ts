@@ -151,6 +151,8 @@ export interface AppSettings {
   bellMode: "off" | "flash" | "sound" | "both";
   renderTerminalMath: boolean;
   tabPosition: "top" | "side";
+  builtinBoxDrawing: boolean;
+
   backgroundColor?: string;
   accentColor?: string;
   resumeAiSessions: boolean;
