@@ -435,6 +435,9 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   const treeRef = useRef(paneTree);
   const activeSessionIdRef = useRef(activeSessionId);
   const terminalInstancesRef = useRef<Map<string, XTerm>>(new Map());
+  // 数据块活动刷新 250ms 聚合：高频终端输出不再每块 setSessions 全量重渲染（性能热路径）
+  const terminalActivityDirtyRef = useRef<Set<string>>(new Set());
+  const terminalActivityFlushRef = useRef<number | undefined>(undefined);
   const mountedRef = useRef(true);
   const paneResizeRef = useRef<{ splitKey: string; index: number; startX: number; startY: number; startSizes: number[]; direction: SplitDirection; containerSize: number } | null>(null);
   const paneResizeCleanupRef = useRef<(() => void) | null>(null);
@@ -597,7 +600,8 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
   }, [settings.cliProfiles]);
 
   const splitPaneRef = useRef<(direction: SplitDirection, sessionId?: string, anchorId?: string) => Promise<string | undefined>>(async () => undefined);
-  useEffect(() => window.codex.onTerminalEvent((event: TerminalEvent) => {
+  useEffect(() => {
+    const unsubscribeTerminalEvents = window.codex.onTerminalEvent((event: TerminalEvent) => {
     const previous = sessionsRef.current.find((item) => item.id === event.sessionId);
     if (event.type === "meta" && event.terminal) {
       setSessions((current) => current.map((item) => item.id === event.sessionId ? event.terminal! : item));
@@ -606,8 +610,19 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
         setNotice({ sessionId: event.sessionId, title: event.terminal.title, message: event.terminal.lastCommandDuration ? workbenchCopy.completedIn(Math.max(1, Math.round(event.terminal.lastCommandDuration / 1000))) : workbenchCopy.completed });
       }
     } else if (event.type === "data") {
-      setSessions((current) => current.map((item) => item.id === event.sessionId ? { ...item, updatedAt: Date.now() } : item));
       if (!containsLeaf(treeRef.current, event.sessionId)) setUnread((current) => new Set(current).add(event.sessionId));
+      // 250ms 聚合 updatedAt 刷新；数据字节由 pane 订阅直接写入 xterm，无需逐块重渲染工作区
+      terminalActivityDirtyRef.current.add(event.sessionId);
+      if (terminalActivityFlushRef.current === undefined) {
+        terminalActivityFlushRef.current = window.setTimeout(() => {
+          terminalActivityFlushRef.current = undefined;
+          const dirty = terminalActivityDirtyRef.current;
+          terminalActivityDirtyRef.current = new Set();
+          if (!dirty.size) return;
+          const now = Date.now();
+          setSessions((current) => current.map((item) => dirty.has(item.id) ? { ...item, updatedAt: now } : item));
+        }, 250);
+      }
     } else if (event.type === "exit") {
       setSessions((current) => current.map((item) => item.id === event.sessionId ? { ...item, status: "exited", activity: "idle", exitCode: event.code ?? item.exitCode, exitedAt: Date.now(), updatedAt: Date.now() } : item));
       setNotice({ sessionId: event.sessionId, title: previous?.title || workbenchCopy.terminal, message: workbenchCopy.processExited(event.code) });
@@ -628,7 +643,12 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
       }
     } else if (event.type === "focus") assignSession(event.sessionId);
     else if (event.type === "error" && event.message) onError(event.message);
-  }), [assignSession, onError, settings.bellMode, workbenchCopy]);
+    });
+    return () => {
+      unsubscribeTerminalEvents();
+        if (terminalActivityFlushRef.current !== undefined) window.clearTimeout(terminalActivityFlushRef.current);
+      };
+    }, [assignSession, onError, settings.bellMode, workbenchCopy]);
 
   useEffect(() => {
     if (!notice) return;
@@ -992,6 +1012,26 @@ export default function TerminalWorkspace({ project, settings, workspaceMode, ch
       if (id !== sourceId) void window.codex.writeTerminal(id, data);
     }
   }, []);
+
+  // TerminalPane 已 memo：按会话预构造稳定回调，键入命令/普通重渲染不再重渲染全部终端 pane
+  const sessionHandlers = useMemo(() => {
+    const focus = new Map<string, () => void>();
+    const ready = new Map<string, (id: string, terminal: XTerm | null) => void>();
+    const broadcast = new Map<string, (data: string) => void>();
+    for (const item of sessions) {
+      const id = item.id;
+      focus.set(id, () => {
+        setActiveSessionId(id);
+        setUnread((current) => { const next = new Set(current); next.delete(id); return next; });
+      });
+      ready.set(id, (paneId, terminal) => {
+        if (terminal) terminalInstancesRef.current.set(paneId, terminal);
+        else terminalInstancesRef.current.delete(paneId);
+      });
+      broadcast.set(id, (data) => broadcastInput(id, data));
+    }
+    return { focus, ready, broadcast };
+  }, [broadcastInput, sessions]);
 
   const dockSession = (sessionId: string, targetId: string, edge: DockEdge) => {
     if (edge === "center") { assignSession(sessionId, targetId); return; }

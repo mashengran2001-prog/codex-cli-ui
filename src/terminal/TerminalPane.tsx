@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import type { ILink } from "@xterm/xterm";
 import { ImageAddon } from "@xterm/addon-image";
@@ -89,7 +89,7 @@ function resolveTerminalPath(base: string, candidate: string) {
   return `${drive ? drive + "\\" : ""}${stack.join("\\")}`;
 }
 
-export default function TerminalPane({ session, theme, cursorStyle, cursorBlink, fontFamily, cellWidth, backgroundOverride, bellFlash, copyOnSelect, renderTerminalMath, builtinBoxDrawing, active, onFocus, onTerminalReady, onError, onBroadcast }: TerminalPaneProps) {
+function TerminalPane({ session, theme, cursorStyle, cursorBlink, fontFamily, cellWidth, backgroundOverride, bellFlash, copyOnSelect, renderTerminalMath, builtinBoxDrawing, active, onFocus, onTerminalReady, onError, onBroadcast }: TerminalPaneProps) {
   const copy = useUiCopy().workbench;
   const copyRef = useRef(copy);
   useEffect(() => { copyRef.current = copy; }, [copy]);
@@ -619,3 +619,6 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
     </div>
   );
 }
+
+
+export default memo(TerminalPane);

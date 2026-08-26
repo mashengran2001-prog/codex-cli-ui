@@ -73,6 +73,7 @@ import {
   writeInstallerMetadata,
   type UpdateAsset,
 } from "./update-manager";
+import { analyzeTerminalChunk } from "./terminal-stream";
 import { probePackageManager, type PackageManagerInfo } from "./package-managers";
 import {
   deleteImportedFont,
@@ -1557,10 +1558,10 @@ function finishTerminalCommand(session: TerminalSession) {
   if (duration >= 8_000) notifyTerminalAttention(session, `${command} (${Math.round(duration / 1000)}s)`, true);
 }
 
-function updateTerminalCwd(session: TerminalSession, data: string) {
-  for (const match of data.matchAll(/\x1b\]7;file:\/\/[^/]*(\/[^\x07\x1b]*)[\x07\x1b\\]/g)) {
+function updateTerminalCwd(session: TerminalSession, encodedPaths: readonly string[]) {
+  for (const rawPath of encodedPaths) {
     try {
-      let candidate = decodeURIComponent(match[1]);
+      let candidate = decodeURIComponent(rawPath);
       if (process.platform === "win32" && /^\/[a-zA-Z]:\//.test(candidate)) candidate = candidate.slice(1);
       candidate = candidate.replaceAll("/", sep);
       if (isDirectory(candidate)) session.cwd = resolve(candidate);
@@ -1573,21 +1574,22 @@ function updateTerminalCwd(session: TerminalSession, data: string) {
 
 function appendTerminalOutput(session: TerminalSession, data: string) {
   session.updatedAt = Date.now();
-  updateTerminalCwd(session, data);
+  // 热路径：预编译正则 + 无 ESC 快检（terminal-stream 单测覆盖），普通文本块不做任何转义扫描。
+  const analysis = analyzeTerminalChunk(data);
+  updateTerminalCwd(session, analysis.osc7);
   session.history = `${session.history}${data}`.slice(-MAX_TERMINAL_HISTORY);
   session.pending = `${session.pending}${data}`.slice(-MAX_TERMINAL_INPUT);
   if (data.includes("\u0007") && Date.now() - session.lastBellAt > 1_500) {
     session.lastBellAt = Date.now();
     notifyTerminalAttention(session);
   }
-  if (/\x1b\]133;D(?:;[^\x07]*)?\x07/.test(data) || /\x1b\]133;A\x07/.test(data)) finishTerminalCommand(session);
-  const plain = data.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
-  if (session.activity === "running" && /(?:do you want to continue|needs? your (?:input|approval)|press enter|\[[yY]\/[nN]\]|allow this command)/i.test(plain)) {
+  if (analysis.commandFinished) finishTerminalCommand(session);
+  if (session.activity === "running" && analysis.attention) {
     session.activity = "attention";
     sendTerminalMeta(session);
     if (Date.now() - session.lastBellAt > 1_500) {
       session.lastBellAt = Date.now();
-      notifyTerminalAttention(session, plain.trim().slice(-180) || "Input requested");
+      notifyTerminalAttention(session, analysis.attentionMessage || "Input requested");
     }
   }
   if (session.pending.length >= MAX_TERMINAL_INPUT) flushTerminalOutput(session);
