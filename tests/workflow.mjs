@@ -362,14 +362,51 @@ try {
   assert.equal(await profileButton.isDisabled(), false);
   await profileButton.click();
   await page.waitForFunction(() => window.__mock.lastOpenedShellProfile != null);
-  // #47 检查更新：点击后展示最新版本与下载入口
-  await page.evaluate(() => { window.__mock.updateResult = { latest: "v9.9.9", url: "https://github.com/mashengran2001-prog/codex-cli-ui/releases/tag/v9.9.9", name: "Nebula Terminal 9.9.9", publishedAt: "2026-08-25T00:00:00Z" }; });
+  // #47 检查更新：设置页展示最新版本与下载入口，右下角常驻提醒同步出现
+  const updateResultSuccess = { latest: "v9.9.9", url: "https://github.com/mashengran2001-prog/codex-cli-ui/releases/tag/v9.9.9", name: "Nebula Terminal 9.9.9", publishedAt: "2026-08-25T00:00:00Z", assets: [{ name: "setup.exe", size: 1048576, url: "https://github.com/mashengran2001-prog/codex-cli-ui/releases/download/v9.9.9/setup.exe" }] };
+  await page.evaluate((value) => { window.__mock.updateResult = value; }, updateResultSuccess);
   await page.getByRole("button", { name: "检查更新" }).click();
-  await page.getByText(/发现新版本 v9\.9\.9/).waitFor();
+  await page.locator(".settings-update-result").getByText(/发现新版本 v9\.9\.9/).waitFor();
   await page.getByRole("button", { name: "打开下载页" }).click();
   await page.waitForFunction(() => window.__mock.lastOpenedPath === "https://github.com/mashengran2001-prog/codex-cli-ui/releases/tag/v9.9.9");
   await page.getByLabel("补全样式").selectOption("inline");
   await page.getByLabel("字符宽度").selectOption("compact");
+  // 更新通知常驻（对标 Nebula v1.3.1）：右下角提醒直至处理
+  await page.locator(".update-toast").waitFor();
+  assert.ok((await page.locator(".update-toast").textContent()).includes("发现新版本 v9.9.9"), "常驻提醒应展示新版本");
+  await page.locator(".update-toast-actions").getByRole("button", { name: "忽略" }).click();
+  await page.waitForFunction(() => !document.querySelector(".update-toast"));
+  // 检查失败：右下角失败提醒 + 重试
+  await page.evaluate(() => { window.__mock.updateResult = { error: "network down" }; });
+  await page.getByRole("button", { name: "检查更新" }).click();
+  await page.waitForFunction(() => document.querySelector(".update-toast")?.textContent?.includes("更新失败"));
+  await page.locator(".update-toast-actions").getByRole("button", { name: "忽略" }).click();
+  await page.waitForFunction(() => !document.querySelector(".update-toast"));
+  // 重试检查恢复：再次点击检查后常驻提醒出现
+  await page.evaluate((value) => { window.__mock.updateResult = value; }, updateResultSuccess);
+  await page.getByRole("button", { name: "检查更新" }).click();
+  await page.waitForFunction(() => document.querySelector(".update-toast")?.textContent?.includes("发现新版本 v9.9.9"));
+  // 下载过程：进度条 + 校验阶段；失败后重试再下载成功，最后确认安装
+  await page.evaluate(() => {
+    window.__mock.updateDownloadResult = new Promise((resolve) => { window.__mock.resolveDownload = resolve; });
+  });
+  await page.locator(".update-toast-actions").getByRole("button", { name: "下载并安装" }).click();
+  await page.locator(".update-toast .settings-update-progress").waitFor();
+  await page.evaluate(() => { window.__mock.updateListeners?.forEach((fn) => fn({ phase: "downloading", received: 1024, total: 2048 })); });
+  await page.evaluate(() => { window.__mock.updateListeners?.forEach((fn) => fn({ phase: "verifying" })); });
+  await page.waitForFunction(() => document.querySelector(".update-toast")?.textContent?.includes("正在校验安装包"));
+  await page.evaluate(() => { window.__mock.resolveDownload({ ok: false, error: "sha256 mismatch" }); });
+  await page.waitForFunction(() => document.querySelector(".update-toast")?.textContent?.includes("sha256 mismatch"));
+  await page.locator(".update-toast-actions").getByRole("button", { name: "重试" }).click();
+  await page.waitForFunction(() => document.querySelector(".update-toast")?.textContent?.includes("sha256 mismatch"));
+  await page.evaluate(() => { window.__mock.updateDownloadResult = { ok: true, path: "C:\\Users\\test\\AppData\\Roaming\\codex-cli-ui\\updates\\setup.exe", sha256: "a".repeat(64) }; });
+  await page.locator(".update-toast-actions").getByRole("button", { name: "重试" }).click();
+  await page.waitForFunction(() => document.querySelector(".update-toast")?.textContent?.includes("更新已就绪"));
+  await page.locator(".update-toast-actions").getByRole("button", { name: "确认安装" }).click();
+  await page.locator(".confirm-dialog").waitFor();
+  await page.locator(".confirm-dialog").getByRole("button", { name: "确认安装" }).click();
+  await page.waitForFunction(() => window.__mock.lastLaunchedInstaller != null);
+  await page.waitForFunction(() => !document.querySelector(".update-toast"));
   await page.locator('.terminal-top-tab[data-tab-kind="settings"] .terminal-tab-close').click();
   await page.locator(".xterm-screen").waitFor();
 

@@ -527,6 +527,21 @@ export interface UpdateDownloadResult {
   error?: string;
 }
 
+export interface UpdateDownloadState {
+  phase: "downloading" | "verifying" | "done" | "error";
+  received?: number;
+  total?: number;
+  path?: string;
+  error?: string;
+}
+
+export interface SettingsUpdateState {
+  state: "idle" | "checking" | "done" | "error";
+  result: UpdateCheckResult | null;
+  download: UpdateDownloadState | null;
+  busy: boolean;
+}
+
 export interface UpdateCheckResult {
   /** 最新发布 tag，例如 v1.3.0。 */
   latest?: string;

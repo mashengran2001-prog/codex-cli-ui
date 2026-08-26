@@ -36,6 +36,10 @@ const uiCopies = {
       saveSettingsFailed: "保存设置失败",
       lifecycleFailed: "更新 CLI 活动同步失败",
       projectBusy: "该工作目录仍有任务正在运行",
+      updateReadyTitle: "更新已就绪",
+      updateFailedTitle: "更新失败",
+      dismissUpdate: "忽略",
+      retryUpdate: "重试",
     },
     sidebar: {
       workspace: "工作目录",
@@ -331,6 +335,10 @@ const uiCopies = {
       saveSettingsFailed: "Failed to save settings",
       lifecycleFailed: "Failed to update CLI activity sync",
       projectBusy: "This working directory still has a running task",
+      updateReadyTitle: "Update ready",
+      updateFailedTitle: "Update failed",
+      dismissUpdate: "Dismiss",
+      retryUpdate: "Retry",
     },
     sidebar: {
       workspace: "Working directories",

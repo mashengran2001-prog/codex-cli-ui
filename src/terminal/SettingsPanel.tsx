@@ -2,13 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { Activity, BellRing, Brain, Check, CheckCircle2, ChevronDown, Command, Download, ExternalLink, FileCode2, FolderOpen, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Pencil, Plug, Plus, RotateCcw, Search, Server, Shield, TerminalSquare, Trash2, Undo2, X, type LucideIcon } from "lucide-react";
 import BrandIcon, { type BrandIconName } from "../BrandIcon";
 import { chordFromEvent, isModifierOnly, modifierPrefix, setKeybindingCaptureActive } from "../keybindings";
-import type { AppSettings, BackupPreview, BackupResult, BackupSelection, CliLifecycleStatus, CliProfile, CliToolInfo, DiagnosticsInfo, KeybindingAction, LatencyProbeResult, ShellProfile, SshProfile, TerminalThemeName, ImportedFontInfo, ImportFontResult, UpdateCheckResult, UpdateDownloadResult, UpdateProgress } from "../types";
+import type { AppSettings, BackupPreview, BackupResult, BackupSelection, CliLifecycleStatus, CliProfile, CliToolInfo, DiagnosticsInfo, KeybindingAction, LatencyProbeResult, ShellProfile, SshProfile, TerminalThemeName, ImportedFontInfo, ImportFontResult, SettingsUpdateState } from "../types";
 import { DEFAULT_KEYBINDINGS } from "../types";
 import { getSettingsCopy } from "../i18n";
 import { registerImportedFontFaces } from "../importedFonts";
 import { terminalThemes } from "./themes";
 import SshEditor from "./SshEditor";
-import ConfirmDialog from "../ConfirmDialog";
 
 const KEYMAP_GROUPS: { id: "global" | "tabs" | "panes"; actions: KeybindingAction[] }[] = [
   { id: "global", actions: ["quick-terminal", "command-palette", "open-settings"] },
@@ -48,6 +47,8 @@ interface SettingsPanelProps {
   onChange(settings: AppSettings): void;
   onCliLifecycleToggle(): void;
   onConnectSsh?(profile: SshProfile): void;
+  update: SettingsUpdateState;
+  onUpdateAction(action: "check" | "download" | "install"): void;
   onClose(): void;
 }
 
@@ -69,7 +70,7 @@ function formatBytes(bytes: number) {
   return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${units[index]}`;
 }
 
-export default function SettingsPanel({ settings, shells, cliTools, cliLifecycleStatus, cliLifecycleBusy, onChange, onCliLifecycleToggle, onConnectSsh, onClose }: SettingsPanelProps) {
+export default function SettingsPanel({ settings, shells, cliTools, cliLifecycleStatus, cliLifecycleBusy, onChange, onCliLifecycleToggle, onConnectSsh, update: updateInfo, onUpdateAction, onClose }: SettingsPanelProps) {
   const [newName, setNewName] = useState("");
   const [newCommand, setNewCommand] = useState("");
   const copy = getSettingsCopy(settings.language);
@@ -108,11 +109,6 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
   const [sshStatus, setSshStatus] = useState<{ message: string; error?: boolean }>();
   const [profilePath, setProfilePath] = useState<string | null>(null);
   const [profileError, setProfileError] = useState(false);
-  const [updateState, setUpdateState] = useState<"idle" | "checking" | "done" | "error">("idle");
-  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
-  const [updateDownload, setUpdateDownload] = useState<{ phase: "downloading" | "verifying" | "done" | "error"; received?: number; total?: number; path?: string; error?: string } | null>(null);
-  const updateBusy = updateDownload?.phase === "downloading" || updateDownload?.phase === "verifying";
-  const [confirmInstallOpen, setConfirmInstallOpen] = useState(false);
   const [importedFonts, setImportedFonts] = useState<ImportedFontInfo[]>([]);
   const [fontImportStatus, setFontImportStatus] = useState<{ message: string; error?: boolean }>();
   const [fontImportBusy, setFontImportBusy] = useState(false);
@@ -159,37 +155,6 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
     setProfileError(false);
     const ok = await window.codex.openShellProfile(shellId).catch(() => false);
     setProfileError(!ok);
-  };
-  const checkForUpdates = async () => {
-    setUpdateState("checking");
-    setUpdateResult(null);
-    const result = await window.codex.checkForUpdates().catch<UpdateCheckResult>(() => ({ error: copy.updateCheckFailed }));
-    setUpdateResult(result);
-    setUpdateState(result.error ? "error" : "done");
-  };
-  useEffect(() => {
-    return window.codex.onUpdateProgress?.((progress: UpdateProgress) => {
-      setUpdateDownload((prev) => ({ ...(prev ?? { phase: progress.phase }), phase: progress.phase, received: progress.received, total: progress.total, error: progress.message }));
-    });
-  }, []);
-  const downloadUpdate = async () => {
-    setUpdateDownload({ phase: "downloading", received: 0 });
-    const result = await window.codex.downloadUpdate().catch<UpdateDownloadResult>(() => ({ ok: false, error: copy.updateDownloadFailed }));
-    if (result.ok) {
-      setUpdateDownload((prev) => ({ ...(prev ?? { phase: "done" }), phase: "done", path: result.path, error: undefined }));
-    } else {
-      setUpdateDownload((prev) => ({ ...(prev ?? { phase: "error" }), phase: "error", error: result.error || copy.updateDownloadFailed }));
-    }
-  };
-  const launchInstaller = () => {
-    if (!updateDownload?.path) return;
-    setConfirmInstallOpen(true);
-  };
-  const confirmLaunchInstaller = async () => {
-    setConfirmInstallOpen(false);
-    if (!updateDownload?.path) return;
-    const result = await window.codex.launchUpdateInstaller(updateDownload.path).catch<UpdateDownloadResult>(() => ({ ok: false, error: copy.updateLaunchFailed }));
-    if (!result.ok) setUpdateDownload((prev) => ({ ...(prev ?? { phase: "error" }), phase: "error", error: result.error || copy.updateLaunchFailed }));
   };
   const refreshImportedFonts = useCallback(async () => {
     const fonts = await window.codex.listImportedFonts().catch<ImportedFontInfo[]>(() => []);
@@ -684,29 +649,29 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
         <section id="settings-about">
           <h2>{copy.about}</h2>
           <div className="settings-row settings-update-row">
-            <button className="settings-update-button" disabled={updateState === "checking" || updateBusy} onClick={() => void checkForUpdates()}>
-              {updateState === "checking" ? <LoaderCircle className="spin" size={12} /> : <Download size={12} />}
-              {updateState === "checking" ? copy.checkingUpdates : copy.checkForUpdates}
+            <button className="settings-update-button" disabled={updateInfo.state === "checking" || updateInfo.busy} onClick={() => onUpdateAction("check")}>
+              {updateInfo.state === "checking" ? <LoaderCircle className="spin" size={12} /> : <Download size={12} />}
+              {updateInfo.state === "checking" ? copy.checkingUpdates : copy.checkForUpdates}
             </button>
-            {updateState === "done" && updateResult?.latest ? (
+            {updateInfo.state === "done" && updateInfo.result?.latest ? (
               <span className="settings-update-result">
-                <strong>{copy.updateAvailable(updateResult.latest)}</strong>
-                {updateResult.url ? <button title={copy.updateOpenDownload} onClick={() => void window.codex.openPath(updateResult.url as string)}><ExternalLink size={12} />{copy.updateOpenDownload}</button> : null}
-                {updateResult.assets?.length ? <button disabled={updateBusy} onClick={() => void downloadUpdate()}><Download size={12} />{copy.updateDownloadInstall}</button> : null}
+                <strong>{copy.updateAvailable(updateInfo.result.latest)}</strong>
+                {updateInfo.result?.url ? <button title={copy.updateOpenDownload} onClick={() => void window.codex.openPath(updateInfo.result?.url as string)}><ExternalLink size={12} />{copy.updateOpenDownload}</button> : null}
+                {updateInfo.result.assets?.length ? <button disabled={updateInfo.busy} onClick={() => onUpdateAction("download")}><Download size={12} />{copy.updateDownloadInstall}</button> : null}
               </span>
             ) : null}
-            {updateState === "done" && !updateResult?.latest ? <span className="settings-update-result">{copy.updateNone}</span> : null}
-            {updateState === "error" ? <span className="settings-update-result error">{updateResult?.error || copy.updateCheckFailed}</span> : null}
-            {updateDownload?.phase === "downloading" || updateDownload?.phase === "verifying" ? (
+            {updateInfo.state === "done" && !updateInfo.result?.latest ? <span className="settings-update-result">{copy.updateNone}</span> : null}
+            {updateInfo.state === "error" ? <span className="settings-update-result error">{updateInfo.result?.error || copy.updateCheckFailed}</span> : null}
+            {updateInfo.download?.phase === "downloading" || updateInfo.download?.phase === "verifying" ? (
               <div className="settings-update-download">
-                <div className="settings-update-progress"><i style={{ width: updateDownload.phase === "verifying" ? "100%" : `${updateDownload.total ? Math.min(100, Math.round(((updateDownload.received ?? 0) / updateDownload.total) * 100)) : 6}%` }} /></div>
-                <span>{updateDownload.phase === "verifying" ? copy.updateVerifying : `${copy.updateDownloading}${updateDownload.total ? ` ${formatBytes(updateDownload.received ?? 0)} / ${formatBytes(updateDownload.total)}` : ""}`}</span>
+                <div className="settings-update-progress"><i style={{ width: updateInfo.download.phase === "verifying" ? "100%" : `${updateInfo.download.total ? Math.min(100, Math.round(((updateInfo.download.received ?? 0) / updateInfo.download.total) * 100)) : 6}%` }} /></div>
+                <span>{updateInfo.download.phase === "verifying" ? copy.updateVerifying : `${copy.updateDownloading}${updateInfo.download.total ? ` ${formatBytes(updateInfo.download.received ?? 0)} / ${formatBytes(updateInfo.download.total)}` : ""}`}</span>
               </div>
             ) : null}
-            {updateDownload?.phase === "done" && updateDownload.path ? (
-              <button className="settings-update-install" onClick={() => void launchInstaller()}><Download size={12} />{copy.updateInstallNow}</button>
+            {updateInfo.download?.phase === "done" && updateInfo.download.path ? (
+              <button className="settings-update-install" onClick={() => onUpdateAction("install")}><Download size={12} />{copy.updateInstallNow}</button>
             ) : null}
-            {updateDownload?.phase === "error" ? <span className="settings-update-result error">{updateDownload.error || copy.updateDownloadFailed}</span> : null}
+            {updateInfo.download?.phase === "error" ? <span className="settings-update-result error">{updateInfo.download.error || copy.updateDownloadFailed}</span> : null}
           </div>
           <div className="settings-group-divider" />
           <h3>{copy.diagnostics}</h3>
@@ -735,16 +700,6 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
         </div>
       </div>
       {sshEditor && <SshEditor profile={sshEditor === "new" ? undefined : sshEditor} onClose={() => setSshEditor(undefined)} onError={(message) => setSshStatus({ message, error: true })} onSave={async (profile) => { const saved = await window.codex.saveSshProfile(profile); setSshEditor(undefined); await refreshSshHosts(); setSshStatus({ message: copy.savedHost(saved.name) }); }} onDelete={async (id) => { await window.codex.deleteSshProfile(id); setSshEditor(undefined); await refreshSshHosts(); setSshStatus({ message: copy.deletedHost }); }} />}
-      {confirmInstallOpen && (
-        <ConfirmDialog
-          title={copy.updateInstallNow}
-          body={copy.updateConfirmInstall}
-          confirmLabel={copy.updateInstallNow}
-          cancelLabel={copy.cancel}
-          onConfirm={() => void confirmLaunchInstaller()}
-          onCancel={() => setConfirmInstallOpen(false)}
-        />
-      )}
     </section>
   );
 }

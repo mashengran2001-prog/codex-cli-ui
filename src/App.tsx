@@ -1,12 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, LoaderCircle, ShieldAlert, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, ExternalLink, LoaderCircle, RefreshCw, ShieldAlert, X } from "lucide-react";
 import Composer from "./Composer";
 import { sanitizeDisplayText } from "./text-encoding";
 import { loadImportedFonts } from "./importedFonts";
 import ConversationView from "./ConversationView";
 import Sidebar from "./Sidebar";
 import ConfirmDialog from "./ConfirmDialog";
-import { getUiCopy, UiLocaleContext, useResolvedAppLocale } from "./i18n";
+import { getSettingsCopy, getUiCopy, UiLocaleContext, useResolvedAppLocale } from "./i18n";
 import { defaultState, loadState, saveState } from "./storage";
 import {
   Activity,
@@ -23,9 +23,22 @@ import {
   ReasoningEffort,
   RunEvent,
   SandboxMode,
+  SettingsUpdateState,
+  UpdateCheckResult,
+  UpdateDownloadResult,
+  UpdateDownloadState,
+  UpdateProgress,
 } from "./types";
 
 const TerminalWorkspace = lazy(() => import("./TerminalWorkspace"));
+
+function formatBytes(bytes?: number) {
+  if (!Number.isFinite(bytes) || bytes === undefined || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  const value = bytes / 1024 ** index;
+  return value >= 100 ? Math.round(value) + " " + units[index] : value.toFixed(1) + " " + units[index];
+}
 
 const DEFAULT_APP_SETTINGS: AppSettings = {
   closeBehavior: "tray",
@@ -191,6 +204,13 @@ export default function App() {
   const [pendingDanger, setPendingDanger] = useState<PendingDanger | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const settingsCopy = getSettingsCopy(locale);
+  const [updateState, setUpdateState] = useState<"idle" | "checking" | "done" | "error">("idle");
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [updateDownload, setUpdateDownload] = useState<UpdateDownloadState | null>(null);
+  const [updateNoticeDismissed, setUpdateNoticeDismissed] = useState(false);
+  const [confirmInstallOpen, setConfirmInstallOpen] = useState(false);
+  const updateBusy = updateDownload?.phase === "downloading" || updateDownload?.phase === "verifying";
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showCompletionToast = useCallback((value: ToastState) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -268,6 +288,11 @@ export default function App() {
 
   useEffect(() => {
     void loadImportedFonts();
+  }, []);
+  useEffect(() => {
+    return window.codex.onUpdateProgress?.((progress: UpdateProgress) => {
+      setUpdateDownload((prev) => ({ ...(prev ?? { phase: progress.phase }), phase: progress.phase, received: progress.received, total: progress.total, error: progress.message }));
+    });
   }, []);
 
   useEffect(() => {
@@ -621,6 +646,42 @@ export default function App() {
     }
   };
 
+  const checkForUpdates = useCallback(async () => {
+    setUpdateState("checking");
+    setUpdateResult(null);
+    setUpdateNoticeDismissed(false);
+    const result = await window.codex.checkForUpdates().catch<UpdateCheckResult>(() => ({ error: settingsCopy.updateCheckFailed }));
+    setUpdateResult(result);
+    setUpdateState(result.error ? "error" : "done");
+  }, [settingsCopy.updateCheckFailed]);
+  const downloadUpdate = useCallback(async () => {
+    setUpdateDownload({ phase: "downloading", received: 0 });
+    const result = await window.codex.downloadUpdate().catch<UpdateDownloadResult>(() => ({ ok: false, error: settingsCopy.updateDownloadFailed }));
+    if (result.ok) {
+      setUpdateDownload((prev) => ({ ...(prev ?? { phase: "done" }), phase: "done", path: result.path, error: undefined }));
+    } else {
+      setUpdateDownload((prev) => ({ ...(prev ?? { phase: "error" }), phase: "error", error: result.error || settingsCopy.updateDownloadFailed }));
+    }
+  }, [settingsCopy.updateDownloadFailed]);
+  const launchInstaller = useCallback(() => {
+    if (!updateDownload?.path) return;
+    setConfirmInstallOpen(true);
+  }, [updateDownload?.path]);
+  const confirmLaunchInstaller = useCallback(async () => {
+    setConfirmInstallOpen(false);
+    if (!updateDownload?.path) return;
+    const result = await window.codex.launchUpdateInstaller(updateDownload.path).catch<UpdateDownloadResult>(() => ({ ok: false, error: settingsCopy.updateLaunchFailed }));
+    if (!result.ok) {
+      setUpdateDownload((prev) => ({ ...(prev ?? { phase: "error" }), phase: "error", error: result.error || settingsCopy.updateLaunchFailed }));
+    } else {
+      setUpdateNoticeDismissed(true);
+    }
+  }, [updateDownload?.path, settingsCopy.updateLaunchFailed]);
+  const updateAction = useCallback((action: "check" | "download" | "install") => {
+    if (action === "check") void checkForUpdates();
+    else if (action === "download") void downloadUpdate();
+    else launchInstaller();
+  }, [checkForUpdates, downloadUpdate, launchInstaller]);
   const removeProject = (projectId: string) => {
     if (conversationsRef.current.some((conversation) => conversation.projectId === projectId && conversation.runState === "running")) {
       setError(copy.projectBusy);
@@ -653,6 +714,8 @@ export default function App() {
           onRefreshChat={() => { if (selectedProject) void refreshProject(selectedProject.id, activeProviderId); }}
           onAddProject={addProject}
           onError={setError}
+          update={{ state: updateState, result: updateResult, download: updateDownload, busy: updateBusy }}
+          onUpdateAction={updateAction}
           chatSidebar={(
             <Sidebar
               projects={projects}
@@ -732,6 +795,49 @@ export default function App() {
           <CheckCircle2 size={17} /><span><strong>{copy.completed}</strong><small>{sanitizeDisplayText(toast.title)}</small></span>
         </button>
       )}
+      {!updateNoticeDismissed && (updateState === "error" || (updateState === "done" && updateResult?.latest) || updateDownload !== null) && (
+        <div className="update-toast">
+          <div className="update-toast-head">
+            <span className="update-toast-icon"><Download size={14} /></span>
+            <strong>
+              {updateDownload?.phase === "done" ? copy.updateReadyTitle
+                : updateDownload?.phase === "downloading" || updateDownload?.phase === "verifying" ? settingsCopy.updateDownloading
+                : updateDownload?.phase === "error" || updateState === "error" ? copy.updateFailedTitle
+                : settingsCopy.updateAvailable(updateResult?.latest || "")}
+            </strong>
+            <button className="update-toast-dismiss" title={copy.dismissUpdate} onClick={() => setUpdateNoticeDismissed(true)}><X size={13} /></button>
+          </div>
+          <div className="update-toast-body">
+            {updateDownload?.phase === "downloading" || updateDownload?.phase === "verifying" ? (
+              <div className="settings-update-progress"><i style={{ width: updateDownload.phase === "verifying" ? "100%" : (updateDownload.total ? Math.min(100, Math.round(((updateDownload.received ?? 0) / updateDownload.total) * 100)) : 6) + "%" }} /></div>
+            ) : null}
+            <span className="update-toast-text">
+              {updateDownload?.phase === "verifying" ? settingsCopy.updateVerifying
+                : updateDownload?.phase === "downloading" ? settingsCopy.updateDownloading + (updateDownload.total ? " " + formatBytes(updateDownload.received ?? 0) + " / " + formatBytes(updateDownload.total) : "")
+                : updateDownload?.phase === "error" ? (updateDownload.error || settingsCopy.updateDownloadFailed)
+                : updateState === "error" ? (updateResult?.error || settingsCopy.updateCheckFailed)
+                : settingsCopy.updateAvailable(updateResult?.latest || "")}
+            </span>
+          </div>
+          <div className="update-toast-actions">
+            {updateDownload?.phase === "done" && updateDownload.path ? (
+              <button className="update-toast-primary" onClick={() => launchInstaller()}><Download size={13} />{settingsCopy.updateInstallNow}</button>
+            ) : updateDownload?.phase === "error" ? (
+              <button className="update-toast-primary" onClick={() => void downloadUpdate()}><RefreshCw size={13} />{copy.retryUpdate}</button>
+            ) : updateState === "error" ? (
+              <button className="update-toast-primary" onClick={() => void checkForUpdates()}><RefreshCw size={13} />{copy.retryUpdate}</button>
+            ) : updateDownload?.phase === "downloading" || updateDownload?.phase === "verifying" ? null : (
+              <button className="update-toast-primary" onClick={() => void downloadUpdate()} disabled={!updateResult?.assets?.length}><Download size={13} />{settingsCopy.updateDownloadInstall}</button>
+            )}
+            {updateState === "done" && updateResult?.latest && updateDownload?.phase !== "downloading" && updateDownload?.phase !== "verifying" && updateDownload?.phase !== "done" ? (
+              <button className="update-toast-secondary" onClick={() => setUpdateNoticeDismissed(true)}>{copy.dismissUpdate}</button>
+            ) : null}
+            {updateDownload?.phase === "error" || updateState === "error" ? (
+              <button className="update-toast-secondary" onClick={() => setUpdateNoticeDismissed(true)}>{copy.dismissUpdate}</button>
+            ) : null}
+          </div>
+        </div>
+      )}
       {pendingDanger && (
         <ConfirmDialog
           danger
@@ -749,6 +855,16 @@ export default function App() {
         />
       )}
     </div>
+      {confirmInstallOpen && (
+        <ConfirmDialog
+          title={settingsCopy.updateInstallNow}
+          body={settingsCopy.updateConfirmInstall}
+          confirmLabel={settingsCopy.updateInstallNow}
+          cancelLabel={copy.cancel}
+          onConfirm={() => void confirmLaunchInstaller()}
+          onCancel={() => setConfirmInstallOpen(false)}
+        />
+      )}
     </UiLocaleContext.Provider>
   );
 }

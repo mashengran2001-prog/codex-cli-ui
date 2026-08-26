@@ -657,6 +657,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .completion-toast > span { display: grid; min-width: 0; gap: 2px; }
 .completion-toast strong { color: #344239; font-size: 11px; }
 .completion-toast small { overflow: hidden; color: #737c75; font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+.update-toast { position: fixed; z-index: 39; right: 20px; bottom: 20px; display: grid; width: min(350px, calc(100vw - 40px)); gap: 8px; padding: 12px 13px; border: 1px solid #c8d5ca; border-radius: 8px; background: #f7fbf8; box-shadow: 0 12px 34px rgb(28 37 30 / 15%); }
+.update-toast-head { display: flex; align-items: center; gap: 8px; }
+.update-toast-head > strong { min-width: 0; flex: 1; overflow: hidden; color: #344239; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.update-toast-icon { display: grid; width: 26px; height: 26px; flex: 0 0 auto; place-items: center; border-radius: 6px; background: #e0ecf1; color: var(--blue); }
+.update-toast-dismiss { display: grid; width: 22px; height: 22px; flex: 0 0 auto; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #737c75; cursor: pointer; }
+.update-toast-dismiss:hover { background: #e8efe9; color: #344239; }
+.update-toast-body { overflow-wrap: anywhere; color: #737c75; font-size: 10px; line-height: 1.5; }
+.update-toast-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.update-toast-actions button { display: inline-flex; height: 26px; align-items: center; gap: 5px; padding: 0 10px; border: 1px solid #cdd4cd; border-radius: 5px; background: #fff; color: #344239; font-size: 9.5px; font-weight: 600; cursor: pointer; }
+.update-toast-actions button:hover { background: #f0f4f0; }
+.update-toast-actions .update-toast-primary { border-color: var(--blue); background: var(--blue); color: #fff; }
+.update-toast-actions .update-toast-primary:hover { background: #315b72; }
+.update-toast-actions .update-toast-secondary:hover { background: transparent; }
+.update-toast .settings-update-progress { height: 4px; margin-top: 1px; }
 
 .spin { animation: spin .85s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1379,6 +1393,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .completion-toast { color: #79b994; }
 .completion-toast strong { color: var(--text); }
 .completion-toast small { color: var(--muted); }
+.update-toast { border-color: var(--line-strong); background: #1c2028; box-shadow: 0 12px 34px rgb(0 0 0 / 40%); }
+.update-toast-head > strong { color: var(--text); }
+.update-toast-body { color: var(--muted); }
+.update-toast-actions button { border-color: var(--line-strong); background: #242a34; color: var(--text); }
+.update-toast-actions button:hover { background: #2b3340; }
+.update-toast-actions .update-toast-primary:hover { background: #315b72; }
+.update-toast-dismiss { color: var(--muted); }
+.update-toast-dismiss:hover { background: #2b3340; color: var(--text); }
 ::-webkit-scrollbar-thumb { background: #343c49; background-clip: padding-box; }
 ::-webkit-scrollbar-thumb:hover { background: #465365; background-clip: padding-box; }
 /* SSH 设置区（对标 Nebula ssh_settings：58px 行、8s 撤销、私钥列表） */
