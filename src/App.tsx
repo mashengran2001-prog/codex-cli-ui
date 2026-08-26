@@ -214,6 +214,7 @@ export default function App() {
   const [confirmInstallOpen, setConfirmInstallOpen] = useState(false);
   const [packageManager, setPackageManager] = useState<PackageManagerInfo | null>(null);
   const updateBusy = updateDownload?.phase === "downloading" || updateDownload?.phase === "verifying";
+  const updateToastVisible = !updateNoticeDismissed && (updateState === "error" || (updateState === "done" && updateResult?.latest) || updateDownload !== null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showCompletionToast = useCallback((value: ToastState) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -803,14 +804,14 @@ export default function App() {
       </Suspense>
 
       {error && (
-        <div className="error-toast"><AlertTriangle size={15} /><span>{sanitizeDisplayText(error)}</span><button title={copy.close} onClick={() => setError(null)}><X size={13} /></button></div>
+        <div className="error-toast" style={updateToastVisible ? { bottom: 170 } : undefined}><AlertTriangle size={15} /><span>{sanitizeDisplayText(error)}</span><button title={copy.close} onClick={() => setError(null)}><X size={13} /></button></div>
       )}
       {toast && (
-        <button className="completion-toast" onClick={() => { setSelectedConversationId(toast.id); setToast(null); if (toastTimerRef.current) { clearTimeout(toastTimerRef.current); toastTimerRef.current = null; } }}>
+        <button className="completion-toast" style={updateToastVisible ? { bottom: 170 } : undefined} onClick={() => { setSelectedConversationId(toast.id); setToast(null); if (toastTimerRef.current) { clearTimeout(toastTimerRef.current); toastTimerRef.current = null; } }}>
           <CheckCircle2 size={17} /><span><strong>{copy.completed}</strong><small>{sanitizeDisplayText(toast.title)}</small></span>
         </button>
       )}
-      {!updateNoticeDismissed && (updateState === "error" || (updateState === "done" && updateResult?.latest) || updateDownload !== null) && (
+      {updateToastVisible && (
         <div className="update-toast">
           <div className="update-toast-head">
             <span className="update-toast-icon"><Download size={14} /></span>

@@ -58,7 +58,7 @@
 | 事务式托管 agent worktree（v1.2） | 已实现 | agent fork 保留稳定分支/路径身份，prepare/commit/rollback 事务式创建，dirty-source 拒绝提交（git-worktree + electron-agent-fork 测试） |
 | 更新检查（#47） | 已实现 | 设置页"关于"区提供检查更新按钮（GitHub releases API、8s 超时），显示最新版本、安装包清单与发布说明声明的 SHA-256 |
 | 应用内验证更新（v1.3.1） | 已实现 | 应用内后台下载官方 Windows 安装包（优先 Setup→Portable→任意 exe），流式上报进度条；校验大小、PE 头（MZ+PE）与 SHA-256（发布体或 .sha256 资产），校验失败自动删除并报错；通过后才显示"确认安装"，且只允许启动 userData/updates 目录内的 exe；update-manager 单元测试覆盖 |
-| 更新通知常驻（v1.3.1） | 已实现 | 检查更新后，右下角常驻提醒持续显示直至用户处理：下载/校验中显示进度条，完成/失败原位替换原提醒；提供忽略/重试/确认安装操作；设置页"关于"区与全局 toast 消费同一份更新状态（状态提升至 App，SettingsPanel 只读），workflow 集成测试覆盖完整流转 |
+| 更新通知常驻（v1.3.1） | 已实现 | 检查更新后，右下角常驻提醒持续显示直至用户处理：下载/校验中显示进度条，完成/失败原位替换原提醒；提供忽略/重试/确认安装操作；设置页"关于"区与全局 toast 消费同一份更新状态（状态提升至 App，SettingsPanel 只读）；与完成/错误通知共存时自动上移避让，不重叠遮挡；workflow 集成测试覆盖完整流转 |
 | 外观与交互设置 | 已实现 | 七套主题、背景图片、透明度、模糊、光标、可配置字体族（含中文回退链）、面板宽度、补全、Powerline、三档界面密度 |
 | 七主题色板数值 | 已实现 | 七主题 shell/term/panel/pill/ink/accent/语义色与 Nebula `display/ui/theme.rs` 的 palette+skin 数值一一对应（独立实现）；浅色主题 ANSI-16 用 GitHub Primer Light 色表，窗口标题栏覆盖层同步 shell 色 |
 | 控件几何与动效 | 已实现 | 开关 48×26 / 旋钮 20 / 位移 24（400ms 液态 + 250ms 拉伸 + 300ms 变色）、菜单与补全浮层圆角 8、浮层阴影 4/12、侧栏标签行 34/42 |

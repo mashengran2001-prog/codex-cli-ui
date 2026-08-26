@@ -417,11 +417,30 @@ try {
   await page.evaluate(() => {
     window.__mock.updateResult = { latest: "v9.9.9", url: "https://github.com/mashengran2001-prog/codex-cli-ui/releases/tag/v9.9.9", name: "Nebula Terminal 9.9.9", publishedAt: "2026-08-25T00:00:00Z", assets: [{ name: "setup.exe", size: 1048576, url: "https://example.com/setup.exe" }] };
     window.__mock.packageManagerStatus = { source: "winget", command: "winget upgrade --id CodexCLIUI.CodexCLIUI --silent", label: "winget" };
-    window.__mock.packageManagerRun = { ok: true, source: "winget", command: "winget upgrade --id CodexCLIUI.CodexCLIUI --silent" };
+    window.__mock.packageManagerRun = { ok: false, error: "winget not ready" };
   });
   await page.getByRole("button", { name: "检查更新" }).click();
   await page.waitForFunction(() => document.querySelector(".update-toast")?.textContent?.includes("发现新版本 v9.9.9"));
   await page.locator(".settings-update-button", { hasText: "通过 winget 升级" }).waitFor();
+  // 启动失败时 update 常驻提醒与 error 通知共存：不得重叠（error 上移 170px）
+  await page.locator(".update-toast-actions").getByRole("button", { name: "通过 winget 升级" }).click();
+  await page.waitForFunction(() => document.querySelector(".error-toast"));
+  const toastGeometry = await page.evaluate(() => {
+    const update = document.querySelector(".update-toast")?.getBoundingClientRect();
+    const error = document.querySelector(".error-toast")?.getBoundingClientRect();
+    if (!update || !error) return null;
+    return {
+      overlap: update.top < error.bottom && error.top < update.bottom && update.left < error.right && error.left < update.right,
+      errorBottom: document.querySelector(".error-toast")?.style.bottom ?? "",
+    };
+  });
+  assert.ok(toastGeometry, "update 与 error 通知应同时可见");
+  assert.equal(toastGeometry.overlap, false, "update 通知不应遮挡 error 通知");
+  assert.equal(toastGeometry.errorBottom, "170px");
+  await page.locator(".error-toast button").click();
+  await page.waitForFunction(() => !document.querySelector(".error-toast"));
+  // 重试成功：包管理器升级启动后常驻提醒关闭
+  await page.evaluate(() => { window.__mock.packageManagerRun = { ok: true, source: "winget", command: "winget upgrade --id CodexCLIUI.CodexCLIUI --silent" }; });
   await page.locator(".update-toast-actions").getByRole("button", { name: "通过 winget 升级" }).click();
   await page.waitForFunction(() => !document.querySelector(".update-toast"));
   await page.evaluate(() => {
