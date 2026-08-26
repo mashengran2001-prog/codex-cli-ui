@@ -71,6 +71,7 @@ import {
   verifyInstallerFile,
   type UpdateAsset,
 } from "./update-manager";
+import { probePackageManager, type PackageManagerInfo } from "./package-managers";
 import {
   deleteImportedFont,
   importFontFile,
@@ -3511,6 +3512,39 @@ ipcMain.handle("updates:launch-installer", async (_event, installerPath: unknown
   }
 });
 
+let packageManagerProbe: Promise<PackageManagerInfo> | null = null;
+let packageManagerProbeAt = 0;
+const PACKAGE_MANAGER_CACHE_MS = 10 * 60 * 1000;
+
+function getPackageManagerInfo(): Promise<PackageManagerInfo> {
+  const now = Date.now();
+  if (!packageManagerProbe || now - packageManagerProbeAt > PACKAGE_MANAGER_CACHE_MS) {
+    packageManagerProbeAt = now;
+    packageManagerProbe = probePackageManager().catch<PackageManagerInfo>(() => ({ source: null, command: null, label: null }));
+  }
+  return packageManagerProbe;
+}
+
+ipcMain.handle("updates:package-manager", async () => getPackageManagerInfo());
+
+ipcMain.handle("updates:package-manager-run", async () => {
+  const info = await getPackageManagerInfo();
+  if (!info || info.source === null || !info.command) {
+    return { ok: false, error: "未检测到 winget/scoop 安装，请使用应用内更新" };
+  }
+  const title = info.source === "winget" ? "Codex CLI UI - winget 升级" : "Codex CLI UI - scoop 升级";
+  try {
+    const child = spawn("cmd.exe", ["/d", "/c", "start", title, "cmd", "/k", info.command], {
+      detached: true,
+      windowsHide: false,
+      stdio: "ignore",
+    });
+    child.unref();
+    return { ok: true, source: info.source, command: info.command };
+  } catch (reason) {
+    return { ok: false, error: reason instanceof Error ? reason.message : "启动包管理器升级失败" };
+  }
+});
 function shellProfilePath(shellId: string): string | null {
   const id = shellId.toLowerCase();
   if (id.includes("powershell") || id.includes("pwsh")) {

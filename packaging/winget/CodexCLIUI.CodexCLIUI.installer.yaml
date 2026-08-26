@@ -1,0 +1,14 @@
+PackageIdentifier: CodexCLIUI.CodexCLIUI
+PackageVersion: 0.2.0
+InstallerType: nsis
+ReleaseDate: 2026-08-26
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/mashengran2001-prog/codex-cli-ui/releases/download/v0.2.0/Codex-CLI-UI-Setup-0.2.0.exe
+    InstallerSha256: PLEASE_REPLACE_WITH_RELEASE_SHA256
+    Scope: user
+    InstallerSwitches:
+      Silent: /S
+      SilentWithProgress: /S
+ManifestType: installer
+ManifestVersion: 1.6.0

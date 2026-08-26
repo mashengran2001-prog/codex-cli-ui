@@ -410,6 +410,27 @@ try {
   await page.locator('.terminal-top-tab[data-tab-kind="settings"] .terminal-tab-close').click();
   await page.locator(".xterm-screen").waitFor();
 
+  // 分发接入（对标 Nebula #47 余项）：检测到 winget 安装时，提醒给出包管理器升级入口
+  await page.getByTitle("更多操作").click();
+  await page.getByRole("menuitem", { name: "打开设置" }).click();
+  await page.locator(".terminal-settings").waitFor();
+  await page.evaluate(() => {
+    window.__mock.updateResult = { latest: "v9.9.9", url: "https://github.com/mashengran2001-prog/codex-cli-ui/releases/tag/v9.9.9", name: "Nebula Terminal 9.9.9", publishedAt: "2026-08-25T00:00:00Z", assets: [{ name: "setup.exe", size: 1048576, url: "https://example.com/setup.exe" }] };
+    window.__mock.packageManagerStatus = { source: "winget", command: "winget upgrade --id CodexCLIUI.CodexCLIUI --silent", label: "winget" };
+    window.__mock.packageManagerRun = { ok: true, source: "winget", command: "winget upgrade --id CodexCLIUI.CodexCLIUI --silent" };
+  });
+  await page.getByRole("button", { name: "检查更新" }).click();
+  await page.waitForFunction(() => document.querySelector(".update-toast")?.textContent?.includes("发现新版本 v9.9.9"));
+  await page.locator(".settings-update-button", { hasText: "通过 winget 升级" }).waitFor();
+  await page.locator(".update-toast-actions").getByRole("button", { name: "通过 winget 升级" }).click();
+  await page.waitForFunction(() => !document.querySelector(".update-toast"));
+  await page.evaluate(() => {
+    window.__mock.packageManagerStatus = { source: null, command: null, label: null };
+    window.__mock.packageManagerRun = null;
+  });
+  await page.locator('.terminal-top-tab[data-tab-kind="settings"] .terminal-tab-close').click();
+  await page.locator(".xterm-screen").waitFor();
+
   // 拖拽标签到分屏左缘：dock 为左右分屏并持久化分屏树
   const beforeDockTabs = await page.locator(".terminal-top-tab").count();
   // 新建两个终端，再把第一个会话放回 pane，让最后一个会话保持“未分配”作为拖拽源

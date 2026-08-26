@@ -177,6 +177,8 @@ export async function installMockBridge(page) {
       downloadUpdate: async () => window.__mock.updateDownloadResult || { ok: true, path: "C:\\Users\\test\\AppData\\Roaming\\codex-cli-ui\\updates\\setup.exe", sha256: "a".repeat(64) },
       launchUpdateInstaller: async (installerPath) => { window.__mock.lastLaunchedInstaller = installerPath; return { ok: true }; },
       onUpdateProgress: (listener) => { (window.__mock.updateListeners ??= []).push(listener); return () => {}; },
+      getPackageManagerStatus: async () => window.__mock.packageManagerStatus || { source: null, command: null, label: null },
+      runPackageManagerUpdate: async () => window.__mock.packageManagerRun || { ok: false, error: "no package manager" },
       getShellProfilePath: async (shellId) => (window.__mock.shellProfilePaths ? (window.__mock.shellProfilePaths[shellId] ?? null) : (shellId === "powershell" || shellId === "pwsh" ? "C:\\Users\\test\\Documents\\PowerShell\\profile.ps1" : null)),
       openShellProfile: async (shellId) => { window.__mock.lastOpenedShellProfile = shellId; return true; },
       openTerminal: async () => true,

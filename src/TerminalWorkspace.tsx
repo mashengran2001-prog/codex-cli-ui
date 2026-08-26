@@ -36,7 +36,7 @@ interface TerminalWorkspaceProps {
   onAddProject(): Promise<boolean>;
   onError(message: string): void;
   update: SettingsUpdateState;
-  onUpdateAction(action: "check" | "download" | "install"): void;
+  onUpdateAction(action: "check" | "download" | "install" | "package"): void;
 }
 
 type Drawer = "files" | "git" | "sftp" | "directories" | null;

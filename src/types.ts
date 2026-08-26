@@ -539,7 +539,21 @@ export interface SettingsUpdateState {
   state: "idle" | "checking" | "done" | "error";
   result: UpdateCheckResult | null;
   download: UpdateDownloadState | null;
+  pkgMgr: PackageManagerInfo | null;
   busy: boolean;
+}
+
+export interface PackageManagerInfo {
+  source: "winget" | "scoop" | null;
+  command: string | null;
+  label: string | null;
+}
+
+export interface PackageManagerRunResult {
+  ok: boolean;
+  source?: "winget" | "scoop";
+  command?: string;
+  error?: string;
 }
 
 export interface UpdateCheckResult {
@@ -583,6 +597,8 @@ export interface CodexBridge {
   downloadUpdate(): Promise<UpdateDownloadResult>;
   launchUpdateInstaller(installerPath: string): Promise<UpdateDownloadResult>;
   onUpdateProgress(listener: (progress: UpdateProgress) => void): () => void;
+  getPackageManagerStatus(): Promise<PackageManagerInfo>;
+  runPackageManagerUpdate(): Promise<PackageManagerRunResult>;
   getDiagnosticsInfo(): Promise<DiagnosticsInfo>;
   probeInputLatency(paneId?: string): Promise<LatencyProbeResult>;
   getShellProfilePath(shellId: string): Promise<string | null>;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { Activity, BellRing, Brain, Check, CheckCircle2, ChevronDown, Command, Download, ExternalLink, FileCode2, FolderOpen, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Palette, Pencil, Plug, Plus, RotateCcw, Search, Server, Shield, TerminalSquare, Trash2, Undo2, X, type LucideIcon } from "lucide-react";
+import { Activity, BellRing, Brain, Check, CheckCircle2, ChevronDown, Command, Download, ExternalLink, FileCode2, FolderOpen, Globe, Image, Keyboard, LoaderCircle, MousePointerClick, Package, Palette, Pencil, Plug, Plus, RotateCcw, Search, Server, Shield, TerminalSquare, Trash2, Undo2, X, type LucideIcon } from "lucide-react";
 import BrandIcon, { type BrandIconName } from "../BrandIcon";
 import { chordFromEvent, isModifierOnly, modifierPrefix, setKeybindingCaptureActive } from "../keybindings";
 import type { AppSettings, BackupPreview, BackupResult, BackupSelection, CliLifecycleStatus, CliProfile, CliToolInfo, DiagnosticsInfo, KeybindingAction, LatencyProbeResult, ShellProfile, SshProfile, TerminalThemeName, ImportedFontInfo, ImportFontResult, SettingsUpdateState } from "../types";
@@ -48,7 +48,7 @@ interface SettingsPanelProps {
   onCliLifecycleToggle(): void;
   onConnectSsh?(profile: SshProfile): void;
   update: SettingsUpdateState;
-  onUpdateAction(action: "check" | "download" | "install"): void;
+  onUpdateAction(action: "check" | "download" | "install" | "package"): void;
   onClose(): void;
 }
 
@@ -658,6 +658,9 @@ export default function SettingsPanel({ settings, shells, cliTools, cliLifecycle
                 <strong>{copy.updateAvailable(updateInfo.result.latest)}</strong>
                 {updateInfo.result?.url ? <button title={copy.updateOpenDownload} onClick={() => void window.codex.openPath(updateInfo.result?.url as string)}><ExternalLink size={12} />{copy.updateOpenDownload}</button> : null}
                 {updateInfo.result.assets?.length ? <button disabled={updateInfo.busy} onClick={() => onUpdateAction("download")}><Download size={12} />{copy.updateDownloadInstall}</button> : null}
+                {updateInfo.pkgMgr?.source === "winget" || updateInfo.pkgMgr?.source === "scoop" ? (
+                  <button className="settings-update-button" onClick={() => onUpdateAction("package")}><Package size={12} />{updateInfo.pkgMgr.source === "winget" ? copy.updateViaWinget : copy.updateViaScoop}</button>
+                ) : null}
               </span>
             ) : null}
             {updateInfo.state === "done" && !updateInfo.result?.latest ? <span className="settings-update-result">{copy.updateNone}</span> : null}

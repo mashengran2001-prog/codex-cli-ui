@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "description": "Nebula-style terminal UI for Codex CLI (chat workspace, tabs, split panes, AI session restore)",
+  "homepage": "https://github.com/mashengran2001-prog/codex-cli-ui",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/mashengran2001-prog/codex-cli-ui/releases/download/v0.2.0/Codex-CLI-UI-Portable-0.2.0.exe",
+      "hash": "PLEASE_REPLACE_WITH_RELEASE_SHA256"
+    }
+  },
+  "bin": "Codex-CLI-UI-Portable-0.2.0.exe",
+  "shortcuts": [
+    [
+      "Codex-CLI-UI-Portable-0.2.0.exe",
+      "Codex CLI UI"
+    ]
+  ],
+  "checkver": {
+    "github": "https://github.com/mashengran2001-prog/codex-cli-ui"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/mashengran2001-prog/codex-cli-ui/releases/download/v$version/Codex-CLI-UI-Portable-$version.exe"
+      }
+    },
+    "hash": {
+      "url": "$url.sha256"
+    }
+  }
+}

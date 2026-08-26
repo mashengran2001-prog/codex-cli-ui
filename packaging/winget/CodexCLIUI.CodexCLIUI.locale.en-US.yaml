@@ -1,0 +1,11 @@
+PackageIdentifier: CodexCLIUI.CodexCLIUI
+PackageVersion: 0.2.0
+PackageLocale: en-US
+Publisher: Codex CLI UI
+PackageName: Codex CLI UI
+PackageUrl: https://github.com/mashengran2001-prog/codex-cli-ui
+License: MIT
+ShortDescription: Nebula-style terminal UI for the Codex CLI
+Description: Codex CLI UI is a desktop terminal that hosts Codex CLI and other AI CLIs, with tabs, split panes, drag-and-drop docking, AI session restore/fork, and a full settings experience aligned with Nebula.
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Download, ExternalLink, LoaderCircle, RefreshCw, ShieldAlert, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, ExternalLink, LoaderCircle, Package, RefreshCw, ShieldAlert, X } from "lucide-react";
 import Composer from "./Composer";
 import { sanitizeDisplayText } from "./text-encoding";
 import { loadImportedFonts } from "./importedFonts";
@@ -18,6 +18,8 @@ import {
   DEFAULT_KEYBINDINGS,
   LauncherRequest,
   LauncherStatus,
+  PackageManagerInfo,
+  PackageManagerRunResult,
   PersistedState,
   ProjectRecord,
   ReasoningEffort,
@@ -210,6 +212,7 @@ export default function App() {
   const [updateDownload, setUpdateDownload] = useState<UpdateDownloadState | null>(null);
   const [updateNoticeDismissed, setUpdateNoticeDismissed] = useState(false);
   const [confirmInstallOpen, setConfirmInstallOpen] = useState(false);
+  const [packageManager, setPackageManager] = useState<PackageManagerInfo | null>(null);
   const updateBusy = updateDownload?.phase === "downloading" || updateDownload?.phase === "verifying";
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showCompletionToast = useCallback((value: ToastState) => {
@@ -649,10 +652,12 @@ export default function App() {
   const checkForUpdates = useCallback(async () => {
     setUpdateState("checking");
     setUpdateResult(null);
+    setUpdateDownload(null);
     setUpdateNoticeDismissed(false);
     const result = await window.codex.checkForUpdates().catch<UpdateCheckResult>(() => ({ error: settingsCopy.updateCheckFailed }));
     setUpdateResult(result);
     setUpdateState(result.error ? "error" : "done");
+    void window.codex.getPackageManagerStatus().then(setPackageManager).catch(() => {});
   }, [settingsCopy.updateCheckFailed]);
   const downloadUpdate = useCallback(async () => {
     setUpdateDownload({ phase: "downloading", received: 0 });
@@ -677,11 +682,21 @@ export default function App() {
       setUpdateNoticeDismissed(true);
     }
   }, [updateDownload?.path, settingsCopy.updateLaunchFailed]);
-  const updateAction = useCallback((action: "check" | "download" | "install") => {
+  const runPkgMgrUpdate = useCallback(async () => {
+    const result = await window.codex.runPackageManagerUpdate().catch<PackageManagerRunResult>(() => ({ ok: false, error: settingsCopy.pkgMgrLaunchFailed }));
+    if (result.ok) {
+      setUpdateNoticeDismissed(true);
+      showCompletionToast({ id: selectedConversationId ?? "", title: settingsCopy.pkgMgrLaunched });
+    } else {
+      setError(result.error || settingsCopy.pkgMgrLaunchFailed);
+    }
+  }, [settingsCopy.pkgMgrLaunched, settingsCopy.pkgMgrLaunchFailed, selectedConversationId, showCompletionToast]);
+  const updateAction = useCallback((action: "check" | "download" | "install" | "package") => {
     if (action === "check") void checkForUpdates();
     else if (action === "download") void downloadUpdate();
+    else if (action === "package") void runPkgMgrUpdate();
     else launchInstaller();
-  }, [checkForUpdates, downloadUpdate, launchInstaller]);
+  }, [checkForUpdates, downloadUpdate, runPkgMgrUpdate, launchInstaller]);
   const removeProject = (projectId: string) => {
     if (conversationsRef.current.some((conversation) => conversation.projectId === projectId && conversation.runState === "running")) {
       setError(copy.projectBusy);
@@ -714,7 +729,7 @@ export default function App() {
           onRefreshChat={() => { if (selectedProject) void refreshProject(selectedProject.id, activeProviderId); }}
           onAddProject={addProject}
           onError={setError}
-          update={{ state: updateState, result: updateResult, download: updateDownload, busy: updateBusy }}
+          update={{ state: updateState, result: updateResult, download: updateDownload, pkgMgr: packageManager, busy: updateBusy }}
           onUpdateAction={updateAction}
           chatSidebar={(
             <Sidebar
@@ -826,10 +841,14 @@ export default function App() {
               <button className="update-toast-primary" onClick={() => void downloadUpdate()}><RefreshCw size={13} />{copy.retryUpdate}</button>
             ) : updateState === "error" ? (
               <button className="update-toast-primary" onClick={() => void checkForUpdates()}><RefreshCw size={13} />{copy.retryUpdate}</button>
+            ) : (packageManager?.source === "winget" || packageManager?.source === "scoop") && updateDownload?.phase !== "downloading" && updateDownload?.phase !== "verifying" ? (
+              <button className="update-toast-primary" onClick={() => void runPkgMgrUpdate()}><Package size={13} />{packageManager.source === "winget" ? settingsCopy.updateViaWinget : settingsCopy.updateViaScoop}</button>
             ) : updateDownload?.phase === "downloading" || updateDownload?.phase === "verifying" ? null : (
               <button className="update-toast-primary" onClick={() => void downloadUpdate()} disabled={!updateResult?.assets?.length}><Download size={13} />{settingsCopy.updateDownloadInstall}</button>
             )}
-            {updateState === "done" && updateResult?.latest && updateDownload?.phase !== "downloading" && updateDownload?.phase !== "verifying" && updateDownload?.phase !== "done" ? (
+            {updateState === "done" && updateResult?.latest && (packageManager?.source === "winget" || packageManager?.source === "scoop") && updateDownload?.phase !== "downloading" && updateDownload?.phase !== "verifying" && updateDownload?.phase !== "done" ? (
+              <button className="update-toast-secondary" onClick={() => void downloadUpdate()} disabled={!updateResult?.assets?.length}><Download size={13} />{settingsCopy.updateDownloadInstall}</button>
+            ) : updateState === "done" && updateResult?.latest && updateDownload?.phase !== "downloading" && updateDownload?.phase !== "verifying" && updateDownload?.phase !== "done" ? (
               <button className="update-toast-secondary" onClick={() => setUpdateNoticeDismissed(true)}>{copy.dismissUpdate}</button>
             ) : null}
             {updateDownload?.phase === "error" || updateState === "error" ? (

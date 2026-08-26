@@ -40,6 +40,8 @@ const bridge: CodexBridge = {
   checkForUpdates: () => ipcRenderer.invoke("updates:check"),
   downloadUpdate: () => ipcRenderer.invoke("updates:download"),
   launchUpdateInstaller: (installerPath: string) => ipcRenderer.invoke("updates:launch-installer", installerPath),
+  getPackageManagerStatus: () => ipcRenderer.invoke("updates:package-manager"),
+  runPackageManagerUpdate: () => ipcRenderer.invoke("updates:package-manager-run"),
   onUpdateProgress: (listener: (progress: UpdateProgress) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, value: UpdateProgress) => listener(value);
     ipcRenderer.on("update-progress", handler);

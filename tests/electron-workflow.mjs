@@ -39,6 +39,7 @@ const electronEnv = {
   CODEX_UI_SHELL_STARTUP_REGISTRY_PATH: shellStartupRegistry,
   CODEX_UI_RENDERER: "dom",
   CODEX_UI_EXPORT_PATH: exportProbe,
+  CODEX_UI_PACKAGE_MANAGER_DISABLE: "1",
 };
 
 const app = await electron.launch({
@@ -84,6 +85,12 @@ try {
   assert.equal(cmdProfile, null);
   const updateCheck = await window.evaluate(async () => window.codex.checkForUpdates());
   assert.ok(updateCheck && (typeof updateCheck.latest === "string" || typeof updateCheck.error === "string"), JSON.stringify(updateCheck));
+  const pkgMgrStatus = await window.evaluate(async () => window.codex.getPackageManagerStatus());
+  assert.deepEqual(pkgMgrStatus, { source: null, command: null, label: null }, JSON.stringify(pkgMgrStatus));
+  const pkgMgrRun = await window.evaluate(async () => window.codex.runPackageManagerUpdate());
+  assert.equal(pkgMgrRun.ok, false);
+  assert.ok(typeof pkgMgrRun.error === "string" && pkgMgrRun.error.length > 0);
+  console.log("electron-pkgmgr: package-manager status/run channels answered (disabled probe)");
   const openCmdProfile = await window.evaluate(async () => window.codex.openShellProfile("cmd"));
   assert.equal(openCmdProfile, false);
     const userModelId = await window.evaluate(async () => window.codex.getAppUserModelId());
