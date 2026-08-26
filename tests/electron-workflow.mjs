@@ -139,7 +139,8 @@ try {
   await window.locator(".xterm-helper-textarea").focus();
   await window.keyboard.type('Write-Output ("NEBULA" + "_PTY_OK")', { delay: 12 });
   await window.keyboard.press("Enter");
-  await window.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent?.includes("NEBULA_PTY_OK"), undefined, { timeout: 30_000 });
+  // 高负载机器上 PTY 回显可能较慢：放宽到 60s（load-flake 加固，与启动超时同级）
+  await window.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent?.includes("NEBULA_PTY_OK"), undefined, { timeout: 60_000 });
  assert.equal(await window.evaluate(async () => (await window.codex.listTerminals()).length), 1);
   let latencyProbe = null;
   for (let attempt = 0; attempt < 3 && !latencyProbe?.ok; attempt++) {

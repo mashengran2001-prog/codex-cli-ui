@@ -67,8 +67,10 @@ import {
   parseSha256AssetContent,
   parseSha256Checksum,
   pickInstallerAsset,
+  readInstallerMetadata,
   sanitizeFileName,
   verifyInstallerFile,
+  writeInstallerMetadata,
   type UpdateAsset,
 } from "./update-manager";
 import { probePackageManager, type PackageManagerInfo } from "./package-managers";
@@ -3560,6 +3562,7 @@ ipcMain.handle("updates:download", async (event) => {
       sendProgress({ phase: "error", message: error });
       return { ok: false, error };
     }
+    await writeInstallerMetadata(dest, { name: installer.name, size: installer.size, sha256: expectedSha256 });
     sendProgress({ phase: "done", received: installer.size, total: installer.size });
     return { ok: true, path: dest, sha256: verified.sha256 };
   } catch (reason) {
@@ -3578,6 +3581,12 @@ ipcMain.handle("updates:launch-installer", async (_event, installerPath: unknown
   }
   if (!existsSync(target) || !/\.exe$/i.test(target)) return { ok: false, error: "安装包不存在或不是可执行文件" };
   try {
+    // Nebula v1.3.1：启动安装程序前对同一文件做二次校验（大小/PE 头/SHA-256 依据下载时写入的旁路元数据）。
+    const metadata = await readInstallerMetadata(target);
+    const recheck = await verifyInstallerFile(target, metadata?.size, metadata?.sha256);
+    if (!recheck.ok) {
+      return { ok: false, error: `安装包二次校验失败：${recheck.error ?? "未知错误"}` };
+    }
     const error = await shell.openPath(target);
     return error ? { ok: false, error } : { ok: true };
   } catch (reason) {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, open, rename, stat, unlink } from "node:fs/promises";
+import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 /**
@@ -166,6 +166,51 @@ export async function verifyInstallerFile(
     return { ok: true, sha256 };
   } catch (reason) {
     return { ok: false, error: reason instanceof Error ? reason.message : String(reason) };
+  }
+}
+
+export interface InstallerMetadata {
+  name?: string;
+  size?: number;
+  sha256?: string;
+}
+
+/** 安装包旁路校验元数据文件：记录下载时通过的大小与 SHA-256，供启动安装前二次校验。 */
+export function installerMetadataPath(installerPath: string): string {
+  return `${installerPath}.verified.json`;
+}
+
+/** 把下载时校验通过的大小与 SHA-256 原子写入旁路元数据。 */
+export async function writeInstallerMetadata(
+  installerPath: string,
+  metadata: { name: string; size: number; sha256?: string | undefined },
+): Promise<void> {
+  const metaPath = installerMetadataPath(installerPath);
+  const temporary = `${metaPath}.tmp`;
+  const payload = {
+    name: metadata.name,
+    size: metadata.size,
+    sha256: metadata.sha256 ? metadata.sha256.toLowerCase() : undefined,
+    verifiedAt: new Date().toISOString(),
+  };
+  await mkdir(dirname(installerPath), { recursive: true });
+  await writeFile(temporary, JSON.stringify(payload, null, 2), "utf8");
+  await rename(temporary, metaPath);
+}
+
+/** 读取旁路元数据；文件缺失、JSON 损坏或字段类型非法时按字段宽容降级，全空返回 null。 */
+export async function readInstallerMetadata(installerPath: string): Promise<InstallerMetadata | null> {
+  try {
+    const raw = await readFile(installerMetadataPath(installerPath), "utf8");
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    if (!value || typeof value !== "object") return null;
+    const size = typeof value.size === "number" && Number.isFinite(value.size) && value.size >= 0 ? value.size : undefined;
+    const sha256 = typeof value.sha256 === "string" && /^[0-9a-fA-F]{64}$/.test(value.sha256) ? value.sha256.toLowerCase() : undefined;
+    const name = typeof value.name === "string" && value.name.length > 0 && value.name.length <= 200 ? value.name : undefined;
+    if (size === undefined && sha256 === undefined) return null;
+    return { name, size, sha256 };
+  } catch {
+    return null;
   }
 }
 

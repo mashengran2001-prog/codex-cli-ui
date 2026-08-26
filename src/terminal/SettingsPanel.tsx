@@ -849,6 +849,7 @@ function FontPicker({ value, onChange, copy, imported }: {
               style={{ fontFamily: entry.family }}
               role="option"
               aria-selected={entry.current}
+              title={entry.family}
               key={entry.family}
               onClick={() => { onChange(replacePrimaryFont(value, entry.family)); setOpen(false); }}
             >
@@ -868,7 +869,7 @@ function FontPicker({ value, onChange, copy, imported }: {
   return (
     <div className="font-family-picker">
       <button className={open ? "font-picker-trigger selected" : "font-picker-trigger"} ref={triggerRef} type="button" aria-label={copy.fontFamily} aria-expanded={open} aria-haspopup="listbox" onClick={toggle}>
-        <span style={{ fontFamily: primary }}>{primary}</span><ChevronDown className={open ? "open" : ""} size={13} />
+        <span style={{ fontFamily: primary }} title={primary}>{primary}</span><ChevronDown className={open ? "open" : ""} size={13} />
       </button>
       {fontChain(value).length > 1 && <small className="font-fallback-hint">{copy.fontFallbackHint}</small>}
       {panel}

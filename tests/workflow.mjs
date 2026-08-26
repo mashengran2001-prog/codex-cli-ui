@@ -332,7 +332,11 @@ try {
   await page.locator(".completion-popup").waitFor();
   // 二次填入后候选异步加载，等两个候选都出现再按方向键，避免竞态（load-flake 加固）
   await page.locator(".completion-popup button").nth(1).waitFor({ timeout: 5000 });
+  // 高负载下异步候选重渲染会把选中态重置回首项：先等选中态稳定，再按方向键并等
+  // 高亮落到第二个候选后才 Tab，杜绝“Tab 接受了首项”的时序竞态（load-flake 加固）
+  await page.waitForFunction(() => document.querySelectorAll(".completion-popup button.selected").length === 1, undefined, { timeout: 5000 });
   await page.locator(".command-dock input").press("ArrowDown");
+  await page.waitForFunction(() => document.querySelector(".completion-popup button.selected span")?.textContent?.includes("npm run.ps1"), undefined, { timeout: 5000 });
   await page.locator(".command-dock input").press("Tab");
   assert.equal(await page.locator(".command-dock input").inputValue(), "npm run.ps1");
   await page.locator(".command-dock input").press("Escape");

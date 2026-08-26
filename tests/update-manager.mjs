@@ -8,10 +8,13 @@ import {
   downloadToFile,
   parseSha256AssetContent,
   parseSha256Checksum,
+  installerMetadataPath,
   pickInstallerAsset,
+  readInstallerMetadata,
   sanitizeFileName,
   validatePeHeader,
   verifyInstallerFile,
+  writeInstallerMetadata,
 } from "../dist-electron/electron/update-manager.js";
 
 // ---- 安装包挑选 ----
@@ -92,6 +95,26 @@ try {
   // 不传 sha 时仅做大小 + PE 头校验
   const noSha = await verifyInstallerFile(installer, bytes.length, undefined);
   assert.equal(noSha.ok, true);
+
+  // ---- 旁路校验元数据（启动安装前二次校验的依据）----
+  const metaPath = installerMetadataPath(installer);
+  assert.equal(await readInstallerMetadata(installer), null, "未写入元数据时应返回 null");
+  await writeInstallerMetadata(installer, { name: "fake-setup.exe", size: bytes.length, sha256: sha.toUpperCase() });
+  const meta = await readInstallerMetadata(installer);
+  assert.equal(meta?.name, "fake-setup.exe");
+  assert.equal(meta?.size, bytes.length);
+  assert.equal(meta?.sha256, sha, "SHA-256 应统一保存为小写");
+
+  writeFileSync(metaPath, "{ not json");
+  assert.equal(await readInstallerMetadata(installer), null, "损坏的元数据应返回 null");
+
+  writeFileSync(metaPath, JSON.stringify({ size: "wrong" }));
+  assert.equal(await readInstallerMetadata(installer), null, "类型非法的元数据应返回 null");
+
+  writeFileSync(metaPath, JSON.stringify({ size: bytes.length, sha256: "zz" }));
+  const metaWeak = await readInstallerMetadata(installer);
+  assert.equal(metaWeak?.size, bytes.length, "size 合法时保留");
+  assert.equal(metaWeak?.sha256, undefined, "非法 sha256 字段应降级为空，避免误用损坏的摘要");
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }
