@@ -22,7 +22,7 @@ import { access, appendFile, lstat, mkdir, readFile, readdir, realpath, rename, 
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
-import { createWindowsTextDecoder, decodeWindowsText } from "../src/text-encoding";
+import { createWindowsTextDecoder, decodeWindowsText, sanitizeDisplayText } from "../src/text-encoding";
 import { normalizeJumpHost, normalizePreferredAuth, normalizeProxyCommand, normalizeKeepAliveInterval, normalizeKeepAliveMax, sshProfileTarget, sshTransportOptions } from "./ssh-utils";
 import type { IPty } from "node-pty";
 import type {
@@ -1468,8 +1468,8 @@ function notifyTerminalAttention(session: TerminalSession, message = "Attention 
   if (!appSettings.notifyOnCompletion || !Notification.isSupported()) return;
   if (mainWindow?.isVisible() && mainWindow.isFocused()) return;
   const notification = new Notification({
-    title: completion ? `${session.title} completed` : `${session.title} needs attention`,
-    body: message,
+    title: sanitizeDisplayText(completion ? session.title + " completed" : session.title + " needs attention"),
+    body: sanitizeDisplayText(message),
     silent: true,
   });
   notification.on("click", () => {
@@ -1720,14 +1720,20 @@ function findNushellExecutable(): string | undefined {
       if (existsSync(path)) return path;
     }
   }
-  for (const dir of (process.env.PATH || "").split(";").filter(Boolean)) {
+  // PATH 探活有界：只查前 64 项并跳过 UNC 网络路径（existsSync 命中网络盘可能阻塞数秒，对标 Nebula #21）。
+  const pathEntries = (process.env.PATH || "").split(";").filter((value) => Boolean(value) && !value.startsWith("\\\\")).slice(0, 64);
+  for (const dir of pathEntries) {
     const path = join(dir, "nu.exe");
     if (existsSync(path)) return path;
   }
   return undefined;
 }
 
-async function detectTerminalShells() {
+/**
+ * 同步可用的平台默认 shell（不含 Nushell PATH 探活与 WSL 枚举，
+ * 避免网络盘 existsSync 或子系统启动拖慢首帧；探测完成后由 detectTerminalShells 补齐）。
+ */
+function platformShellProfiles(): DetectedShell[] {
   const profiles: DetectedShell[] = [];
   if (process.platform === "win32") {
     const systemRoot = process.env.SystemRoot || process.env.SYSTEMROOT || "C:\\Windows";
@@ -1741,18 +1747,34 @@ async function detectTerminalShells() {
     if (existsSync(cmd)) profiles.push({ id: "cmd", label: "Command Prompt", command: cmd, args: ["/Q"], kind: "cmd" });
     const gitBash = join(programFiles, "Git", "bin", "bash.exe");
     if (existsSync(gitBash)) profiles.push({ id: "git-bash", label: "Git Bash", command: gitBash, args: ["--noprofile", "--norc", "-i"], kind: "git-bash" });
+  } else {
+    const shell = process.env.SHELL || "/bin/bash";
+    profiles.push({ id: "shell", label: basename(shell), command: shell, args: ["--noprofile"], kind: "custom" });
+  }
+  return profiles.length ? profiles : [{ id: "shell", label: "Shell", command: process.env.SHELL || (process.platform === "win32" ? "powershell.exe" : "/bin/bash"), args: [], kind: "custom" }];
+}
+
+async function detectTerminalShells() {
+  // 性能探针：集成测试可用该环境变量人为放慢探测，验证首帧不被探测阻塞。
+  const probeDelay = Number(process.env.CODEX_UI_SHELL_DETECT_DELAY_MS);
+  if (Number.isFinite(probeDelay) && probeDelay > 0) {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.min(probeDelay, 30_000)));
+  }
+  const profiles = platformShellProfiles();
+  if (process.platform === "win32") {
     // Nushell — installed per-user; Nebula probes well-known roots then PATH.
     const nu = findNushellExecutable();
     if (nu) profiles.push({ id: "nu", label: "Nushell", command: nu, args: [], kind: "nushell" });
     // WSL discovery can block while the subsystem starts. Keep it out of the
     // critical boot path and publish the profiles when the optional probe ends.
+    const systemRoot = process.env.SystemRoot || process.env.SYSTEMROOT || "C:\\Windows";
     const wsl = join(systemRoot, "System32", "wsl.exe");
     if (existsSync(wsl)) {
       void execFileText(wsl, ["--list", "--quiet"]).then(({ stdout }) => {
         const distroNames = stdout.replaceAll("\0", "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
         wslDistroNames = distroNames;
         const wslProfiles = distroNames.map((distro) => ({
-          id: `wsl:${Buffer.from(distro).toString("base64url")}`,
+          id: "wsl:" + Buffer.from(distro).toString("base64url"),
           label: distro,
           detail: "WSL",
           command: wsl,
@@ -1767,11 +1789,8 @@ async function detectTerminalShells() {
         // WSL is optional and may be disabled or unavailable.
       });
     }
-  } else {
-    const shell = process.env.SHELL || "/bin/bash";
-    profiles.push({ id: "shell", label: basename(shell), command: shell, args: ["--noprofile"], kind: "custom" });
   }
-  detectedShells = profiles.length ? profiles : [{ id: "shell", label: "Shell", command: process.env.SHELL || "powershell.exe", args: [], kind: "custom" }];
+  detectedShells = profiles;
 }
 
 function selectedShell(id?: string) {
@@ -1925,7 +1944,7 @@ function createTerminalSession(
   const now = Date.now();
   const session: TerminalSession = {
     id,
-    title: request.title?.trim().slice(0, 120) || restored?.title?.trim().slice(0, 120) || cliProfile?.name || sshProfile?.name || terminalTitleFromPath(cwd),
+    title: sanitizeDisplayText(request.title?.trim().slice(0, 120) || restored?.title?.trim().slice(0, 120) || cliProfile?.name || sshProfile?.name || terminalTitleFromPath(cwd)),
     cwd,
     shell: basename(shellPath),
     shellId: sshProfile ? `ssh:${sshProfile.id}` : shellProfile.id,
@@ -1948,6 +1967,11 @@ function createTerminalSession(
     runtimeStateSeq: 0,
   };
   terminalSessions.set(session.id, session);
+  // 恢复的会话保留 AI 身份，确保再次重启后仍能自动 resume（Nebula 跨重启接续语义）
+  if (restored?.aiSource && restored.aiSessionId) {
+    session.aiSource = restored.aiSource;
+    session.aiSessionId = restored.aiSessionId;
+  }
   recordRuntimeLifecycle(session, "created");
   recordSessionDirectory(session);
   terminal.onData((data) => appendTerminalOutput(session, data));
@@ -3100,7 +3124,7 @@ function providerIdValue(value: unknown): AgentProviderId | null {
 
 function notifyProviderCompletion(owner: BrowserWindow, title: string, body: string) {
   if (!appSettings.notifyOnCompletion || (owner.isVisible() && owner.isFocused()) || !Notification.isSupported()) return;
-  const notification = new Notification({ title, body, silent: true });
+  const notification = new Notification({ title: sanitizeDisplayText(title), body: sanitizeDisplayText(body), silent: true });
   notification.on("click", () => showMainWindow());
   trackNotificationDismiss(notification);
   notification.show();
@@ -4166,13 +4190,19 @@ void app.whenReady().then(async () => {
   void Promise.all([terminalIntegrationReady, sshProfilesReady, cliLifecycleReady])
     .then(() => bootTrace("profiles-loaded"))
     .catch((reason) => bootTrace(`profiles-error:${reason instanceof Error ? reason.message : String(reason)}`));
-  await detectTerminalShells();
-  bootTrace("shells-detected");
+  detectedShells = platformShellProfiles();
+  bootTrace("shells-seeded");
   updateQuickTerminalShortcut();
   registerFontProtocol();
   queuedLauncherRequest = parseLauncherRequest(process.argv);
   createWindow();
   bootTrace("window-created");
+  // Shell 探测（Nushell PATH 探活 / WSL 枚举）不再阻塞首帧：窗口先行显示，探测完成后补齐列表（对标 Nebula #21）。
+  void detectTerminalShells().then(() => {
+    bootTrace("shells-detected");
+    const target = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : undefined;
+    target?.send("terminal:shells-changed", detectedShells.map(({ args: _args, ...profile }) => profile));
+  }).catch((reason) => bootTrace("shells-detected-error:" + (reason instanceof Error ? reason.message : String(reason))));
   startRuntimeHeartbeat();
   startAiStateWatchdog();
   void startRuntimeControl(app.getPath("userData"), {

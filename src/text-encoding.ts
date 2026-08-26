@@ -136,10 +136,13 @@ function trailingIncompleteTail(buf: Uint8Array): number {
   return tailU;
 }
 
-/** 清理解码产生的替换字符与杂散控制字节，避免警报/通知展示乱码。 */
+/** 清理解码产生的替换字符、完整 ANSI 转义序列（CSI/OSC）与杂散控制字节，避免警报/通知展示乱码。 */
 export function sanitizeDisplayText(value: string): string {
   if (!value) return value;
   return value
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b[@-Z\\-_]/g, "")
     .replace(/[\uFFFD\u0080-\u009F]/g, "")
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
 }

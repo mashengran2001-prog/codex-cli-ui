@@ -19,7 +19,7 @@
 | AI 回合四状态识别 | 已实现 | 侧栏/顶栏标签显示 AI CLI 运行中、已完成、等待输入、失败四种状态（转圈/圆点/三角/红叉），空闲无圆点 |
 | AI 回合状态看门狗（v1.3，#42/#54） | 已实现 | 3 秒周期进程树探测，Codex/Claude 回到空闲提示符后推翻过期 running 状态；解决"命令结束仍显示运行中"与"命令执行莫名中断" |
 | AI 完成通知 90 秒关闭（v1.3） | 已实现 | 通知节流并跟踪，90 秒后自动关闭，避免无限堆积 |
-| AI 会话跨重启恢复与分叉 | 已实现 | 恢复纯 Shell 标签时按快照注入 `codex resume <id>` / `claude --resume <id>`；右键运行中的 AI 标签可"继续上次 AI 会话"或"分叉 AI 会话"，设置页可关闭自动接续 |
+| AI 会话跨重启恢复与分叉 | 已实现 | 恢复纯 Shell 标签时按快照注入 `codex resume <id>` / `claude --resume <id>`，且恢复出的会话把 AI 身份写回快照，再次重启仍可自动接续（不再丢失 aiSource/aiSessionId）；右键运行中的 AI 标签可"继续上次 AI 会话"或"分叉 AI 会话"，设置页可关闭自动接续 |
 | Shell 与 CLI 启动 | 已实现 | PowerShell、CMD、Git Bash、WSL、SSH；Codex、Claude Code、Gemini、OpenCode、DeepSeek Harness 和任意自定义命令 |
 | AI CLI 活动同步 | 已实现 | Codex `config.toml/notify`、Claude hooks、链式配置保护、自动修复和点击聚焦 |
 | Shell 分类注入（v1.2） | 已实现 | PowerShell、cmd、Nushell 与 fallback 的分类注入与检测（electron-shells 真实探测 Nushell）；已移除注入的 `fmt` 动作 |
@@ -58,6 +58,7 @@
 | 事务式托管 agent worktree（v1.2） | 已实现 | agent fork 保留稳定分支/路径身份，prepare/commit/rollback 事务式创建，dirty-source 拒绝提交（git-worktree + electron-agent-fork 测试） |
 | 更新检查（#47） | 已实现 | 设置页"关于"区提供检查更新按钮（GitHub releases API、8s 超时），显示最新版本、安装包清单与发布说明声明的 SHA-256 |
 | 应用内验证更新（v1.3.1） | 已实现 | 应用内后台下载官方 Windows 安装包（优先 Setup→Portable→任意 exe），流式上报进度条；校验大小、PE 头（MZ+PE）与 SHA-256（发布体或 .sha256 资产），校验失败自动删除并报错；通过后才显示"确认安装"，且只允许启动 userData/updates 目录内的 exe；update-manager 单元测试覆盖 |
+| 警报/通知文本清洗 | 已实现 | 右下角更新常驻提醒、完成/错误 toast、Windows 系统通知与终端会话标题统一经过 sanitizeDisplayText 清洗（替换字符、BEL/ESC/NUL 等控制字节与误解码残留不进入界面），配合 GBK/UTF-8 容错解码杜绝乱码；text-encoding 单测覆盖 |
 | 更新通知常驻（v1.3.1） | 已实现 | 检查更新后，右下角常驻提醒持续显示直至用户处理：下载/校验中显示进度条，完成/失败原位替换原提醒；提供忽略/重试/确认安装操作；设置页"关于"区与全局 toast 消费同一份更新状态（状态提升至 App，SettingsPanel 只读）；与完成/错误通知共存时自动上移避让，不重叠遮挡；workflow 集成测试覆盖完整流转 |
 | 外观与交互设置 | 已实现 | 七套主题、背景图片、透明度、模糊、光标、可配置字体族（含中文回退链）、面板宽度、补全、Powerline、三档界面密度 |
 | 七主题色板数值 | 已实现 | 七主题 shell/term/panel/pill/ink/accent/语义色与 Nebula `display/ui/theme.rs` 的 palette+skin 数值一一对应（独立实现）；浅色主题 ANSI-16 用 GitHub Primer Light 色表，窗口标题栏覆盖层同步 shell 色 |
@@ -118,5 +119,5 @@
 | #42 | 检测命令是否结束需要特判 | 已实现：进程树看门狗 3s 探测 |
 | #40 | 换行错误 | 未复现；如遇具体场景请提供复现步骤 |
 | #31 | 增加 shell profile 按钮 | 已实现：设置页打开配置文件入口 |
-| #21 | 启动 PowerShell 7 会卡很久 | 已缓解：WSL/Shell 探测非阻塞并行加载，窗口先行显示；真实慢环境下的启动链路可再优化 |
+| #21 | 启动 PowerShell 7 会卡很久 | 已优化：窗口首帧不再等待 shell 探测（同步默认 shell 兜底，Nushell PATH 探活有界并跳过 UNC 网络盘），探测完成后后台补齐；electron 集成测试用性能探针验证首帧先于探测完成 |
 | #12 | 打开文件夹没有 WSL 路径 | 已实现：空工作台 WSL 发行版快捷入口、常用目录 WSL 根目录、文件面板与补全跟随 WSL 路径 |

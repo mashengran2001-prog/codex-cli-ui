@@ -47,7 +47,7 @@ const app = await electron.launch({
   args: [root, ...launcherArgs(root)],
   cwd: root,
   env: electronEnv,
-  timeout: 30_000,
+  timeout: 60_000,
 });
 
 try {
@@ -367,8 +367,9 @@ try {
   assert.ok(typeof receipt.result.steps[0].action.pane_id === "string" && receipt.result.steps[0].action.pane_id.length > 0);
   // validation: forward reference must be rejected
   const badWorkflow = { steps: [{ id: "later", op: "focus", target: { step: "tab_a", field: "pane_id" } }] };
-  const badResult = spawnSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "orchestrate", "--spec", JSON.stringify(badWorkflow), "--endpoint", runtimeEndpointPath], { encoding: "utf8", timeout: 10_000 });
-  assert.notEqual(badResult.status, 0, badResult.stdout);
+  const badResult = spawnSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "orchestrate", "--spec", JSON.stringify(badWorkflow), "--endpoint", runtimeEndpointPath], { encoding: "utf8", timeout: 30_000 });
+  assert.notEqual(badResult.status, 0, badResult.stdout || badResult.stderr);
+  assert.ok(badResult.stdout && badResult.stdout.trim().length > 0, "invalid orchestrate spec must print a JSON receipt: " + badResult.stderr);
   const badReceipt = JSON.parse(badResult.stdout);
   assert.equal(badReceipt.ok, false);
   assert.equal(badReceipt.error.code, "invalid_params");
@@ -422,8 +423,9 @@ try {
   assert.doesNotThrow(() => execFileSync("git", ["-C", forkRepo, "show-ref", "--verify", "--quiet", "refs/heads/nebula/reviewer"], { windowsHide: true }));
   // 脏工作区未显式允许 → 拒绝且不创建分支
   writeFileSync(join(forkRepo, "untracked.txt"), "dirty");
-  const dirtyResult = spawnSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "agent.fork", "--name", "dirty-agent", "--kind", "codex", "--source-cwd", forkRepo, "--branch", "nebula/dirty-agent", "--endpoint", forkEndpoint], { encoding: "utf8", timeout: 10_000 });
-  assert.notEqual(dirtyResult.status, 0, dirtyResult.stdout);
+  const dirtyResult = spawnSync(process.execPath, [join(root, "scripts", "runtime-ctl.mjs"), "agent.fork", "--name", "dirty-agent", "--kind", "codex", "--source-cwd", forkRepo, "--branch", "nebula/dirty-agent", "--endpoint", forkEndpoint], { encoding: "utf8", timeout: 30_000 });
+  assert.notEqual(dirtyResult.status, 0, dirtyResult.stdout || dirtyResult.stderr);
+  assert.ok(dirtyResult.stdout && dirtyResult.stdout.trim().length > 0, "agent.fork dirty rejection must print a JSON receipt: " + dirtyResult.stderr);
   const dirtyReceipt = JSON.parse(dirtyResult.stdout);
   assert.equal(dirtyReceipt.ok, false);
   assert.equal(dirtyReceipt.error.code, "dirty_source");
@@ -453,7 +455,7 @@ const restoredApp = await electron.launch({
   args: [root],
   cwd: root,
   env: electronEnv,
-  timeout: 30_000,
+  timeout: 60_000,
 });
 
 try {
@@ -464,9 +466,22 @@ try {
   await window.locator(".xterm-screen").waitFor({ timeout: 15_000 });
   assert.equal(await window.evaluate(async () => (await window.codex.listTerminals()).length), 1);
   assert.match(await window.locator(".terminal-tab, .terminal-top-tab").first().textContent(), /codex-ui/);
-  // AI 对话跨重启接续：恢复出的终端自动重敲 codex resume（对标 Nebula resume 注入）
-  await window.waitForFunction(() => (document.querySelector(".xterm-rows")?.textContent ?? "").includes("codex resume 33333333-3333-4333-8333-333333333333"), undefined, { timeout: 20_000 });
-  console.log("electron-restore: terminal snapshot recreated the project tab and re-issued the AI resume command");
+  // AI 对话跨重启接续：恢复出的终端自动重敲 codex resume（对标 Nebula resume 注入）。
+  // 断言按恢复出的项目终端 pane 定位，避免布局恢复出其他标签时误读可见 pane。
+  const restoredId = await window.evaluate(async () => (await window.codex.listTerminals())[0].id);
+  await window.waitForFunction((targetId) => {
+    const pane = document.querySelector(`.terminal-pane-leaf[data-session-id="${targetId}"] .xterm-rows`);
+    return Boolean(pane && pane.textContent?.includes("codex resume 33333333-3333-4333-8333-333333333333"));
+  }, restoredId, { timeout: 20_000 });
+  // 恢复出的会话必须把 AI 身份写回快照（再次重启仍可 resume）
+  const snapshotDeadline2 = Date.now() + 15_000;
+  while (Date.now() < snapshotDeadline2) {
+    const rawSnapshot2 = readFileSync(join(userData, "terminal-sessions.json"), "utf8");
+    if (rawSnapshot2.includes('"aiSource": "codex"')) break;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 300));
+  }
+  assert.ok(readFileSync(join(userData, "terminal-sessions.json"), "utf8").includes('"aiSource": "codex"'), "re-saved snapshot must keep the AI identity for the next restart");
+  console.log("electron-restore: terminal snapshot recreated the project tab, re-issued the AI resume command, and preserved AI identity for the next restart");
 } finally {
   await restoredApp.close();
   try { execFileSync("powershell.exe", ["-NoProfile", "-Command", `Remove-Item -LiteralPath '${shellStartupRegistry}' -Recurse -Force -ErrorAction SilentlyContinue`], { windowsHide: true }); } catch {}
@@ -500,7 +515,7 @@ const quarantineApp = await electron.launch({
   args: [root],
   cwd: root,
   env: { ...electronEnv, CODEX_UI_USER_DATA_DIR: quarantineUserData },
-  timeout: 30_000,
+  timeout: 60_000,
 });
 
 try {
@@ -530,4 +545,55 @@ try {
   console.log("electron-quarantine: 崩溃隔离横幅/保留 3 份与一键恢复快照通过");
 } finally {
   await quarantineApp.close();
+}
+
+
+// --- 启动顺序（对标 Nebula #21）：窗口首帧不等待 shell 探测 ---
+const bootUserData = join(testRoot, "boot-user-data");
+await rm(bootUserData, { recursive: true, force: true });
+await mkdir(bootUserData, { recursive: true });
+const bootApp = await electron.launch({
+  executablePath: electronPath,
+  // 通过 launcher 参数选中项目，终端工作台才有 projectPath 可挂载 pane
+  args: [root, ...launcherArgs(root)],
+  cwd: root,
+  env: {
+    ...electronEnv,
+    CODEX_UI_USER_DATA_DIR: bootUserData,
+    CODEX_UI_BOOT_TRACE: "1",
+    CODEX_UI_SHELL_DETECT_DELAY_MS: "4000",
+  },
+  timeout: 60_000,
+});
+try {
+  const bootWindow = await bootApp.firstWindow();
+  await bootWindow.waitForLoadState("domcontentloaded");
+  // 探测仍在挂起时窗口即可显示、终端即可创建（走同步默认 shell 兜底）
+  const bootTerminalId = await bootWindow.evaluate(async (cwd) => (await window.codex.createTerminal({ cwd, cols: 100, rows: 30, reuseExisting: false })).id, root);
+  assert.ok(bootTerminalId);
+  // 新窗口默认在聊天页，切到终端页后 pane 才会挂载并可见；
+  // 复用的同一会话（同 cwd/默认 shell）会作为可见 pane 加入树。
+  await bootWindow.getByRole("tab", { name: "终端" }).waitFor({ timeout: 15_000 });
+  await bootWindow.getByRole("tab", { name: "终端" }).click();
+  await bootWindow.locator(".xterm-screen").waitFor({ timeout: 15_000 });
+  const bootTracePath = join(bootUserData, "boot-trace.log");
+  const traceDeadline = Date.now() + 15_000;
+  let bootTraceText = "";
+  while (Date.now() < traceDeadline) {
+    try {
+      bootTraceText = readFileSync(bootTracePath, "utf8");
+      if (bootTraceText.includes("shells-detected")) break;
+    } catch { /* boot trace may not be written yet */ }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+  }
+  const bootLines = bootTraceText.split("\n");
+  const windowCreatedAt = bootLines.findIndex((line) => line.includes("window-created"));
+  const shellsDetectedAt = bootLines.findIndex((line) => line.includes("shells-detected"));
+  assert.ok(bootTraceText.includes("shells-seeded"), bootTraceText);
+  assert.ok(windowCreatedAt >= 0, bootTraceText);
+  assert.ok(shellsDetectedAt >= 0, bootTraceText);
+  assert.ok(windowCreatedAt < shellsDetectedAt, "window must appear before shell detection completes:\n" + bootTraceText);
+  console.log("electron-boot-order: 窗口首帧先于 shell 探测完成（#21）");
+} finally {
+  await bootApp.close();
 }

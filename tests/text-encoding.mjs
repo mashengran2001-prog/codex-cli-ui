@@ -70,4 +70,10 @@ assert.equal(sanitizeDisplayText("干净文本"), "干净文本");
   assert.equal(decoder.flush(), "");
 }
 
+// 渲染层防御：警报/通知文案里的 BEL/ESC/NUL/DEL 与 C1 控制字节一并清理
+assert.equal(sanitizeDisplayText("命令\u0007完成\u001b[31m"), "命令完成");
+assert.equal(sanitizeDisplayText("a\u0000b\u001bc\u007fd"), "abcd");
+assert.equal(sanitizeDisplayText("\uFFFD\u001b\u009c\u001b\u009d"), "");
+assert.equal(sanitizeDisplayText("正常\u200b零宽\u2060连接"), "正常\u200b零宽\u2060连接");
+
 console.log("text-encoding.mjs ok");

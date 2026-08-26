@@ -819,7 +819,7 @@ export default function App() {
               {updateDownload?.phase === "done" ? copy.updateReadyTitle
                 : updateDownload?.phase === "downloading" || updateDownload?.phase === "verifying" ? settingsCopy.updateDownloading
                 : updateDownload?.phase === "error" || updateState === "error" ? copy.updateFailedTitle
-                : settingsCopy.updateAvailable(updateResult?.latest || "")}
+                : settingsCopy.updateAvailable(sanitizeDisplayText(updateResult?.latest || ""))}
             </strong>
             <button className="update-toast-dismiss" title={copy.dismissUpdate} onClick={() => setUpdateNoticeDismissed(true)}><X size={13} /></button>
           </div>
@@ -830,9 +830,9 @@ export default function App() {
             <span className="update-toast-text">
               {updateDownload?.phase === "verifying" ? settingsCopy.updateVerifying
                 : updateDownload?.phase === "downloading" ? settingsCopy.updateDownloading + (updateDownload.total ? " " + formatBytes(updateDownload.received ?? 0) + " / " + formatBytes(updateDownload.total) : "")
-                : updateDownload?.phase === "error" ? (updateDownload.error || settingsCopy.updateDownloadFailed)
-                : updateState === "error" ? (updateResult?.error || settingsCopy.updateCheckFailed)
-                : settingsCopy.updateAvailable(updateResult?.latest || "")}
+                : updateDownload?.phase === "error" ? (sanitizeDisplayText(updateDownload.error || "") || settingsCopy.updateDownloadFailed)
+                : updateState === "error" ? (sanitizeDisplayText(updateResult?.error || "") || settingsCopy.updateCheckFailed)
+                : settingsCopy.updateAvailable(sanitizeDisplayText(updateResult?.latest || ""))}
             </span>
           </div>
           <div className="update-toast-actions">
