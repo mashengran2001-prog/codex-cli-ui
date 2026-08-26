@@ -9,6 +9,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import katex from "katex";
 import { TerminalMathOverlay } from "./terminal-math";
 import { BoxGlyphOverlay } from "./box-glyphs";
+import { dragScrollStep } from "./drag-scroll";
 import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
 import type { TerminalCursorStyle, TerminalInfo, TerminalThemeName } from "../types";
 import { useUiCopy } from "../i18n";
@@ -255,6 +256,43 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
     container.addEventListener("contextmenu", contextMenu);
     container.addEventListener("dragover", dragOver);
     container.addEventListener("drop", drop);
+    // Nebula 1.3：拖拽选择时视口自动滚动（边缘 1 行，每 20px +1，15ms 节奏）
+    let dragScrollTimer = 0;
+    let dragArmed = false;
+    let dragDistance = 0;
+    const stopDragScroll = () => {
+      dragArmed = false;
+      window.clearInterval(dragScrollTimer);
+      dragScrollTimer = 0;
+    };
+    const updateDragDistance = (clientY: number) => {
+      const screen = container.querySelector<HTMLElement>(".xterm-screen") ?? container;
+      const rect = screen.getBoundingClientRect();
+      dragDistance = clientY < rect.top ? clientY - rect.top : clientY > rect.bottom ? clientY - rect.bottom : 0;
+      if (dragDistance === 0) {
+        window.clearInterval(dragScrollTimer);
+        dragScrollTimer = 0;
+      } else if (!dragScrollTimer) {
+        dragScrollTimer = window.setInterval(() => {
+          if (!dragArmed) return;
+          terminal.scrollLines(dragScrollStep(dragDistance));
+        }, 15);
+      }
+    };
+    const onDragMouseDown = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      dragArmed = true;
+      updateDragDistance(event.clientY);
+    };
+    const onDragMouseMove = (event: MouseEvent) => {
+      if (!dragArmed || (event.buttons & 1) === 0) return;
+      updateDragDistance(event.clientY);
+    };
+    const onDragMouseUp = () => stopDragScroll();
+    container.addEventListener("mousedown", onDragMouseDown);
+    window.addEventListener("mousemove", onDragMouseMove);
+    window.addEventListener("mouseup", onDragMouseUp);
+    window.addEventListener("blur", onDragMouseUp);
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown") return true;
       // IME composition (搜狗/微软拼音 etc.): keyCode 229 marks in-progress
@@ -331,6 +369,11 @@ export default function TerminalPane({ session, theme, cursorStyle, cursorBlink,
       container.removeEventListener("contextmenu", contextMenu);
       container.removeEventListener("dragover", dragOver);
       container.removeEventListener("drop", drop);
+      stopDragScroll();
+      container.removeEventListener("mousedown", onDragMouseDown);
+      window.removeEventListener("mousemove", onDragMouseMove);
+      window.removeEventListener("mouseup", onDragMouseUp);
+      window.removeEventListener("blur", onDragMouseUp);
       removeEvents();
       selection.dispose();
       input.dispose();

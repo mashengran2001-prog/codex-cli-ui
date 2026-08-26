@@ -17,6 +17,7 @@
     "electron/**/*.ts",
     "src/types.ts",
     "src/terminal/terminal-math.ts",
-    "src/terminal/box-glyphs.ts"
+    "src/terminal/box-glyphs.ts",
+    "src/terminal/drag-scroll.ts"
   ]
 }
